@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@layer base {
+  /* Default variables (Slate/Emerald) */
+  :root {
+    --background: #020617; /* slate-950 */
+    --panel: rgba(15, 23, 42, 0.4); /* slate-900 with opacity */
+    --panel-border: rgba(51, 65, 85, 0.5); /* slate-700/50 */
+    --text: #cbd5e1; /* slate-300 */
+    --text-muted: #64748b; /* slate-500 */
+    --text-highlight: #f8fafc; /* slate-50 */
+    --primary: #10b981; /* emerald-500 */
+    --primary-hover: #059669; /* emerald-600 */
+    --primary-glow: rgba(16, 185, 129, 0.15);
+    --accent: #3b82f6; /* blue-500 */
+    --accent-glow: rgba(59, 130, 246, 0.15);
+  }
+
+  /* Deep Slate/Emerald Dark Mode explicitly */
+  [data-skin="slate"] {
+    --background: #020617;
+    --panel: rgba(15, 23, 42, 0.4);
+    --panel-border: rgba(51, 65, 85, 0.4);
+    --text: #cbd5e1;
+    --text-muted: #64748b;
+    --text-highlight: #f8fafc;
+    --primary: #10b981;
+    --primary-hover: #059669;
+    --primary-glow: rgba(16, 185, 129, 0.15);
+    --accent: #3b82f6;
+    --accent-glow: rgba(59, 130, 246, 0.15);
+  }
+
+  /* Brighter/Clean Light Mode */
+  [data-skin="light"] {
+    --background: #f8fafc; /* slate-50 */
+    --panel: #ffffff; /* pure white */
+    --panel-border: #e2e8f0; /* slate-200 */
+    --text: #334155; /* slate-700 */
+    --text-muted: #64748b; /* slate-500 */
+    --text-highlight: #0f172a; /* slate-900 */
+    --primary: #059669; /* emerald-600 */
+    --primary-hover: #047857; /* emerald-700 */
+    --primary-glow: rgba(5, 150, 105, 0.1);
+    --accent: #2563eb; /* blue-600 */
+    --accent-glow: rgba(37, 99, 235, 0.1);
+  }
+
+  /* High-Contrast Cyberpunk Look */
+  [data-skin="cyberpunk"] {
+    --background: #000000; /* pitch black */
+    --panel: rgba(20, 20, 25, 0.9);
+    --panel-border: #fdec0e; /* cyberpunk yellow */
+    --text: #00ffcc; /* cyber neon cyan */
+    --text-muted: #ff0055; /* cyber neon pink */
+    --text-highlight: #ffffff; /* pure white */
+    --primary: #ff0055; /* cyber neon pink */
+    --primary-hover: #d00045;
+    --primary-glow: rgba(255, 0, 85, 0.3);
+    --accent: #fdec0e; /* cyberpunk yellow */
+    --accent-glow: rgba(253, 236, 14, 0.3);
+  }
+}

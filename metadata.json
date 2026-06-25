@@ -1,0 +1,6 @@
+{
+  "name": "Smart Grocery IL",
+  "description": "מערכת אלגוריתמית מתקדמת להשוואת סלי קניות בין רשתות המזון המובילות בישראל בהתאמה אישית.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
