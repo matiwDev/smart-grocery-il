@@ -1,0 +1,81 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String        @id @default(uuid())
+  email         String        @unique
+  name          String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  searches      SearchHistory[]
+  savedBaskets  SavedBasket[]
+}
+
+model Product {
+  id           String         @id @default(uuid())
+  standardName String
+  brand        String
+  category     String
+  barcode      String?        @unique
+  embedding    Unsupported("vector(1536)")?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  prices       ProductPrice[]
+}
+
+model StoreChain {
+  id        String   @id @default(uuid())
+  nameHe    String
+  nameEn    String
+  logoUrl   String?
+  branches  Branch[]
+}
+
+model Branch {
+  id           String         @id @default(uuid())
+  chainId      String
+  chain        StoreChain     @relation(fields: [chainId], references: [id], onDelete: Cascade)
+  branchNameHe String
+  branchNameEn String
+  addressHe    String
+  addressEn    String
+  distance     Decimal?
+  isOpen       Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  prices       ProductPrice[]
+}
+
+model ProductPrice {
+  id          String   @id @default(uuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  price       Decimal
+  lastUpdated DateTime @default(now()) @updatedAt
+
+  @@unique([productId, branchId])
+}
+
+model SearchHistory {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  query     String
+  createdAt DateTime @default(now())
+}
+
+model SavedBasket {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  items     Json     // Array of standard items with quantities
+  createdAt DateTime @default(now())
+}

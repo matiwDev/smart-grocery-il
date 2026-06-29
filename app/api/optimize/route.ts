@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { PrismaClient } from "@prisma/client";
+
+let prismaClientInstance: PrismaClient | null = null;
+
+function getPrismaClient(): PrismaClient {
+  if (!prismaClientInstance) {
+    prismaClientInstance = new PrismaClient();
+  }
+  return prismaClientInstance;
+}
 
 enum Type {
   STRING = "STRING",
@@ -17,6 +27,84 @@ interface ParsedGroceryItem {
   shufersalPrice: number;
   yohananofPrice: number;
   victoryPrice: number;
+}
+
+async function enrichWithLiveDatabasePrices(items: ParsedGroceryItem[]): Promise<ParsedGroceryItem[]> {
+  try {
+    const prisma = getPrismaClient();
+    const productNames = items.map(item => item.productName);
+
+    // Optimized batch query to fetch products matching standardName contains
+    const dbProducts = await prisma.product.findMany({
+      where: {
+        OR: productNames.map(name => ({
+          standardName: {
+            contains: name,
+            mode: "insensitive" as const
+          }
+        }))
+      },
+      include: {
+        prices: {
+          include: {
+            branch: {
+              include: {
+                chain: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (dbProducts.length === 0) {
+      return items;
+    }
+
+    return items.map(item => {
+      // Find matching db product (closest substring match)
+      const matchedDbProduct = dbProducts.find(dbProd => 
+        dbProd.standardName.toLowerCase().includes(item.productName.toLowerCase()) ||
+        item.productName.toLowerCase().includes(dbProd.standardName.toLowerCase())
+      );
+
+      if (!matchedDbProduct || !matchedDbProduct.prices || matchedDbProduct.prices.length === 0) {
+        return item;
+      }
+
+      let shufersalPrice = item.shufersalPrice;
+      let yohananofPrice = item.yohananofPrice;
+      let victoryPrice = item.victoryPrice;
+
+      // Extract branch prices for Shufersal, Yohananof, Victory
+      const shufPriceObj = matchedDbProduct.prices.find(p => 
+        p.branch.chain.nameEn.toLowerCase().includes("shufersal") || 
+        p.branch.chain.nameHe.includes("שופרסל")
+      );
+      const yohPriceObj = matchedDbProduct.prices.find(p => 
+        p.branch.chain.nameEn.toLowerCase().includes("yohananof") || 
+        p.branch.chain.nameHe.includes("יוחננוף")
+      );
+      const vicPriceObj = matchedDbProduct.prices.find(p => 
+        p.branch.chain.nameEn.toLowerCase().includes("victory") || 
+        p.branch.chain.nameHe.includes("ויקטורי")
+      );
+
+      if (shufPriceObj) shufersalPrice = Number(shufPriceObj.price);
+      if (yohPriceObj) yohananofPrice = Number(yohPriceObj.price);
+      if (vicPriceObj) victoryPrice = Number(vicPriceObj.price);
+
+      return {
+        ...item,
+        shufersalPrice,
+        yohananofPrice,
+        victoryPrice
+      };
+    });
+  } catch (err) {
+    console.warn("Database price query skipped or failed (likely no migrations or empty DB yet):", err);
+    return items; // Gracefully continue with generated/mock prices
+  }
 }
 
 // Fallback high-fidelity parser for offline/robust usage
@@ -171,8 +259,10 @@ export async function POST(req: NextRequest) {
     // Check if the api key exists and is not the placeholder text
     if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
       // Graceful fallback
+      const items = getFallbackData(rawList);
+      const enriched = await enrichWithLiveDatabasePrices(items);
       return NextResponse.json({
-        items: getFallbackData(rawList),
+        items: enriched,
         isFallback: true
       });
     }
@@ -240,8 +330,9 @@ ${rawList}`;
     }
 
     const items = JSON.parse(textOutput.trim());
+    const enriched = await enrichWithLiveDatabasePrices(items);
     return NextResponse.json({
-      items,
+      items: enriched,
       isFallback: false
     });
 
@@ -252,8 +343,9 @@ ${rawList}`;
     try {
       // Gracefully fallback to deterministic local parser to ensure 100% app uptime even during high API demand
       const items = getFallbackData(rawList);
+      const enriched = await enrichWithLiveDatabasePrices(items);
       return NextResponse.json({
-        items,
+        items: enriched,
         isFallback: true,
         fallbackReason: error.message || "Gemini Unavailable"
       });

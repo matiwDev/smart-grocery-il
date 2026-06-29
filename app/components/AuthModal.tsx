@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { signIn } from "next-auth/react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   X, 
@@ -115,7 +116,7 @@ export default function AuthModal({ isOpen, onClose, lang, onAuthSuccess }: Auth
     return true;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
@@ -124,37 +125,49 @@ export default function AuthModal({ isOpen, onClose, lang, onAuthSuccess }: Auth
 
     setIsLoading(true);
 
-    // Simulate standard secure backend Auth delay
-    setTimeout(() => {
+    try {
+      const res = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+      });
+
       setIsLoading(false);
-      const displayName = activeTab === "signup" ? name : email.split("@")[0];
-      setSuccess(activeTab === "signup" ? t.successSignUp : t.successSignIn);
-      
-      if (onAuthSuccess) {
-        setTimeout(() => {
-          onAuthSuccess(displayName);
-          onClose();
-        }, 1500);
+
+      if (res?.error) {
+        setError(lang === "he" ? "פרטי התחברות שגויים או שגיאה במערכת" : "Invalid credentials or system error");
+      } else {
+        const displayName = activeTab === "signup" ? name : email.split("@")[0];
+        setSuccess(activeTab === "signup" ? t.successSignUp : t.successSignIn);
+        
+        if (onAuthSuccess) {
+          setTimeout(() => {
+            onAuthSuccess(displayName);
+            onClose();
+          }, 1500);
+        } else {
+          setTimeout(() => {
+            onClose();
+          }, 1500);
+        }
       }
-    }, 1200);
+    } catch (err: any) {
+      setIsLoading(false);
+      setError(err?.message || "Something went wrong");
+    }
   };
 
-  const handleGoogleSignIn = () => {
+  const handleGoogleSignIn = async () => {
     setIsLoading(true);
     setError(null);
     setSuccess(null);
 
-    setTimeout(() => {
+    try {
+      await signIn("google");
+    } catch (err: any) {
       setIsLoading(false);
-      setSuccess(lang === "he" ? "התחברת בהצלחה באמצעות Google!" : "Successfully logged in via Google!");
-      
-      if (onAuthSuccess) {
-        setTimeout(() => {
-          onAuthSuccess("Google User");
-          onClose();
-        }, 1200);
-      }
-    }, 1000);
+      setError(err?.message || "Google Sign-In failed");
+    }
   };
 
   return (
@@ -271,16 +284,14 @@ export default function AuthModal({ isOpen, onClose, lang, onAuthSuccess }: Auth
                     {t.nameLabel}
                   </label>
                   <div className="relative">
-                    <User className={`absolute ${isRTL ? "right-3" : "left-3"} top-2.5 w-4 h-4 text-[var(--text-muted)]`} />
+                    <User className="absolute start-3 top-2.5 w-4 h-4 text-[var(--text-muted)]" />
                     <input
                       type="text"
                       disabled={isLoading}
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder={t.namePlaceholder}
-                      className={`w-full h-9 bg-[var(--background)] border border-[var(--panel-border)] rounded-xl text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]/30 transition-all ${
-                        isRTL ? "ps-10 pe-9" : "ps-9 pe-10"
-                      }`}
+                      className="w-full h-9 bg-[var(--background)] border border-[var(--panel-border)] rounded-xl text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]/30 transition-all ps-9 pe-4"
                     />
                   </div>
                 </div>
@@ -291,16 +302,14 @@ export default function AuthModal({ isOpen, onClose, lang, onAuthSuccess }: Auth
                   {t.emailLabel}
                 </label>
                 <div className="relative">
-                  <Mail className={`absolute ${isRTL ? "right-3" : "left-3"} top-2.5 w-4 h-4 text-[var(--text-muted)]`} />
+                  <Mail className="absolute start-3 top-2.5 w-4 h-4 text-[var(--text-muted)]" />
                   <input
                     type="email"
                     disabled={isLoading}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder={t.emailPlaceholder}
-                    className={`w-full h-9 bg-[var(--background)] border border-[var(--panel-border)] rounded-xl text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]/30 transition-all ${
-                      isRTL ? "ps-10 pe-9" : "ps-9 pe-10"
-                    }`}
+                    className="w-full h-9 bg-[var(--background)] border border-[var(--panel-border)] rounded-xl text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]/30 transition-all ps-9 pe-4"
                   />
                 </div>
               </div>
@@ -320,21 +329,19 @@ export default function AuthModal({ isOpen, onClose, lang, onAuthSuccess }: Auth
                   )}
                 </div>
                 <div className="relative">
-                  <Lock className={`absolute ${isRTL ? "right-3" : "left-3"} top-2.5 w-4 h-4 text-[var(--text-muted)]`} />
+                  <Lock className="absolute start-3 top-2.5 w-4 h-4 text-[var(--text-muted)]" />
                   <input
                     type={showPassword ? "text" : "password"}
                     disabled={isLoading}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder={t.passwordPlaceholder}
-                    className={`w-full h-9 bg-[var(--background)] border border-[var(--panel-border)] rounded-xl text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]/30 transition-all ${
-                      isRTL ? "ps-12 pe-9" : "ps-9 pe-12"
-                    }`}
+                    className="w-full h-9 bg-[var(--background)] border border-[var(--panel-border)] rounded-xl text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)]/30 transition-all ps-9 pe-9"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className={`absolute ${isRTL ? "left-3" : "right-3"} top-2.5 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors`}
+                    className="absolute end-3 top-2.5 text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>

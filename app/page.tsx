@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useSession, signOut } from "next-auth/react";
 import {
   Search,
   ShoppingCart,
@@ -23,9 +24,13 @@ import {
   Heart,
   Calendar,
   Menu,
-  X
+  X,
+  Settings,
+  LogOut,
+  Palette
 } from "lucide-react";
 import AuthModal from "./components/AuthModal";
+import BranchMapContainer from "./components/BranchMapContainer";
 import { motion, AnimatePresence } from "motion/react";
 
 interface GroceryItem {
@@ -256,8 +261,10 @@ const DICTIONARY = {
 export default function Dashboard() {
   const [lang, setLang] = useState<"he" | "en">("he");
   const [skin, setSkin] = useState<"light" | "slate" | "cyberpunk">("slate");
+  const { data: session, status } = useSession();
+  const isLoggedIn = status === "authenticated";
+  const currentUser = session?.user?.name || null;
   const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const t = DICTIONARY[lang];
 
@@ -308,6 +315,7 @@ export default function Dashboard() {
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [selectedCity, setSelectedCity] = useState(CITIES[0]);
+  const [showMapDrawer, setShowMapDrawer] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [geoAuthStatus, setGeoAuthStatus] = useState<"locked" | "requesting" | "granted">("locked");
   const [isAiPowered, setIsAiPowered] = useState<boolean | null>(null);
@@ -522,7 +530,7 @@ export default function Dashboard() {
       {/* Sidebar Section */}
       <aside 
         id="sidebar-panel" 
-        className={`fixed lg:static inset-y-0 ${lang === "he" ? "right-0 border-l" : "left-0 border-r"} z-40 w-72 bg-[var(--panel)] border-[var(--panel-border)] flex flex-col shrink-0 transition-transform duration-300 lg:translate-x-0 ${
+        className={`fixed lg:static inset-y-0 start-0 border-e z-40 w-72 bg-[var(--panel)] border-[var(--panel-border)] flex flex-col shrink-0 transition-transform duration-300 lg:translate-x-0 ${
           isSidebarOpen 
             ? "translate-x-0" 
             : lang === "he" 
@@ -581,6 +589,96 @@ export default function Dashboard() {
             <span className="text-sm">{t.historicalPriceAnalysis}</span>
           </div>
 
+          {/* Visual Divider */}
+          <div className="border-t border-[var(--panel-border)] my-4"></div>
+
+          {/* Customization / התאמה אישית Section */}
+          <div className="space-y-3 px-1">
+            <div className="flex items-center gap-1.5 text-[var(--text-highlight)] px-2">
+              <Palette className="w-3.5 h-3.5 text-[var(--primary)]" />
+              <span className="text-xs font-bold uppercase tracking-wider">
+                {lang === "he" ? "התאמה אישית" : "Customization / התאמה אישית"}
+              </span>
+            </div>
+
+            {/* Bilingual Language toggles */}
+            <div className="grid grid-cols-2 gap-1 bg-[var(--background)] p-1 rounded-lg border border-[var(--panel-border)]">
+              <button
+                onClick={() => setLang("he")}
+                className={`py-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                  lang === "he"
+                    ? "bg-[var(--primary)] text-[var(--text-highlight)] shadow-sm"
+                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
+                }`}
+              >
+                עברית
+              </button>
+              <button
+                onClick={() => setLang("en")}
+                className={`py-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                  lang === "en"
+                    ? "bg-[var(--primary)] text-[var(--text-highlight)] shadow-sm"
+                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
+                }`}
+              >
+                EN
+              </button>
+            </div>
+
+            {/* 3-Skin theme palette swapper buttons */}
+            <div className="grid grid-cols-3 gap-1 bg-[var(--background)] p-1 rounded-lg border border-[var(--panel-border)]">
+              <button
+                onClick={() => setSkin("light")}
+                className={`py-1 rounded text-[9px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  skin === "light"
+                    ? "bg-[var(--primary)] text-[var(--text-highlight)]"
+                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-100 border border-slate-300"></span>
+                <span>{lang === "he" ? "בהיר" : "Light"}</span>
+              </button>
+              <button
+                onClick={() => setSkin("slate")}
+                className={`py-1 rounded text-[9px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  skin === "slate"
+                    ? "bg-[var(--primary)] text-[var(--text-highlight)]"
+                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span>{lang === "he" ? "אמרלד" : "Emerald"}</span>
+              </button>
+              <button
+                onClick={() => setSkin("cyberpunk")}
+                className={`py-1 rounded text-[9px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  skin === "cyberpunk"
+                    ? "bg-[var(--primary)] text-[var(--text-highlight)]"
+                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-pink-500"></span>
+                <span>{lang === "he" ? "סייבר" : "Cyber"}</span>
+              </button>
+            </div>
+
+            {/* Log Out option directly inside Customization Section */}
+            {isLoggedIn && (
+              <button
+                onClick={() => {
+                  signOut({ redirect: false });
+                }}
+                className="w-full mt-2 py-1.5 px-3 rounded-lg text-xs font-bold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all flex items-center justify-between cursor-pointer border border-transparent hover:border-red-500/20"
+              >
+                <span className="flex items-center gap-1.5">
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>{lang === "he" ? "התנתק מהמערכת" : "Sign Out"}</span>
+                </span>
+                <span>➔</span>
+              </button>
+            )}
+          </div>
+
           <div className="pt-6">
             <p className="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">{t.sampleLists}</p>
             <div className="space-y-1.5 px-2">
@@ -588,10 +686,10 @@ export default function Dashboard() {
                 <button
                   key={idx}
                   onClick={() => loadPreset(p.list)}
-                  className={`w-full ${lang === 'he' ? 'text-right' : 'text-left'} text-xs px-3 py-2 rounded-lg bg-slate-950/40 hover:bg-slate-800 text-slate-300 border border-slate-800/50 hover:border-slate-700 transition-all flex items-center justify-between group`}
+                  className="w-full text-start text-xs px-3 py-2 rounded-lg bg-slate-950/40 hover:bg-slate-800 text-slate-300 border border-slate-800/50 hover:border-slate-700 transition-all flex items-center justify-between group"
                 >
                   <span className="truncate">{p.name[lang]}</span>
-                  <Sparkles className="w-3.5 h-3.5 text-slate-500 group-hover:text-blue-400 transition-colors shrink-0 mr-2" />
+                  <Sparkles className="w-3.5 h-3.5 text-slate-500 group-hover:text-blue-400 transition-colors shrink-0 ms-2" />
                 </button>
               ))}
             </div>
@@ -611,11 +709,60 @@ export default function Dashboard() {
       {/* Main Container Section */}
       <main id="main-content-panel" className="flex-1 flex flex-col relative overflow-hidden">
         {/* Header Component */}
-        <header id="top-navbar-header" className="min-h-16 border-b border-[var(--panel-border)] bg-[var(--panel)] flex flex-col lg:flex-row items-center justify-between p-4 md:px-8 gap-4 z-10 shrink-0 transition-all duration-300">
+        <header id="top-navbar-header" className="relative min-h-16 border-b border-[var(--panel-border)] bg-[var(--panel)] flex flex-col lg:flex-row items-center justify-between p-4 md:px-8 gap-4 z-10 shrink-0 transition-all duration-300">
           
           {/* Mobile top-row container for brand title + mobile menu toggle */}
           <div className="flex items-center justify-between w-full lg:hidden">
-            <div className="flex items-center gap-3">
+            {/* Mobile Left Block: Single Sign In Button / Signed In Badge (Top-left of the header bar) */}
+            <div className="flex flex-col items-start">
+              <div>
+                {isLoggedIn ? (
+                  <div
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white flex items-center gap-1 text-[10px] font-black select-none shrink-0 border border-emerald-500/20 shadow-md shadow-emerald-950/20"
+                    title={lang === "he" ? "מחובר למערכת" : "Signed In to System"}
+                  >
+                    <Check className="w-3 h-3" />
+                    <span>{lang === "he" ? "✓ מחובר" : "✓ Signed In / מחובר"}</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setIsAuthOpen(true)}
+                    className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] text-white hover:scale-105 active:scale-95 transition-all duration-200 flex items-center gap-1 text-[10px] font-extrabold cursor-pointer shadow-lg shadow-[var(--primary-glow)] shrink-0"
+                    title={lang === "he" ? "התחברות למערכת" : "Sign In to System"}
+                  >
+                    <User className="w-3 h-3" />
+                    <span>{lang === "he" ? "התחברות" : "Sign In"}</span>
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-col mt-1 space-y-0.5 text-start">
+                <span className="text-[9px] font-bold text-[var(--text-highlight)]">
+                  {isLoggedIn ? (session?.user?.name || t.userDefaultName) : "אורח / Guest"}
+                </span>
+                <span className="text-[8px] text-[var(--text-muted)] font-medium">
+                  {isLoggedIn ? ((session?.user as any)?.membershipTier || "Premium") : (lang === "he" ? "דרגת בסיס" : "Standard Tier")}
+                </span>
+              </div>
+            </div>
+
+            {/* Mobile Right Block with menu toggle and profile dropdown */}
+            <div className="flex items-center gap-2">
+              {/* Quick Profile Avatar for Mobile */}
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[var(--primary)] to-[var(--accent)] p-0.5 shadow-md select-none">
+                <div className="w-full h-full rounded-[6px] bg-[var(--background)] flex items-center justify-center font-bold text-xs text-[var(--text-highlight)]">
+                  {currentUser ? currentUser.slice(0, 2).toUpperCase() : t.userInitials}
+                </div>
+              </div>
+
+              {/* Brand Logo */}
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 bg-[var(--primary)] rounded flex items-center justify-center font-black text-white text-xs shadow-md">
+                  S
+                </div>
+                <span className="font-bold text-xs text-[var(--text-highlight)]">{t.title}</span>
+              </div>
+
+              {/* Sidebar Menu Toggle */}
               <button
                 onClick={() => setIsSidebarOpen(true)}
                 className="p-2 rounded-lg hover:bg-[var(--background)] border border-[var(--panel-border)] text-[var(--text)] cursor-pointer"
@@ -623,129 +770,71 @@ export default function Dashboard() {
               >
                 <Menu className="w-5 h-5" />
               </button>
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 bg-[var(--primary)] rounded flex items-center justify-center font-black text-white text-xs shadow-md">
-                  S
-                </div>
-                <span className="font-bold text-xs text-[var(--text-highlight)]">{t.title}</span>
-              </div>
-            </div>
-            
-            {/* Quick Profile Avatar for Mobile */}
-            <div 
-              onClick={() => setIsAuthOpen(true)}
-              className="flex items-center gap-2 cursor-pointer"
-            >
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[var(--primary)] to-[var(--accent)] p-0.5 shadow-md">
-                <div className="w-full h-full rounded-[6px] bg-[var(--background)] flex items-center justify-center font-bold text-xs text-[var(--text-highlight)]">
-                  {currentUser ? currentUser.slice(0, 2).toUpperCase() : t.userInitials}
-                </div>
-              </div>
             </div>
           </div>
 
-          {/* Search bar wrapper */}
-          <div className="flex items-center gap-4 w-full lg:w-96">
-            <div className="relative w-full">
-              <Search className={`absolute ${lang === "he" ? "right-3.5" : "left-3.5"} top-2.5 w-4 h-4 text-[var(--text-muted)]`} />
+          {/* Desktop Left Block: Single Sign In Button / Signed In Badge (Always at the start corner on desktop) */}
+          <div className="hidden lg:flex flex-col items-start shrink-0 transition-all">
+            <div>
+              {isLoggedIn ? (
+                <div
+                  className="px-4 py-2 rounded-lg bg-emerald-600 text-white flex items-center gap-1.5 text-xs font-bold select-none shrink-0 border border-emerald-500/20 shadow-md shadow-emerald-950/20"
+                  title={lang === "he" ? "מחובר למערכת" : "Signed In to System"}
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>{lang === "he" ? "✓ מחובר" : "✓ Signed In / מחובר"}</span>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setIsAuthOpen(true)}
+                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] text-white hover:scale-105 active:scale-95 transition-all duration-200 flex items-center gap-1.5 text-xs font-bold cursor-pointer shadow-lg shadow-[var(--primary-glow)] shrink-0"
+                  title={lang === "he" ? "התחברות למערכת" : "Sign In to System"}
+                >
+                  <User className="w-3.5 h-3.5" />
+                  <span>{lang === "he" ? "התחברות" : "Sign In"}</span>
+                </button>
+              )}
+            </div>
+            <div className="flex flex-col mt-1 space-y-0.5 text-start">
+              <span className="text-[11px] font-bold text-[var(--text-highlight)]">
+                {isLoggedIn ? (session?.user?.name || t.userDefaultName) : "אורח / Guest"}
+              </span>
+              <span className="text-[9px] text-[var(--text-muted)] font-medium">
+                {isLoggedIn ? ((session?.user as any)?.membershipTier || "Premium") : (lang === "he" ? "דרגת בסיס" : "Standard Tier")}
+              </span>
+            </div>
+          </div>
+
+          {/* Search bar & Location wrapper (Always centered on desktop) */}
+          <div className="flex flex-col md:flex-row gap-4 items-center w-full lg:flex-1 lg:max-w-2xl">
+            {/* Search Input (Takes 3/4 space on desktop, full on mobile) */}
+            <div className="relative w-full md:w-3/4">
+              <Search className="absolute start-3.5 top-2.5 w-4 h-4 text-[var(--text-muted)]" />
               <input
                 type="text"
                 placeholder={t.searchPlaceholder}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className={`w-full h-9 bg-[var(--background)]/80 border border-[var(--panel-border)] hover:border-[var(--primary)]/50 focus:border-[var(--primary)] rounded-full text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none transition-all ${
-                  lang === "he" ? "ps-4 pe-10" : "ps-10 pe-4"
-                }`}
+                className="w-full h-9 bg-[var(--background)]/80 border border-[var(--panel-border)] hover:border-[var(--primary)]/50 focus:border-[var(--primary)] rounded-full text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none transition-all ps-10 pe-4"
               />
             </div>
-          </div>
 
-          {/* Nav Actions (Theme, Language, Location, User Profile) */}
-          <div className="flex flex-wrap items-center justify-center lg:justify-end gap-3 md:gap-4 w-full lg:w-auto">
-            {/* Theme Skin Selector Widget */}
-            <div className="flex items-center gap-1 bg-[var(--background)] border border-[var(--panel-border)] rounded-lg p-1 transition-all">
-              <button
-                onClick={() => setSkin("light")}
-                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                  skin === "light"
-                    ? "bg-[var(--primary)] text-[var(--text-highlight)] shadow-sm"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
-                }`}
-                title="Light Mode"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-100 border border-slate-300"></span>
-                <span>{t.themeLight || "Light"}</span>
-              </button>
-              <button
-                onClick={() => setSkin("slate")}
-                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                  skin === "slate"
-                    ? "bg-[var(--primary)] text-[var(--text-highlight)] shadow-sm"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
-                }`}
-                title="Slate Mode"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                <span>{t.themeSlate || "Emerald"}</span>
-              </button>
-              <button
-                onClick={() => setSkin("cyberpunk")}
-                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                  skin === "cyberpunk"
-                    ? "bg-[var(--primary)] text-[var(--text-highlight)] shadow-sm"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
-                }`}
-                title="Cyberpunk Mode"
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-pink-500"></span>
-                <span>{t.themeCyberpunk || "Cyberpunk"}</span>
-              </button>
-            </div>
-
-            {/* Dynamic Glassmorphic Language Toggle Switch */}
-            <div className="flex items-center gap-1 bg-[var(--background)] border border-[var(--panel-border)] rounded-lg p-1 transition-all">
-              <button
-                onClick={() => setLang("he")}
-                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                  lang === "he"
-                    ? "bg-[var(--primary)] text-[var(--text-highlight)] shadow-sm"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
-                }`}
-              >
-                עברית
-              </button>
-              <button
-                onClick={() => setLang("en")}
-                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                  lang === "en"
-                    ? "bg-[var(--primary)] text-[var(--text-highlight)] shadow-sm"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
-                }`}
-              >
-                EN
-              </button>
-            </div>
-
-            {/* Prominent Sleek Sign In / התחברות Button */}
-            <button
-              onClick={() => setIsAuthOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] text-white hover:opacity-90 transition-all flex items-center gap-1.5 text-[10px] font-bold cursor-pointer shadow-lg shadow-[var(--primary-glow)] shrink-0"
-              title={lang === "he" ? "התחברות למערכת" : "Sign In to System"}
+            {/* City Branch Selector (Takes 1/4 space on desktop, full on mobile) */}
+            <div 
+              onClick={() => setShowMapDrawer(true)}
+              className="flex items-center gap-2 bg-[var(--background)]/80 border border-[var(--panel-border)] hover:border-[var(--primary)]/50 focus-within:border-[var(--primary)] rounded-full px-3.5 h-9 w-full md:w-1/4 transition-colors duration-300 cursor-pointer"
             >
-              <User className="w-3.5 h-3.5" />
-              <span>{currentUser ? currentUser : (lang === "he" ? "התחברות" : "Sign In")}</span>
-            </button>
-
-            {/* City Branch Selector */}
-            <div className="flex items-center gap-1.5 bg-[var(--background)] border border-[var(--panel-border)] rounded-lg px-2 py-1 transition-colors duration-300">
-              <MapPin className="w-3 h-3 text-[var(--primary)] transition-colors duration-300" />
+              <MapPin className="w-3.5 h-3.5 text-[var(--primary)] shrink-0 transition-colors duration-300" />
               <select
                 value={selectedCity.name.he}
                 onChange={(e) => {
                   const cityObj = CITIES.find(c => c.name.he === e.target.value || c.name.en === e.target.value);
-                  if (cityObj) setSelectedCity(cityObj);
+                  if (cityObj) {
+                    setSelectedCity(cityObj);
+                    setShowMapDrawer(true);
+                  }
                 }}
-                className="bg-transparent text-[11px] text-[var(--text-highlight)] font-semibold pr-3 focus:outline-none cursor-pointer"
+                className="w-full bg-transparent text-xs text-[var(--text-highlight)] font-semibold focus:outline-none cursor-pointer pe-1"
               >
                 {CITIES.map((c, idx) => (
                   <option key={idx} value={c.name[lang]} className="bg-[var(--background)] text-[var(--text)]">
@@ -754,22 +843,13 @@ export default function Dashboard() {
                 ))}
               </select>
             </div>
+          </div>
 
+          {/* Nav Actions (User Profile) (Always at the end corner on desktop) */}
+          <div className="flex items-center justify-center gap-3 md:gap-4 w-full lg:w-auto">
             {/* Profile Avatar (Desktop) */}
-            <div 
-              onClick={() => setIsAuthOpen(true)}
-              className="hidden lg:flex items-center gap-3 cursor-pointer hover:opacity-90 transition-all group"
-              title={lang === "he" ? "התחברות / ניהול חשבון" : "Sign In / Account"}
-            >
-              <div className={`flex flex-col ${lang === 'he' ? 'items-start text-left' : 'items-end text-right'}`}>
-                <span className="text-xs font-semibold text-[var(--text-highlight)] group-hover:text-[var(--primary)] transition-colors">
-                  {currentUser || t.userDefaultName}
-                </span>
-                <span className="text-[9px] text-[var(--primary)] font-bold uppercase tracking-widest mt-0.5">
-                  {currentUser ? (lang === "he" ? "מחובר למערכת" : "CONNECTED") : t.userStatus}
-                </span>
-              </div>
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[var(--primary)] to-[var(--accent)] p-0.5 shadow-md group-hover:scale-105 transition-all">
+            <div className="hidden lg:flex items-center gap-3 select-none" title={lang === "he" ? "חשבון משתמש" : "User Account"}>
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[var(--primary)] to-[var(--accent)] p-0.5 shadow-md">
                 <div className="w-full h-full rounded-[6px] bg-[var(--background)] flex items-center justify-center font-bold text-xs text-[var(--text-highlight)] transition-colors duration-300">
                   {currentUser ? currentUser.slice(0, 2).toUpperCase() : t.userInitials}
                 </div>
@@ -777,6 +857,40 @@ export default function Dashboard() {
             </div>
           </div>
         </header>
+
+        {/* Sliding Branch Map Drawer */}
+        <AnimatePresence>
+          {showMapDrawer && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.3, ease: "easeInOut" }}
+              className="border-b border-[var(--panel-border)] bg-slate-950/90 backdrop-blur-md overflow-hidden shrink-0"
+            >
+              <div className="max-w-7xl mx-auto p-4 md:p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <h2 className="text-sm font-black text-[var(--text-highlight)] tracking-tight">
+                      {lang === "he" ? "מפת סניפים חכמה ושירותים מבוססי מיקום" : "Smart Branch Map & Location Services"}
+                    </h2>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowMapDrawer(false);
+                    }}
+                    className="text-xs font-bold text-red-400 hover:text-red-300 transition-colors flex items-center gap-1.5 cursor-pointer bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg border border-red-500/20"
+                  >
+                    <span>{lang === "he" ? "✕ סגור מפה" : "✕ Close Map"}</span>
+                  </button>
+                </div>
+                <BranchMapContainer selectedCity={selectedCity} lang={lang} skin={skin} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Dashboard Dynamic Workspace Grid */}
         <div id="grid-layout-workspace" className="flex-1 p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 overflow-y-auto lg:overflow-hidden h-full">
@@ -921,7 +1035,7 @@ export default function Dashboard() {
           </section>
 
           {/* Left Grid Side (Stats and Comparison Matrix Table) */}
-          <section id="analytics-data-column" className="col-span-1 lg:col-span-8 flex flex-col gap-6 h-auto lg:h-full lg:overflow-hidden">
+          <section id="analytics-data-column" className="col-span-1 lg:col-span-8 flex flex-col gap-6 h-auto lg:h-full lg:overflow-y-auto scrollbar-thin pe-1">
             
             {/* Top Stats Cards Block */}
             <div id="quick-metrics-grid" className="h-auto lg:h-[140px] grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
@@ -1138,14 +1252,14 @@ export default function Dashboard() {
                     <p className="text-xs text-[var(--text-muted)] mt-1">{t.tryEditing}</p>
                   </div>
                 ) : (
-                  <table className={`w-full ${lang === 'he' ? 'text-right' : 'text-left'} text-xs relative`}>
+                  <table className="w-full text-start text-xs relative">
                     <thead>
                       <tr className="bg-[var(--background)] border-b border-[var(--panel-border)] text-[var(--text-muted)] font-bold uppercase tracking-wider sticky top-0 z-10 transition-colors duration-300">
                         <th className="p-4 font-semibold text-[var(--text)]">{t.tableColProduct}</th>
                         <th className="p-4 font-semibold text-[var(--text)] text-center">{t.tableColQty}</th>
-                        <th className={`p-4 font-semibold text-[var(--text)] ${lang === 'he' ? 'text-left' : 'text-right'}`}>{t.tableColShufersal} ({selectedCity.name[lang]})</th>
-                        <th className={`p-4 font-semibold text-[var(--text)] ${lang === 'he' ? 'text-left' : 'text-right'}`}>{t.tableColYohananof} ({selectedCity.name[lang]})</th>
-                        <th className={`p-4 font-semibold text-[var(--text)] ${lang === 'he' ? 'text-left' : 'text-right'}`}>{t.tableColVictory} ({selectedCity.name[lang]})</th>
+                        <th className="p-4 font-semibold text-[var(--text)] text-end">{t.tableColShufersal} ({selectedCity.name[lang]})</th>
+                        <th className="p-4 font-semibold text-[var(--text)] text-end">{t.tableColYohananof} ({selectedCity.name[lang]})</th>
+                        <th className="p-4 font-semibold text-[var(--text)] text-end">{t.tableColVictory} ({selectedCity.name[lang]})</th>
                         <th className="p-4 font-semibold text-[var(--text)] text-center w-12">{t.tableColDelete}</th>
                       </tr>
                     </thead>
@@ -1167,38 +1281,38 @@ export default function Dashboard() {
                             </td>
                             
                             {/* Shufersal Price Cell */}
-                            <td className={`p-4 ${lang === 'he' ? 'text-left' : 'text-right'} font-mono text-sm ${
+                            <td className={`p-4 text-end font-mono text-sm ${
                               item.shufersalPrice === minPrice 
                                 ? "text-[var(--primary)] font-bold bg-[var(--primary)]/5" 
                                 : "text-[var(--text)]"
                             }`}>
                               ₪{item.shufersalPrice.toFixed(2)}
                               {item.shufersalPrice === minPrice && (
-                                <span className={`text-[9px] bg-[var(--primary)]/15 text-[var(--primary)] px-1 py-0.5 rounded ${lang === 'he' ? 'mr-1' : 'ml-1'}`}>{t.cheapBadge}</span>
+                                <span className="text-[9px] bg-[var(--primary)]/15 text-[var(--primary)] px-1 py-0.5 rounded ms-1">{t.cheapBadge}</span>
                               )}
                             </td>
 
                             {/* Yohananof Price Cell */}
-                            <td className={`p-4 ${lang === 'he' ? 'text-left' : 'text-right'} font-mono text-sm ${
+                            <td className={`p-4 text-end font-mono text-sm ${
                               item.yohananofPrice === minPrice 
                                 ? "text-[var(--primary)] font-bold bg-[var(--primary)]/5" 
                                 : "text-[var(--text)]"
                             }`}>
                               ₪{item.yohananofPrice.toFixed(2)}
                               {item.yohananofPrice === minPrice && (
-                                <span className={`text-[9px] bg-[var(--primary)]/15 text-[var(--primary)] px-1 py-0.5 rounded ${lang === 'he' ? 'mr-1' : 'ml-1'}`}>{t.cheapBadge}</span>
+                                <span className="text-[9px] bg-[var(--primary)]/15 text-[var(--primary)] px-1 py-0.5 rounded ms-1">{t.cheapBadge}</span>
                               )}
                             </td>
 
                             {/* Victory Price Cell */}
-                            <td className={`p-4 ${lang === 'he' ? 'text-left' : 'text-right'} font-mono text-sm ${
+                            <td className={`p-4 text-end font-mono text-sm ${
                               item.victoryPrice === minPrice 
                                 ? "text-[var(--primary)] font-bold bg-[var(--primary)]/5" 
                                 : "text-[var(--text)]"
                             }`}>
                               ₪{item.victoryPrice.toFixed(2)}
                               {item.victoryPrice === minPrice && (
-                                <span className={`text-[9px] bg-[var(--primary)]/15 text-[var(--primary)] px-1 py-0.5 rounded ${lang === 'he' ? 'mr-1' : 'ml-1'}`}>{t.cheapBadge}</span>
+                                <span className="text-[9px] bg-[var(--primary)]/15 text-[var(--primary)] px-1 py-0.5 rounded ms-1">{t.cheapBadge}</span>
                               )}
                             </td>
 
@@ -1224,7 +1338,7 @@ export default function Dashboard() {
                         <td className="p-4"></td>
                         
                         {/* Shufersal Total Column */}
-                        <td className={`p-4 ${lang === 'he' ? 'text-left' : 'text-right'} text-sm ${
+                        <td className={`p-4 text-end text-sm ${
                           shufersalTotal === cheapest.total ? "text-[var(--primary)] font-black" : "text-[var(--text)]"
                         }`}>
                           ₪{shufersalTotal.toFixed(2)}
@@ -1234,7 +1348,7 @@ export default function Dashboard() {
                         </td>
 
                         {/* Yohananof Total Column */}
-                        <td className={`p-4 ${lang === 'he' ? 'text-left' : 'text-right'} text-sm ${
+                        <td className={`p-4 text-end text-sm ${
                           yohananofTotal === cheapest.total ? "text-[var(--primary)] font-black" : "text-[var(--text)]"
                         }`}>
                           ₪{yohananofTotal.toFixed(2)}
@@ -1244,7 +1358,7 @@ export default function Dashboard() {
                         </td>
 
                         {/* Victory Total Column */}
-                        <td className={`p-4 ${lang === 'he' ? 'text-left' : 'text-right'} text-sm ${
+                        <td className={`p-4 text-end text-sm ${
                           victoryTotal === cheapest.total ? "text-[var(--primary)] font-black" : "text-[var(--text)]"
                         }`}>
                           ₪{victoryTotal.toFixed(2)}
@@ -1301,8 +1415,9 @@ export default function Dashboard() {
         isOpen={isAuthOpen}
         onClose={() => setIsAuthOpen(false)}
         lang={lang}
-        onAuthSuccess={(userName) => setCurrentUser(userName)}
       />
+
+
 
       {/* Toast Notification */}
       <AnimatePresence>
