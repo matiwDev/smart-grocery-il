@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { ShoppingCart, ExternalLink, Zap, BarChart3, Clock, TrendingDown, LogIn, LogOut, Globe, User, X, Menu, Home, List, Users, Search, MapPin, Trash2, Plus, Navigation, ChevronDown, ShoppingBag, ChefHat, Store, Box } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { createClient } from '@supabase/supabase-js';
+import { BranchMapContainer } from '@/components/BranchMapContainer';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -251,6 +252,8 @@ export default function SmartGroceryDashboard() {
 
   // List Creator State
   const [basket, setBasket] = useState<BasketItem[]>([]);
+  const [savedBaskets, setSavedBaskets] = useState<any[]>([]);
+  const [isLoadingSaved, setIsLoadingSaved] = useState(false);
   const [activeBasketId, setActiveBasketId] = useState<string | null>(null);
   const [isBasketLoaded, setIsBasketLoaded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -395,6 +398,29 @@ export default function SmartGroceryDashboard() {
 
   const [liveBranches, setLiveBranches] = useState(MOCK_BRANCHES.slice(1));
   const [activeMapPin, setActiveMapPin] = useState('gps');
+
+  useEffect(() => {
+    if (currentView === 'SAVED_LISTS' && supabase && currentUser && currentUser.id !== '00000000-0000-0000-0000-000000000000') {
+      const loadSavedBaskets = async () => {
+         setIsLoadingSaved(true);
+         try {
+           const { data: baskets } = await supabase.from('baskets')
+             .select('*')
+             .eq('user_id', currentUser.id)
+             .order('updated_at', { ascending: false });
+           
+           if (baskets) {
+             setSavedBaskets(baskets);
+           }
+         } catch(e) {
+           console.log(e);
+         } finally {
+           setIsLoadingSaved(false);
+         }
+      };
+      loadSavedBaskets();
+    }
+  }, [currentView, currentUser]);
 
   useEffect(() => {
     if (currentView === 'LOCATION' && supabase) {
@@ -875,73 +901,61 @@ export default function SmartGroceryDashboard() {
             transition={{ duration: 0.2 }}
             className="flex-1 w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-6 text-start h-full mt-6"
           >
-            {/* Left Column: Interactive Map Placeholder */}
-            <div className="w-full lg:w-2/3 bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-2 min-h-[500px] relative overflow-hidden flex flex-col shadow-xl">
-              <div className="absolute inset-0 bg-slate-800/50 opacity-20 pointer-events-none"></div>
-              
-              {/* Map UI Elements */}
-              <div className="absolute top-6 start-6 end-6 flex justify-between items-start pointer-events-none z-10">
-                <div className="bg-slate-950/80 backdrop-blur-md px-4 py-2 rounded-xl border border-slate-700/50 text-sm font-bold text-slate-200 pointer-events-auto shadow-xl">
-                  {t.currentGpsLocation}
-                </div>
-                <div className="flex flex-col gap-2 pointer-events-auto">
-                  <button className="w-10 h-10 bg-slate-950/80 backdrop-blur-md rounded-xl border border-slate-700/50 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 shadow-xl transition-colors">
-                    <Plus className="w-5 h-5" />
-                  </button>
-                  <button className="w-10 h-10 bg-slate-950/80 backdrop-blur-md rounded-xl border border-slate-700/50 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 shadow-xl transition-colors">
-                    <div className="w-3 h-px bg-current"></div>
-                  </button>
-                </div>
-              </div>
-              
-              {/* Simulated Markers */}
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                <div className="w-6 h-6 bg-indigo-500 rounded-full border-4 border-white shadow-[0_0_20px_rgba(99,102,241,0.6)] animate-pulse"></div>
-              </div>
-              <div className="absolute top-1/3 left-1/4">
-                <MapPin className="w-8 h-8 text-rose-500 drop-shadow-lg" />
-              </div>
-              <div className="absolute bottom-1/3 right-1/4">
-                <MapPin className="w-8 h-8 text-emerald-500 drop-shadow-lg" />
-              </div>
-            </div>
-
-            {/* Right Column: Detailed Cards */}
-            <div className="w-full lg:w-1/3 flex flex-col gap-4 overflow-y-auto max-h-[500px] lg:max-h-full pe-2">
-               {liveBranches.map(b => (
-                 <div 
-                   key={b.id} 
-                   onClick={() => setActiveMapPin(b.id)}
-                   className={`bg-slate-900/60 backdrop-blur-xl border ${activeMapPin === b.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-800'} rounded-3xl p-5 flex flex-col gap-4 shadow-xl hover:bg-slate-900 transition-colors shrink-0 cursor-pointer`}
-                 >
-                   <div className="flex items-center gap-4">
-                     <div className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center text-indigo-400 border border-slate-700 shadow-inner">
-                       <Store className="w-6 h-6" />
+            <BranchMapContainer 
+              city={location === 'GPS' ? t.telAviv : (selectedBranch ? selectedBranch.name : t.telAviv)}
+              lang={lang}
+              skin={skin}
+              liveBranches={liveBranches}
+              activeMapPin={activeMapPin}
+              setActiveMapPin={setActiveMapPin}
+              t={t}
+            />
+          </motion.div>
+        ) : currentView === 'SAVED_LISTS' ? (
+          <motion.div
+            key="SAVED_LISTS"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="flex-1 w-full max-w-4xl mx-auto flex flex-col gap-6 text-start mt-6"
+          >
+            <h2 className="text-3xl font-bold text-slate-100 mb-2">{t.navSavedLists}</h2>
+            {isLoadingSaved ? (
+               <div className="flex justify-center py-10">
+                  <Clock className="w-8 h-8 text-indigo-400 animate-spin" />
+               </div>
+            ) : savedBaskets.length > 0 ? (
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 {savedBaskets.map(sb => (
+                   <div key={sb.id} className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl hover:bg-slate-900 transition-colors cursor-pointer group">
+                     <div className="flex items-center gap-4 mb-4">
+                       <div className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center text-indigo-400 group-hover:bg-indigo-500/20 group-hover:text-indigo-300 transition-colors">
+                         <List className="w-6 h-6" />
+                       </div>
+                       <div>
+                         <h3 className="font-bold text-slate-200">{sb.name}</h3>
+                         <p className="text-xs text-slate-400">{new Date(sb.updated_at).toLocaleDateString()}</p>
+                       </div>
                      </div>
-                     <div className="flex-1">
-                       <h4 className="font-bold text-slate-200">{b.name}</h4>
-                       <p className="text-xs text-slate-400 mt-0.5">{b.desc}</p>
-                     </div>
-                   </div>
-                   
-                   <div className="flex items-center justify-between border-t border-slate-800/80 pt-4">
-                     <div className="flex items-center gap-1.5 text-slate-300">
-                       <Navigation className="w-4 h-4 text-emerald-400" />
-                       <span className="font-mono text-sm">{b.dist}</span>
-                     </div>
-                     
-                     <a 
-                      href={b.mapsLink}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 px-4 py-2 rounded-xl text-sm font-semibold transition-colors border border-indigo-500/20 text-center"
+                     <button 
+                       onClick={(e) => {
+                         e.stopPropagation();
+                         setActiveBasketId(sb.id);
+                         setCurrentView('HOME');
+                       }}
+                       className="w-full mt-2 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 py-2 rounded-xl text-sm font-semibold transition-colors border border-indigo-500/20"
                      >
-                       {t.quickNavigate}
-                     </a>
+                       {t.viewDetails}
+                     </button>
                    </div>
-                 </div>
-               ))}
-            </div>
+                 ))}
+               </div>
+            ) : (
+               <div className="bg-slate-900/60 backdrop-blur-xl rounded-3xl p-8 border border-slate-800 shadow-xl text-center">
+                 <p className="text-slate-400">{t.emptyList}</p>
+               </div>
+            )}
           </motion.div>
         ) : (
           <motion.div
@@ -955,13 +969,11 @@ export default function SmartGroceryDashboard() {
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-indigo-500/10 blur-3xl rounded-full pointer-events-none"></div>
             
             <div className="w-20 h-20 bg-slate-800/50 rounded-2xl flex items-center justify-center mb-6 border border-slate-700/50 relative z-10 shadow-lg shadow-indigo-500/10 text-indigo-400">
-              {currentView === 'SAVED_LISTS' && <List className="w-10 h-10" />}
               {currentView === 'PRICE_UPDATES' && <TrendingDown className="w-10 h-10" />}
               {currentView === 'COMMUNITY' && <Users className="w-10 h-10" />}
             </div>
             
             <h2 className="text-2xl font-bold text-slate-100 mb-2 relative z-10">
-              {currentView === 'SAVED_LISTS' && t.navSavedLists}
               {currentView === 'PRICE_UPDATES' && t.navPriceUpdates}
               {currentView === 'COMMUNITY' && t.navCommunity}
             </h2>
