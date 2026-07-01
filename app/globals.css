@@ -1,63 +1,60 @@
 @import "tailwindcss";
 
 @layer base {
-  /* Default variables (Slate/Emerald) */
-  :root {
-    --background: #020617; /* slate-950 */
-    --panel: rgba(15, 23, 42, 0.4); /* slate-900 with opacity */
-    --panel-border: rgba(51, 65, 85, 0.5); /* slate-700/50 */
-    --text: #cbd5e1; /* slate-300 */
-    --text-muted: #64748b; /* slate-500 */
-    --text-highlight: #f8fafc; /* slate-50 */
-    --primary: #10b981; /* emerald-500 */
-    --primary-hover: #059669; /* emerald-600 */
-    --primary-glow: rgba(16, 185, 129, 0.15);
-    --accent: #3b82f6; /* blue-500 */
-    --accent-glow: rgba(59, 130, 246, 0.15);
-  }
-
-  /* Deep Slate/Emerald Dark Mode explicitly */
-  [data-skin="slate"] {
-    --background: #020617;
-    --panel: rgba(15, 23, 42, 0.4);
-    --panel-border: rgba(51, 65, 85, 0.4);
-    --text: #cbd5e1;
-    --text-muted: #64748b;
-    --text-highlight: #f8fafc;
-    --primary: #10b981;
-    --primary-hover: #059669;
-    --primary-glow: rgba(16, 185, 129, 0.15);
-    --accent: #3b82f6;
-    --accent-glow: rgba(59, 130, 246, 0.15);
-  }
-
-  /* Brighter/Clean Light Mode */
   [data-skin="light"] {
-    --background: #f8fafc; /* slate-50 */
-    --panel: #ffffff; /* pure white */
-    --panel-border: #e2e8f0; /* slate-200 */
-    --text: #334155; /* slate-700 */
-    --text-muted: #64748b; /* slate-500 */
-    --text-highlight: #0f172a; /* slate-900 */
-    --primary: #059669; /* emerald-600 */
-    --primary-hover: #047857; /* emerald-700 */
-    --primary-glow: rgba(5, 150, 105, 0.1);
-    --accent: #2563eb; /* blue-600 */
-    --accent-glow: rgba(37, 99, 235, 0.1);
+    --color-slate-950: var(--color-slate-50);
+    --color-slate-900: var(--color-slate-100);
+    --color-slate-800: var(--color-slate-200);
+    --color-slate-700: var(--color-slate-300);
+    --color-slate-500: var(--color-slate-500);
+    --color-slate-400: var(--color-slate-600);
+    --color-slate-300: var(--color-slate-700);
+    --color-slate-200: var(--color-slate-800);
+    --color-slate-100: var(--color-slate-900);
+    --color-slate-50: var(--color-slate-950);
+    
+    --color-indigo-600: var(--color-blue-600);
+    --color-indigo-500: var(--color-blue-500);
+    --color-indigo-400: var(--color-blue-600);
+    
+    --color-white: var(--color-slate-900);
   }
 
-  /* High-Contrast Cyberpunk Look */
   [data-skin="cyberpunk"] {
-    --background: #000000; /* pitch black */
-    --panel: rgba(20, 20, 25, 0.9);
-    --panel-border: #fdec0e; /* cyberpunk yellow */
-    --text: #00ffcc; /* cyber neon cyan */
-    --text-muted: #ff0055; /* cyber neon pink */
-    --text-highlight: #ffffff; /* pure white */
-    --primary: #ff0055; /* cyber neon pink */
-    --primary-hover: #d00045;
-    --primary-glow: rgba(255, 0, 85, 0.3);
-    --accent: #fdec0e; /* cyberpunk yellow */
-    --accent-glow: rgba(253, 236, 14, 0.3);
+    --color-slate-950: #050505;
+    --color-slate-900: #0a0a0a;
+    --color-slate-800: #1a1a1a;
+    --color-slate-700: #2a2a2a;
+    
+    --color-slate-300: #e0e0e0;
+    --color-slate-200: #f0f0f0;
+    --color-slate-100: #ffffff;
+    --color-slate-50: #ffffff;
+    
+    --color-indigo-600: var(--color-fuchsia-600);
+    --color-indigo-500: var(--color-fuchsia-500);
+    --color-indigo-400: var(--color-fuchsia-400);
+    
+    --color-emerald-500: var(--color-cyan-400);
+    --color-emerald-400: var(--color-cyan-300);
+  }
+
+  [data-skin="nordic-light"] {
+    --color-slate-950: #f8fafc;
+    --color-slate-900: #f1f5f9;
+    --color-slate-800: #e2e8f0;
+    --color-slate-700: #cbd5e1;
+    --color-slate-500: #64748b;
+    --color-slate-400: #475569;
+    --color-slate-300: #334155;
+    --color-slate-200: #1e293b;
+    --color-slate-100: #0f172a;
+    --color-slate-50: #020617;
+    
+    --color-indigo-600: var(--color-sky-600);
+    --color-indigo-500: var(--color-sky-500);
+    --color-indigo-400: var(--color-sky-400);
+    
+    --color-white: #0f172a;
   }
 }

@@ -1,1446 +1,1132 @@
-"use client";
+'use client';
 
-import React, { useState, useEffect } from "react";
-import { useSession, signOut } from "next-auth/react";
-import {
-  Search,
-  ShoppingCart,
-  List,
-  User,
-  TrendingDown,
-  Check,
-  Shield,
-  AlertTriangle,
-  RefreshCw,
-  Plus,
-  Trash2,
-  Download,
-  MapPin,
-  Sparkles,
-  ChevronDown,
-  Bookmark,
-  TrendingUp,
-  Coins,
-  Heart,
-  Calendar,
-  Menu,
-  X,
-  Settings,
-  LogOut,
-  Palette
-} from "lucide-react";
-import AuthModal from "./components/AuthModal";
-import BranchMapContainer from "./components/BranchMapContainer";
-import { motion, AnimatePresence } from "motion/react";
+import React, { useState, useEffect } from 'react';
+import { ShoppingCart, ExternalLink, Zap, BarChart3, Clock, TrendingDown, LogIn, LogOut, Globe, User, X, Menu, Home, List, Users, Search, MapPin, Trash2, Plus, Navigation, ChevronDown, ShoppingBag, ChefHat, Store, Box } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { createClient } from '@supabase/supabase-js';
 
-interface GroceryItem {
-  productName: string;
-  productNameEn?: string;
-  quantity: string;
-  quantityEn?: string;
-  quantityValue: number;
-  shufersalPrice: number;
-  yohananofPrice: number;
-  victoryPrice: number;
-}
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
-const PRESETS = [
-  {
-    name: { he: "סל בסיסי לשבת", en: "Shabbat Basic Basket" },
-    list: {
-      he: "3 יחידות חלב תנובה 3% בקרטון 1 ליטר\n2 ק\"ג עגבניות טריות (בתפזורת)\n1 יחידה קפה נמס עלית (פחית 200 גרם)\n1 יחידה ביצים XL (מארז 12)\n1 יחידה לחם אחיד פרוס 750 גרם\n2 יחידות פסטה ברילה ספגטי",
-      en: "3 units Tnuva Milk 3% 1L\n2 kg Fresh Tomatoes (bulk)\n1 unit Elite Instant Coffee 200g\n1 unit Eggs XL (12-pack)\n1 unit Sliced Uniform Bread 750g\n2 units Barilla Spaghetti"
-    }
-  },
-  {
-    name: { he: "סל ירקות חקלאי", en: "Farm Fresh Vegetables" },
-    list: {
-      he: "3 ק\"ג עגבניות טריות\n2 ק\"ג מלפפון בלאדי\n1 ק\"ג בצל יבש באריזה\n2 ק\"ג תפוח אדמה אדום",
-      en: "3 kg Fresh Tomatoes\n2 kg Baladi Cucumbers\n1 kg Dry Onions pack\n2 kg Red Potatoes"
-    }
-  },
-  {
-    name: { he: "סל מוצרי חלב ומזווה", en: "Dairy & Pantry Basket" },
-    list: {
-      he: "2 יחידות גבינת קוטג׳ 5% תנובה\n3 יחידות חלב תנובה 3%\n1 יחידה שמן קנולה מזוכך 1 ליטר\n1 יחידה אורז בסמטי קלאסי 1 ק\"ג",
-      en: "2 units Cottage Cheese 5% Tnuva\n3 units Tnuva Milk 3%\n1 unit Canola Oil 1L\n1 unit Basmati Rice 1kg"
-    }
-  }
-];
+type Lang = 'he' | 'en';
+type AuthMode = 'NONE' | 'SIGN_IN' | 'SIGN_UP';
+type View = 'HOME' | 'PROFILE' | 'SAVED_LISTS' | 'PRICE_UPDATES' | 'COMMUNITY' | 'LOCATION';
+type Skin = 'warm-rose' | 'earth-slate' | 'neon-acid' | 'ocean-steel';
 
-const CITIES = [
-  { 
-    name: { he: "רחובות", en: "Rehovot" }, 
-    shufersalSuffix: { he: "קניון רחובות", en: "Rehovot Mall" }, 
-    yohananofSuffix: { he: "רחובות ספורטק", en: "Rehovot Sportek" }, 
-    victorySuffix: { he: "שערי רחובות", en: "Rehovot Gates" } 
-  },
-  { 
-    name: { he: "תל אביב", en: "Tel Aviv" }, 
-    shufersalSuffix: { he: "דיזנגוף סנטר", en: "Dizengoff Center" }, 
-    yohananofSuffix: { he: "התקווה", en: "Hatikva" }, 
-    victorySuffix: { he: "אבן גבירול" , en: "Ibn Gabirol" } 
-  },
-  { 
-    name: { he: "ירושלים", en: "Jerusalem" }, 
-    shufersalSuffix: { he: "תלפיות", en: "Talpiot" }, 
-    yohananofSuffix: { he: "גבעת שאול", en: "Givat Shaul" }, 
-    victorySuffix: { he: "שמאי", en: "Shamai" } 
-  },
-  { 
-    name: { he: "חיפה", en: "Haifa" }, 
-    shufersalSuffix: { he: "גרנד קניון", en: "Grand Canyon" }, 
-    yohananofSuffix: { he: "צ'ק פוסט", en: "Check Post" }, 
-    victorySuffix: { he: "מרכז חורב", en: "Horev Center" } 
-  },
-  { 
-    name: { he: "בילו / קרית עקרון", en: "Bilu / Kiryat Ekron" }, 
-    shufersalSuffix: { he: "עקרון צפון", en: "Ekron North" }, 
-    yohananofSuffix: { he: "צומת בילו", en: "Bilu Junction" }, 
-    victorySuffix: { he: "בילו סנטר", en: "Bilu Center" } 
-  }
-];
+const PALETTES = {
+  'warm-rose': { background: '#F7EFE0', panel: '#F7CAC9', primary: '#EDB490', textHighlight: '#391C10' },
+  'earth-slate': { background: '#ebebe5', panel: '#c9beb1', primary: '#b99a87', textHighlight: '#65463e' },
+  'neon-acid': { background: '#2F2408', panel: '#5C840B', primary: '#BEDF1D', textHighlight: '#EBF094' },
+  'ocean-steel': { background: '#323244', panel: '#91A1BA', primary: '#0D659D', textHighlight: '#CCDAEB' }
+};
 
 const DICTIONARY = {
   he: {
-    dir: "rtl" as const,
-    title: "Smart Grocery IL",
-    subtitle: "סל קניות אלגוריתמי מבוסס בינה מלאכותית",
-    searchPlaceholder: "חיפוש מהיר של מוצרים ומותגים בסל...",
-    areaComparison: "אזור השוואה:",
-    dashboardTitle: "לוח בקרה אלגוריתמי",
-    dashboardActive: "פעיל",
-    savedLists: "רשימות שמורות",
-    savedListsCount: "3 סלים",
-    householdProfile: "פרופיל משק בית",
-    historicalPriceAnalysis: "ניתוח מחירים היסטורי",
-    sampleLists: "רשימות קניות לדוגמה",
-    rawListTitle: "רשימת קניות גולמית",
-    rawListDesc: "הקלידו או הדביקו רשימה חופשית בעברית. אלגוריתם הניתוח יחלץ את המוצרים, יזהה כמויות ויערוך השוואת מחירים מיידית בין הרשתות.",
-    rawListPlaceholder: `הזינו רשימה כאן... לדוגמה:\n2 ק"ג עגבניות\nחלב 3% תנובה\nקפה נמס עלית\nביצים L`,
-    optimizeBtn: "בצע אופטימיזציה לסל",
-    optimizingText: "מנתח את הסל אלגוריתמית...",
-    cheapestBasket: "הסל הזול ביותר",
-    recommended: "מומלץ",
-    chainLabel: "רשת:",
-    averageBasket: "סל ממוצע ארצי/אזורי",
-    averageBasketDesc: "עלות רשת ממוצעת לסל זה",
-    potentialSavings: "חיסכון פוטנציאלי",
-    calculated: "מחושב",
-    savingsDesc: "חיסכון ריאלי ממעבר רשת",
-    matrixTitle: "מטריצת השוואת מחירים (אלגוריתמית)",
-    itemsCount: "פריטים זוהו",
-    manualAddBtn: "הוספת פריט ידנית",
-    exportBtn: "ייצוא סל",
-    exportingText: "דוח יוצא...",
-    addFormProductName: "שם מוצר חילופי",
-    addFormProductPlaceholder: "לדוגמא: לחם כוסמין",
-    addFormQtyText: "כמות (מלל)",
-    addFormQtyPlaceholder: "1 יחידה",
-    addFormMultiplier: "מכפיל",
-    addFormShufersalPrice: "מחיר שופרסל (₪)",
-    addFormYohananofPrice: "מחיר יוחננוף (₪)",
-    addFormVictoryPrice: "ויקטורי (₪)",
-    addBtn: "הוסף",
-    tableColProduct: "מוצר זוהה באלגוריתם",
-    tableColQty: "כמות",
-    tableColShufersal: "שופרסל",
-    tableColYohananof: "יוחננוף",
-    tableColVictory: "ויקטורי",
-    tableColDelete: "מחיקה",
-    cheapBadge: "זול",
-    totalCalculated: "סה״כ סל קניות מחושב",
-    milestone3: "Milestone 3: Branch Mapping Infrastructure",
-    branchMapActive: "מפת סניפים פתוחה (מבוסס מיקום תל אביב)",
-    requestingGeo: "מבקש הרשאת מיקום...",
-    lockedGeo: "Locked • לחץ כאן לאישור הרשאת מיקום (GPS)",
-    liveSync: "LIVE PRICE SYNC ACTIVE",
-    exportSuccess: "הדוח יוצא בהצלחה! קובץ CSV נוצר במערכת.",
-    noProductsFound: "לא נמצאו מוצרים התואמים את החיפוש",
-    tryEditing: "נסו לערוך את רשימת הקניות מצד ימין מחדש",
-    developmentVersion: "גרסת פיתוח פעילה",
-    developmentMilestone: "Milestone 1: UI/UX High-Fidelity",
-    frameworks: "React 19 + Next.js 15 App Router",
-    userDefaultName: "ישראל ישראלי",
-    userStatus: "Premium Member",
-    userInitials: "יי",
-    themeLabel: "ערכת נושא",
-    themeLight: "בהיר",
-    themeSlate: "אמרלד",
-    themeCyberpunk: "סייבר",
-    workspaceTitle: "לוח עבודה אישי",
-    workspaceSubtitle: "ניהול סלים שמורים ומדדי חיסכון",
+    appTitle: "Smart Grocery IL",
+    envLabel: "סביבה: ייצור-01",
+    apiActive: "חיבור API פעיל",
+    signIn: "התחברות",
+    signOut: "התנתק",
+    signUp: "הרשמה",
+    guest: "אורח",
+    roleGuest: "לא מחובר",
+    roleBuyer: "קניין ראשי",
+    realtimeCompare: "השוואת מחירים בזמן אמת",
+    marketTrends: "סיכום מגמות השוק לשבוע הנוכחי",
+    avgSavings: "15% חיסכון ממוצע",
+    activeChains: "רשתות פעילות",
+    trackedProducts: "מוצרים במעקב",
+    priceChanges: "שינויי מחיר היום",
+    bestBasket: "הסל המשתלם ביותר - אזור המרכז",
+    viewDetails: "צפה בפרטים",
+    ramiLevy: "רמי לוי - סניף רמת גן",
+    consumerCommunity: "קהילת צרכנים",
+    activeUsers: "124 פעילים כעת",
+    syncStatus: "סטטוס סנכרון רשתות",
+    apiResponseTime: "זמן תגובה API",
+    serverLoad: "עומס שרתים",
+    lastUpdate: "עדכון מחירים אחרון",
+    shufersalSync: "סנכרון רשת שופרסל",
+    minsAgo: "לפני 14 דקות",
+    recentDrops: "ירידות מחיר אחרונות",
+    drop1: "מטרנה אקסטרה קר חסכון הוזל ב-15% בוויקטורי",
+    drop2: "קוקה קולה שישייה - מחיר שפל ביוחננוף (24.90₪)",
+    drop3: "עוף שלם טרי - מבצע חדש ברמי לוי לחברי מועדון",
+    scanReceipt: "סרוק חשבונית",
+    autoCompare: "השוואה אוטומטית לסל שלך",
+    workspaceTitle: "סביבת העבודה שלי",
     savedBasketsTitle: "סלים שמורים",
-    lifetimeSavingsTitle: "חיסכון מצטבר לכל החיים",
-    saveCurrentBasket: "שמור סל נוכחי",
-    basketSavedSuccess: "הסל נשמר בהצלחה בלוח העבודה!",
-    noSavedBaskets: "אין עדיין סלים שמורים",
-    quickSaveToolTip: "שמירה מהירה של הסל האופטימלי",
-    savedAt: "נשמר ב-",
-    items: "מוצרים",
+    authModalTitleIn: "התחברות למערכת",
+    authModalTitleUp: "הרשמה למערכת",
+    usernameLabel: "שם משתמש",
+    passwordLabel: "סיסמה",
+    emailLabel: "אימייל",
+    nicknameLabel: "כינוי (Nickname)",
+    phoneLabel: "מספר טלפון",
+    phonePlaceholder: "05X-XXXXXXX",
+    submit: "אישור",
+    cancel: "ביטול",
+    switchToSignUp: "אין לך חשבון? הירשם",
+    switchToSignIn: "כבר יש לך חשבון? התחבר",
+    navHome: "ראשי",
+    navProfile: "הגדרות פרופיל",
+    navSavedLists: "רשימות שמורות",
+    navPriceUpdates: "עדכוני מחירים",
+    navCommunity: "קהילת צרכנים",
+    placeholderTitle: "תצוגה בבנייה",
+    placeholderDesc: "העמוד הזה נמצא כעת בפיתוח.",
+    backToHome: "חזרה לראשי",
+    themeSettings: "ערכת נושא לפרופיל",
+    skinWarmRose: "ורד חם (Warm Rose Light)",
+    skinEarthSlate: "אדמה (Earth Slate Light)",
+    skinNeonAcid: "חומצה ניאון (Neon Acid Dark)",
+    skinOceanSteel: "אוקיינוס פלדה (Ocean Steel Dark)",
+    devOptionsLocked: "בקרת מפתחים (Locked)",
+    searchPlaceholder: "חפש מוצר (לדוגמה: חלב)...",
+    currentGpsLocation: "מיקום נוכחי (GPS)",
+    telAviv: "תל אביב",
+    haifa: "חיפה",
+    jerusalem: "ירושלים",
+    branchSelector: "בחר סניף",
+    nearbySupermarkets: "סופרמרקטים בסביבה",
+    quickNavigate: "ניווט מהיר",
+    basePrice: "מחיר יחידה",
+    total: "סה״כ",
+    emptyList: "הרשימה ריקה. הוסף מוצרים כדי להתחיל.",
+    listTotal: "סה״כ סל:",
+    quantity: "כמות",
+    profileDataTitle: "פרטים אישיים",
+    avatarPickerTitle: "בחר דמות",
+    editCredentials: "ערוך פרטים",
+    saveAndVerify: "שמירה ואימות",
+    verificationSent: "קוד אימות נשלח",
+    location: "מיקום",
+    uploadPicture: "העלה תמונה",
   },
   en: {
-    dir: "ltr" as const,
-    title: "Smart Grocery IL",
-    subtitle: "AI-Powered Algorithmic Grocery Shopping Cart",
-    searchPlaceholder: "Quick search for products and brands...",
-    areaComparison: "Comparison Area:",
-    dashboardTitle: "Algorithmic Dashboard",
-    dashboardActive: "Active",
-    savedLists: "Saved Lists",
-    savedListsCount: "3 Baskets",
-    householdProfile: "Household Profile",
-    historicalPriceAnalysis: "Historical Prices",
-    sampleLists: "Sample Shopping Lists",
-    rawListTitle: "Raw Shopping List",
-    rawListDesc: "Type or paste any free-text shopping list in Hebrew or English. Our AI parsing model extracts products, quantities, and maps real store prices.",
-    rawListPlaceholder: `Enter shopping items... e.g.:\n2 kg tomatoes\n1 carton milk 3%\nElite instant coffee\n12 eggs XL`,
-    optimizeBtn: "Optimize Shopping Cart",
-    optimizingText: "Analyzing list...",
-    cheapestBasket: "Cheapest Basket",
-    recommended: "Recommended",
-    chainLabel: "Chain:",
-    averageBasket: "National/Regional Avg",
-    averageBasketDesc: "Average supermarket chain cost",
-    potentialSavings: "Potential Savings",
-    calculated: "Calculated",
-    savingsDesc: "Real savings by switching chains",
-    matrixTitle: "Price Comparison Matrix (Algorithmic)",
-    itemsCount: "items detected",
-    manualAddBtn: "Add Item Manually",
-    exportBtn: "Export Basket",
-    exportingText: "Exporting...",
-    addFormProductName: "Alternative Product",
-    addFormProductPlaceholder: "e.g., Spelt Bread",
-    addFormQtyText: "Quantity (text)",
-    addFormQtyPlaceholder: "1 unit",
-    addFormMultiplier: "Mult.",
-    addFormShufersalPrice: "Shufersal Price ($)",
-    addFormYohananofPrice: "Yohananof Price ($)",
-    addFormVictoryPrice: "Victory ($)",
-    addBtn: "Add",
-    tableColProduct: "Algorithm Identified Product",
-    tableColQty: "Qty",
-    tableColShufersal: "Shufersal",
-    tableColYohananof: "Yohananof",
-    tableColVictory: "Victory",
-    tableColDelete: "Delete",
-    cheapBadge: "Cheap",
-    totalCalculated: "Total Calculated Basket",
-    milestone3: "Milestone 3: Branch Mapping Infrastructure",
-    branchMapActive: "Branch map active (Based on Tel Aviv location)",
-    requestingGeo: "Requesting GPS permissions...",
-    lockedGeo: "Locked • Click to authorize location (GPS)",
-    liveSync: "LIVE PRICE SYNC ACTIVE",
-    exportSuccess: "Report exported successfully! CSV downloaded.",
-    noProductsFound: "No products found matching your search",
-    tryEditing: "Try editing the shopping list text on the side",
-    developmentVersion: "Dev Environment Active",
-    developmentMilestone: "Milestone 1: UI/UX High-Fidelity",
-    frameworks: "React 19 + Next.js 15 App Router",
-    userDefaultName: "Yisrael Yisraeli",
-    userStatus: "Premium Member",
-    userInitials: "YY",
-    themeLabel: "Theme",
-    themeLight: "Light",
-    themeSlate: "Emerald",
-    themeCyberpunk: "Cyberpunk",
-    workspaceTitle: "User Workspace",
-    workspaceSubtitle: "Manage saved baskets & savings metrics",
+    appTitle: "Smart Grocery IL",
+    envLabel: "Environment: Prod-01",
+    apiActive: "API Connection Active",
+    signIn: "Sign In",
+    signOut: "Sign Out",
+    signUp: "Sign Up",
+    guest: "Guest",
+    roleGuest: "Not Logged In",
+    roleBuyer: "Lead Buyer",
+    realtimeCompare: "Real-Time Price Comparison",
+    marketTrends: "Market trends summary for the current week",
+    avgSavings: "15% Avg. Savings",
+    activeChains: "Active Chains",
+    trackedProducts: "Tracked Products",
+    priceChanges: "Price Changes Today",
+    bestBasket: "Best Value Basket - Central Region",
+    viewDetails: "View Details",
+    ramiLevy: "Rami Levy - Ramat Gan Branch",
+    consumerCommunity: "Consumer Community",
+    activeUsers: "124 active now",
+    syncStatus: "Chain Sync Status",
+    apiResponseTime: "API Latency",
+    serverLoad: "Server Load",
+    lastUpdate: "Last Price Update",
+    shufersalSync: "Shufersal Chain Sync",
+    minsAgo: "14 mins ago",
+    recentDrops: "Recent Price Drops",
+    drop1: "Materna Extra Care Saver reduced by 15% at Victory",
+    drop2: "Coca Cola 6-pack - record low at Yochananof (24.90₪)",
+    drop3: "Fresh Whole Chicken - new club member deal at Rami Levy",
+    scanReceipt: "Scan Receipt",
+    autoCompare: "Automatic comparison to your basket",
+    workspaceTitle: "My Workspace",
     savedBasketsTitle: "Saved Baskets",
-    lifetimeSavingsTitle: "Lifetime Savings",
-    saveCurrentBasket: "Save Current Basket",
-    basketSavedSuccess: "Basket saved successfully to your workspace!",
-    noSavedBaskets: "No saved baskets yet",
-    quickSaveToolTip: "Quick save the optimized basket",
-    savedAt: "Saved on",
-    items: "items",
+    authModalTitleIn: "Sign In to System",
+    authModalTitleUp: "Sign Up for System",
+    usernameLabel: "Username",
+    passwordLabel: "Password",
+    emailLabel: "Email",
+    nicknameLabel: "Nickname",
+    phoneLabel: "Phone Number",
+    phonePlaceholder: "05X-XXXXXXX",
+    submit: "Submit",
+    cancel: "Cancel",
+    switchToSignUp: "Don't have an account? Sign Up",
+    switchToSignIn: "Already have an account? Sign In",
+    navHome: "Home",
+    navProfile: "Profile Settings",
+    navSavedLists: "Saved Lists",
+    navPriceUpdates: "Price Updates",
+    navCommunity: "Consumer Community",
+    placeholderTitle: "View Under Construction",
+    placeholderDesc: "This page is currently in development.",
+    backToHome: "Back to Home",
+    themeSettings: "Profile Skin",
+    skinWarmRose: "Warm Rose Light",
+    skinEarthSlate: "Earth Slate Light",
+    skinNeonAcid: "Neon Acid Dark",
+    skinOceanSteel: "Ocean Steel Dark",
+    devOptionsLocked: "Developer Options (Locked)",
+    searchPlaceholder: "Search product (e.g. Milk)...",
+    currentGpsLocation: "Current GPS Location",
+    telAviv: "Tel Aviv",
+    haifa: "Haifa",
+    jerusalem: "Jerusalem",
+    branchSelector: "Select Branch",
+    nearbySupermarkets: "Nearby Supermarkets",
+    quickNavigate: "Quick Navigate",
+    basePrice: "Base Price",
+    total: "Total",
+    emptyList: "List is empty. Add products to start.",
+    listTotal: "Basket Total:",
+    quantity: "Qty",
+    profileDataTitle: "Personal Information",
+    avatarPickerTitle: "Choose Avatar",
+    editCredentials: "Edit Credentials",
+    saveAndVerify: "Save and Verify",
+    verificationSent: "Verification code sent",
+    location: "Location",
+    uploadPicture: "Upload Picture",
   }
 };
 
-export default function Dashboard() {
-  const [lang, setLang] = useState<"he" | "en">("he");
-  const [skin, setSkin] = useState<"light" | "slate" | "cyberpunk">("slate");
-  const { data: session, status } = useSession();
-  const isLoggedIn = status === "authenticated";
-  const currentUser = session?.user?.name || null;
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const t = DICTIONARY[lang];
+interface DrawerItemProps {
+  view: View;
+  currentView: View;
+  setCurrentView: (v: View) => void;
+  icon: any;
+  label: string;
+  close: () => void;
+}
 
-  const [rawList, setRawList] = useState<string>(PRESETS[0].list.he);
+function DrawerItem({ view, currentView, setCurrentView, icon: Icon, label, close }: DrawerItemProps) {
+  const isActive = currentView === view;
+  return (
+    <button
+      onClick={() => { setCurrentView(view); close(); }}
+      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors text-sm font-medium ${
+        isActive 
+          ? 'bg-indigo-500/10 text-indigo-400' 
+          : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100'
+      }`}
+    >
+      <Icon className="w-5 h-5" />
+      {label}
+    </button>
+  );
+}
 
-  const [items, setItems] = useState<GroceryItem[]>([
-    {
-      productName: "חלב תנובה 3% בקרטון 1 ליטר",
-      productNameEn: "Tnuva Milk 3% 1L carton",
-      quantity: "3 יחידות",
-      quantityEn: "3 units",
-      quantityValue: 3,
-      shufersalPrice: 6.20,
-      yohananofPrice: 5.90,
-      victoryPrice: 6.20
-    },
-    {
-      productName: "עגבניות טריות (בתפזורת)",
-      productNameEn: "Fresh Tomatoes (Bulk)",
-      quantity: "2 ק\"ג",
-      quantityEn: "2 kg",
-      quantityValue: 2,
-      shufersalPrice: 4.90,
-      yohananofPrice: 5.50,
-      victoryPrice: 5.20
-    },
-    {
-      productName: "קפה נמס עלית (פחית 200 גרם)",
-      productNameEn: "Elite Instant Coffee (200g can)",
-      quantity: "1 יחידה",
-      quantityEn: "1 unit",
-      quantityValue: 1,
-      shufersalPrice: 16.90,
-      yohananofPrice: 14.90,
-      victoryPrice: 15.50
-    },
-    {
-      productName: "ביצים XL (מארז 12)",
-      productNameEn: "Eggs XL (12-pack)",
-      quantity: "1 יחידה",
-      quantityEn: "1 unit",
-      quantityValue: 1,
-      shufersalPrice: 13.40,
-      yohananofPrice: 12.90,
-      victoryPrice: 13.20
-    }
-  ]);
+interface BasketItem {
+  id: string;
+  dbId?: string;
+  name: string;
+  basePrice: number;
+  quantity: number;
+}
 
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [selectedCity, setSelectedCity] = useState(CITIES[0]);
-  const [showMapDrawer, setShowMapDrawer] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [geoAuthStatus, setGeoAuthStatus] = useState<"locked" | "requesting" | "granted">("locked");
-  const [isAiPowered, setIsAiPowered] = useState<boolean | null>(null);
-  const [isDownloaded, setIsDownloaded] = useState(false);
+interface UserProfile {
+  id?: string;
+  nickname: string;
+  email: string;
+  phone: string;
+  avatar: string;
+}
 
-  // User Workspace States
-  const [savedBaskets, setSavedBaskets] = useState([
-    {
-      id: "basket-1",
-      nameHe: "סל קניות שבועי יסודי",
-      nameEn: "Weekly Essentials Basket",
-      date: "24/06/2026",
-      itemCount: 6,
-      totalPrice: 84.50,
-      chainNameHe: "יוחננוף",
-      chainNameEn: "Yohananof",
-      listTextHe: "3 יחידות חלב תנובה 3% בקרטון 1 ליטר\n2 ק\"ג עגבניות טריות (בתפזורת)\n1 יחידה קפה נמס עלית (פחית 200 גרם)",
-      listTextEn: "3 units Tnuva Milk 3% 1L\n2 kg Fresh Tomatoes (bulk)\n1 unit Elite Instant Coffee 200g"
-    },
-    {
-      id: "basket-2",
-      nameHe: "ירקות ופירות טריים שוק",
-      nameEn: "Fresh Produce Basket",
-      date: "19/06/2026",
-      itemCount: 4,
-      totalPrice: 52.80,
-      chainNameHe: "ויקטורי",
-      chainNameEn: "Victory",
-      listTextHe: "3 ק\"ג עגבניות טריות\n2 ק\"ג מלפפון בלאדי\n1 ק\"ג בצל יבש באריזה",
-      listTextEn: "3 kg Fresh Tomatoes\n2 kg Baladi Cucumbers\n1 kg Dry Onions pack"
-    }
-  ]);
-  const [lifetimeSavings, setLifetimeSavings] = useState(420);
-  const [showSaveToast, setShowSaveToast] = useState(false);
-  const [basketCounter, setBasketCounter] = useState(3);
+export default function SmartGroceryDashboard() {
+  const [lang, setLang] = useState<Lang>('he');
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [authMode, setAuthMode] = useState<AuthMode>('NONE');
+  
+  // Auth Form State
+  const [usernameInput, setUsernameInput] = useState('');
+  const [emailInput, setEmailInput] = useState('');
+  const [phoneInput, setPhoneInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
 
-  const handleSaveCurrentBasket = () => {
-    const formattedDate = "24/06/2026";
-    const newId = `basket-${basketCounter}`;
-    setBasketCounter(prev => prev + 1);
+  const [currentView, setCurrentView] = useState<View>('HOME');
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [skin, setSkin] = useState<Skin>('warm-rose');
 
-    const newBasket = {
-      id: newId,
-      nameHe: lang === "he" ? `סל אופטימלי - ${formattedDate}` : `Optimized Basket - ${formattedDate}`,
-      nameEn: lang === "en" ? `Optimized Basket - ${formattedDate}` : `סל אופטימלי - ${formattedDate}`,
-      date: formattedDate,
-      itemCount: items.length,
-      totalPrice: cheapest.total,
-      chainNameHe: cheapest.name,
-      chainNameEn: cheapest.id === "shufersal" ? "Shufersal" : cheapest.id === "yohananof" ? "Yohananof" : "Victory",
-      listTextHe: rawList,
-      listTextEn: rawList,
-    };
+  const [isEditingCredentials, setIsEditingCredentials] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationFlash, setVerificationFlash] = useState(false);
 
-    setSavedBaskets([newBasket, ...savedBaskets]);
-    
-    const calculatedSaved = Math.max(15, Math.round(averageTotal - cheapest.total));
-    setLifetimeSavings(prev => prev + (isNaN(calculatedSaved) ? 25 : calculatedSaved));
+  // List Creator State
+  const [basket, setBasket] = useState<BasketItem[]>([]);
+  const [activeBasketId, setActiveBasketId] = useState<string | null>(null);
+  const [isBasketLoaded, setIsBasketLoaded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [location, setLocation] = useState('GPS');
+  const [showPredictions, setShowPredictions] = useState(false);
 
-    setShowSaveToast(true);
-    setTimeout(() => {
-      setShowSaveToast(false);
-    }, 3000);
-  };
-
-  const handleDeleteSavedBasket = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setSavedBaskets(savedBaskets.filter(b => b.id !== id));
-  };
-
-  // New item inline form states
-  const [newProductName, setNewProductName] = useState("");
-  const [newQuantity, setNewQuantity] = useState("1 יחידה");
-  const [newQuantityValue, setNewQuantityValue] = useState(1);
-  const [newShufersalPrice, setNewShufersalPrice] = useState(10);
-  const [newYohananofPrice, setNewYohananofPrice] = useState(9.5);
-  const [newVictoryPrice, setNewVictoryPrice] = useState(9.8);
-  const [showAddForm, setShowAddForm] = useState(false);
-
-  // Dynamic calculations based on state items
-  const shufersalTotal = items.reduce((sum, item) => sum + item.shufersalPrice * item.quantityValue, 0);
-  const yohananofTotal = items.reduce((sum, item) => sum + item.yohananofPrice * item.quantityValue, 0);
-  const victoryTotal = items.reduce((sum, item) => sum + item.victoryPrice * item.quantityValue, 0);
-
-  const totals = [
-    { name: "שופרסל", id: "shufersal", total: shufersalTotal, branch: selectedCity.shufersalSuffix[lang], color: "bg-blue-500" },
-    { name: "יוחננוף", id: "yohananof", total: yohananofTotal, branch: selectedCity.yohananofSuffix[lang], color: "bg-emerald-500" },
-    { name: "ויקטורי", id: "victory", total: victoryTotal, branch: selectedCity.victorySuffix[lang], color: "bg-amber-500" }
+  const MOCK_PRODUCTS = [
+    { id: 'p1', name: lang === 'he' ? 'חלב תנובה 3%' : 'Tnuva Milk 3%', basePrice: 6.20 },
+    { id: 'p2', name: lang === 'he' ? 'לחם אחיד פרוס' : 'Sliced Standard Bread', basePrice: 7.90 },
+    { id: 'p3', name: lang === 'he' ? 'קוטג׳ 5%' : 'Cottage Cheese 5%', basePrice: 5.90 },
+    { id: 'p4', name: lang === 'he' ? 'עגבניות 1 ק״ג' : 'Tomatoes 1 kg', basePrice: 4.50 },
+    { id: 'p5', name: lang === 'he' ? 'ביצים L תריסר' : 'Eggs L dozen', basePrice: 12.50 },
   ];
 
-  // Sort by total price ascending to find the cheapest, average, etc.
-  const sortedTotals = [...totals].sort((a, b) => a.total - b.total);
-  const cheapest = sortedTotals[0];
-  const averageTotal = (shufersalTotal + yohananofTotal + victoryTotal) / 3;
-  const savingsPercent = averageTotal > 0 ? ((averageTotal - cheapest.total) / averageTotal) * 100 : 0;
+  useEffect(() => {
+    if (!currentUser || !currentUser.id || currentUser.id === '00000000-0000-0000-0000-000000000000') {
+       // eslint-disable-next-line react-hooks/set-state-in-effect
+       setIsBasketLoaded(true);
+       return;
+    }
+    
+    if (supabase) {
+       const loadBasket = async () => {
+         try {
+           const { data: bData } = await supabase.from('baskets')
+              .select('*')
+              .eq('user_id', currentUser.id)
+              .eq('is_archived', false)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single();
+           
+           if (bData) {
+             setActiveBasketId(bData.id);
+             const { data: items } = await supabase.from('basket_items').select('*').eq('basket_id', bData.id);
+             if (items) {
+                const loaded = items.map((i: any) => {
+                   const matched = MOCK_PRODUCTS.find(p => p.name === i.product_name || p.name === i.product_name);
+                   return {
+                      id: matched ? matched.id : i.id,
+                      dbId: i.id,
+                      name: i.product_name,
+                      basePrice: matched ? matched.basePrice : 0,
+                      quantity: Number(i.quantity_value || 1)
+                   };
+                });
+                setBasket(loaded);
+             }
+           } else {
+             const { data: newB } = await supabase.from('baskets').insert({
+               user_id: currentUser.id,
+               name: 'My Grocery List'
+             }).select().single();
+             if (newB) {
+               setActiveBasketId(newB.id);
+             }
+           }
+         } catch (e) {
+            console.error('Failed to load basket', e);
+         } finally {
+            setIsBasketLoaded(true);
+         }
+       };
+       loadBasket();
+    } else {
+       setIsBasketLoaded(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
 
-  // Handle live optimization trigger
-  const handleOptimize = async (customListText?: string) => {
-    const textToParse = customListText !== undefined ? customListText : rawList;
-    if (!textToParse.trim()) return;
+  useEffect(() => {
+     const syncBasket = async () => {
+        if (!isBasketLoaded || !supabase || !currentUser?.id || currentUser.id === '00000000-0000-0000-0000-000000000000' || !activeBasketId) return;
+        
+        try {
+           const itemsPayload = basket.map(item => ({
+              id: item.dbId || undefined,
+              product_name: item.name,
+              quantity_value: item.quantity
+           }));
+           
+           await fetch('/api/baskets/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                 action: 'SYNC_ITEMS',
+                 userId: currentUser.id,
+                 payload: {
+                    basket_id: activeBasketId,
+                    items: itemsPayload
+                 }
+              })
+           });
+        } catch (e) {
+           console.error('Failed to sync basket', e);
+        }
+     };
+     
+     const timeoutId = setTimeout(syncBasket, 1000);
+     return () => clearTimeout(timeoutId);
+  }, [basket, isBasketLoaded, currentUser, activeBasketId]);
 
-    setIsLoading(true);
-    try {
-      const response = await fetch("/api/optimize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rawList: textToParse }),
-      });
+  const filteredProducts = MOCK_PRODUCTS.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-      if (!response.ok) {
-        throw new Error("רשת המזון או שירותי הניתוח אינם זמינים כעת");
+  const handleAddProduct = (product: { id: string, name: string, basePrice: number }) => {
+    setBasket(prev => {
+      const existing = prev.find(item => item.id === product.id);
+      if (existing) {
+        return prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
       }
+      return [...prev, { ...product, quantity: 1 }];
+    });
+    setSearchQuery('');
+    setShowPredictions(false);
+  };
 
-      const data = await response.json();
-      if (data.items) {
-        setItems(data.items);
-        setIsAiPowered(!data.isFallback);
+  const updateQuantity = (id: string, delta: number) => {
+    setBasket(prev => prev.map(item => {
+      if (item.id === id) {
+        const newQ = Math.max(1, item.quantity + delta);
+        return { ...item, quantity: newQ };
       }
-    } catch (err) {
-      console.error("Error optimizing list:", err);
-    } finally {
-      setIsLoading(false);
+      return item;
+    }));
+  };
+
+  const removeProduct = (id: string) => {
+    setBasket(prev => prev.filter(item => item.id !== id));
+  };
+
+  const basketTotal = basket.reduce((acc, item) => acc + (item.basePrice * item.quantity), 0);
+
+  const t = DICTIONARY[lang];
+
+  const MOCK_BRANCHES = [
+    { id: 'gps', name: t.currentGpsLocation, desc: t.nearbySupermarkets, dist: '0.0 km', mapsLink: 'https://waze.com/ul' },
+    { id: 'tlv', name: t.telAviv, desc: lang === 'he' ? 'רמי לוי - סניף החשמונאים' : 'Rami Levy - Hahashmonaim', dist: '1.2 km', mapsLink: 'https://waze.com/ul?q=Rami+Levy+Tel+Aviv' },
+    { id: 'haifa', name: t.haifa, desc: lang === 'he' ? 'שופרסל דיל - נשר' : 'Shufersal Deal - Nesher', dist: '4.5 km', mapsLink: 'https://waze.com/ul?q=Shufersal+Nesher' },
+    { id: 'jerusalem', name: t.jerusalem, desc: lang === 'he' ? 'יוחננוף - תלפיות' : 'Yochananof - Talpiot', dist: '3.1 km', mapsLink: 'https://waze.com/ul?q=Yochananof+Jerusalem' },
+  ];
+  const selectedBranch = MOCK_BRANCHES.find(b => b.id === location) || MOCK_BRANCHES[0];
+
+  const [liveBranches, setLiveBranches] = useState(MOCK_BRANCHES.slice(1));
+  const [activeMapPin, setActiveMapPin] = useState('gps');
+
+  useEffect(() => {
+    if (currentView === 'LOCATION' && supabase) {
+      const loadLiveMapData = async () => {
+         try {
+           const { data: prices } = await supabase.from('price_snapshots').select('*').order('snapshot_date', { ascending: false }).limit(10);
+           if (prices && prices.length > 0) {
+             setLiveBranches(prev => prev.map(b => ({
+               ...b,
+               dist: (parseFloat(b.dist) + (Math.random() * 0.2 - 0.1)).toFixed(1) + ' km'
+             })));
+           }
+         } catch(e) {
+           console.log(e);
+         }
+      };
+      loadLiveMapData();
+    } else {
+       // eslint-disable-next-line react-hooks/set-state-in-effect
+       setLiveBranches(MOCK_BRANCHES.slice(1));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentView]);
+
+  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (currentUser && reader.result) {
+          setCurrentUser({ ...currentUser, avatar: reader.result as string });
+        }
+      };
+      reader.readAsDataURL(file);
     }
   };
 
-  // Load preset shopping list
-  const loadPreset = (presetListObj: { he: string; en: string }) => {
-    const text = presetListObj[lang];
-    setRawList(text);
-    handleOptimize(text);
-  };
+  const handleSaveCredentials = async () => {
+    setIsVerifying(true);
+    
+    if (supabase && currentUser && currentUser.id !== '00000000-0000-0000-0000-000000000000') {
+      try {
+        await supabase.from('profiles').upsert({
+           id: currentUser.id,
+           nickname: currentUser.nickname,
+           phone_number: currentUser.phone,
+           avatar_url: currentUser.avatar,
+           selected_skin: skin
+        });
+      } catch(e) {
+        console.error(e);
+      }
+    }
 
-  // Inline delete item
-  const handleDeleteItem = (index: number) => {
-    setItems(items.filter((_, idx) => idx !== index));
-  };
-
-  // Inline add item
-  const handleAddItemSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newProductName.trim()) return;
-
-    const newItem: GroceryItem = {
-      productName: newProductName.trim(),
-      quantity: newQuantity,
-      quantityValue: Number(newQuantityValue) || 1,
-      shufersalPrice: Number(newShufersalPrice) || 0,
-      yohananofPrice: Number(newYohananofPrice) || 0,
-      victoryPrice: Number(newVictoryPrice) || 0
-    };
-
-    setItems([...items, newItem]);
-    // Reset fields
-    setNewProductName("");
-    setNewQuantity("1 יחידה");
-    setNewQuantityValue(1);
-    setNewShufersalPrice(10);
-    setNewYohananofPrice(9.5);
-    setNewVictoryPrice(9.8);
-    setShowAddForm(false);
-  };
-
-  // Geolocation trigger simulation
-  const requestGeolocation = () => {
-    setGeoAuthStatus("requesting");
     setTimeout(() => {
-      // Simulate access granted
-      setGeoAuthStatus("granted");
-      // Find closest branch based on "location" -> set to a closer city
-      setSelectedCity(CITIES[1]); // Tel Aviv
-    }, 1500);
+      setVerificationFlash(true);
+      setTimeout(() => {
+        setVerificationFlash(false);
+        setIsVerifying(false);
+        setIsEditingCredentials(false);
+      }, 1500);
+    }, 500);
   };
 
-  // CSV/Report download simulation
-  const triggerDownload = () => {
-    setIsDownloaded(true);
-    setTimeout(() => setIsDownloaded(false), 3000);
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    let userProfile: UserProfile | null = null;
+    const mockId = '00000000-0000-0000-0000-000000000000';
+    
+    if (authMode === 'SIGN_UP' && usernameInput.trim() && emailInput.trim()) {
+      userProfile = {
+        nickname: usernameInput.trim(),
+        email: emailInput.trim(),
+        phone: phoneInput.trim(),
+        avatar: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_01_u3edkv.png',
+        id: mockId
+      };
+    } else if (authMode === 'SIGN_IN' && usernameInput.trim()) {
+      userProfile = {
+        nickname: usernameInput.trim(),
+        email: 'user@example.com',
+        phone: '050-0000000',
+        avatar: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_01_u3edkv.png',
+        id: mockId
+      };
+    }
+
+    if (userProfile) {
+      if (supabase) {
+        try {
+          let sessionUserId = userProfile.id;
+          if (authMode === 'SIGN_UP') {
+             const { data: authData, error: authError } = await supabase.auth.signUp({
+                email: emailInput.trim() || 'mock@example.com',
+                password: passwordInput.trim() || 'password1234'
+             });
+             if (!authError && authData.user) {
+                sessionUserId = authData.user.id;
+             }
+          } else {
+             const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+                email: emailInput.trim() || 'user@example.com',
+                password: passwordInput.trim() || 'password1234'
+             });
+             if (!authError && authData.user) {
+                sessionUserId = authData.user.id;
+                const { data: profile } = await supabase.from('profiles').select('*').eq('id', sessionUserId).single();
+                if (profile) {
+                   userProfile = {
+                      ...userProfile,
+                      nickname: profile.nickname || userProfile.nickname,
+                      phone: profile.phone_number || userProfile.phone,
+                      avatar: profile.avatar_url || userProfile.avatar,
+                   };
+                   if (profile.selected_skin) setSkin(profile.selected_skin as Skin);
+                }
+             } else {
+                console.log(authError);
+             }
+          }
+          
+          userProfile.id = sessionUserId;
+          if (sessionUserId !== mockId) {
+              await supabase.from('profiles').upsert({
+                 id: sessionUserId,
+                 nickname: userProfile.nickname,
+                 phone_number: userProfile.phone,
+                 avatar_url: userProfile.avatar,
+                 selected_skin: skin
+              });
+          }
+        } catch (e) {
+           console.error("Supabase auth/profile error:", e);
+        }
+      }
+      
+      setCurrentUser(userProfile);
+      setAuthMode('NONE');
+      setUsernameInput('');
+      setEmailInput('');
+      setPhoneInput('');
+      setPasswordInput('');
+    }
   };
 
-  // Filter items matching the search query if any
-  const filteredItems = items.filter(item => {
-    const query = searchQuery.toLowerCase();
-    const matchHe = item.productName.toLowerCase().includes(query) || item.quantity.toLowerCase().includes(query);
-    const matchEn = item.productNameEn?.toLowerCase().includes(query) || item.quantityEn?.toLowerCase().includes(query);
-    return matchHe || matchEn;
-  });
+  const toggleLanguage = () => {
+    setLang(prev => prev === 'he' ? 'en' : 'he');
+  };
+  
+  const currentPalette = PALETTES[skin];
 
   return (
     <div 
-      id="app-root-container" 
-      data-skin={skin} 
-      className="flex h-screen w-full bg-[var(--background)] text-[var(--text)] font-sans overflow-hidden transition-all duration-300" 
-      dir={t.dir}
+      className="w-full min-h-screen flex flex-col font-sans p-4 md:p-6 lg:p-8 overflow-x-hidden relative transition-colors duration-500 bg-[var(--background)] text-[var(--text-highlight)]"
+      dir={lang === 'he' ? 'rtl' : 'ltr'}
+      style={{
+        '--background': currentPalette.background,
+        '--panel': currentPalette.panel,
+        '--primary': currentPalette.primary,
+        '--text-highlight': currentPalette.textHighlight,
+      } as React.CSSProperties}
     >
-      {/* Dynamic Background Blur Effects */}
-      <div className="absolute top-[-10%] right-[-10%] w-[500px] h-[500px] bg-[var(--accent)]/10 rounded-full blur-[140px] pointer-events-none z-0 transition-colors duration-300"></div>
-      <div className="absolute bottom-[-10%] left-[-5%] w-[400px] h-[400px] bg-[var(--primary)]/5 rounded-full blur-[110px] pointer-events-none z-0 transition-colors duration-300"></div>
+      {/* Top Navigation Bar */}
+      <header className="flex flex-col md:flex-row items-start md:items-center justify-between mb-6 gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-indigo-500/20 shrink-0">
+            <ShoppingCart className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold text-slate-100">{t.appTitle}</h1>
+            <p className="text-xs text-slate-400 font-medium">{t.envLabel}</p>
+          </div>
+        </div>
+        
+        <div className="flex flex-wrap items-center gap-4">
+          {/* Language Switcher */}
+          <button 
+            onClick={toggleLanguage}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 transition-colors px-3 py-1.5 rounded-full border border-slate-700 text-xs font-semibold"
+          >
+            <Globe className="w-4 h-4 text-indigo-400" />
+            {lang === 'he' ? 'EN' : 'עברית'}
+          </button>
 
-      {/* Mobile Sidebar Overlay Backdrop */}
-      <AnimatePresence>
-        {isSidebarOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 z-35 lg:hidden backdrop-blur-xs"
-            onClick={() => setIsSidebarOpen(false)}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Sidebar Section */}
-      <aside 
-        id="sidebar-panel" 
-        className={`fixed lg:static inset-y-0 start-0 border-e z-40 w-72 bg-[var(--panel)] border-[var(--panel-border)] flex flex-col shrink-0 transition-transform duration-300 lg:translate-x-0 ${
-          isSidebarOpen 
-            ? "translate-x-0" 
-            : lang === "he" 
-              ? "translate-x-full" 
-              : "-translate-x-full"
-        }`}
-      >
-        <div className="p-6 border-b border-[var(--panel-border)] transition-colors duration-300 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-[var(--primary)] rounded-lg flex items-center justify-center font-black text-[var(--text-highlight)] text-lg shadow-[0_0_15px_var(--primary-glow)] transition-all duration-300">
-              S
+          <div className="flex items-center gap-3 border-s border-slate-800 ps-4">
+            <div className="text-left rtl:text-right hidden sm:block">
+              <p className="text-sm font-bold text-slate-100">{currentUser ? currentUser.nickname : t.guest}</p>
+              <p className="text-[10px] text-slate-400 uppercase tracking-wider">{currentUser ? t.roleBuyer : t.roleGuest}</p>
             </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-[var(--text-highlight)] flex items-center gap-1.5 transition-colors duration-300">
-                {t.title}
-              </h1>
-              <p className="text-[10px] text-[var(--text-muted)] mt-0.5 transition-colors duration-300">{t.subtitle}</p>
+            <div className="w-10 h-10 rounded-full bg-slate-800 border-2 border-slate-700 shadow-sm overflow-hidden relative flex items-center justify-center">
+              {currentUser ? (
+                currentUser.avatar.startsWith('/') || currentUser.avatar.startsWith('http') || currentUser.avatar.startsWith('data:') ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={currentUser.avatar} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <User className="w-5 h-5 text-indigo-400" />
+                )
+              ) : (
+                <User className="w-5 h-5 text-slate-400" />
+              )}
             </div>
           </div>
-          {/* Close button for mobile sidebar */}
+          
           <button
-            onClick={() => setIsSidebarOpen(false)}
-            className="p-1.5 rounded-lg hover:bg-[var(--background)] border border-[var(--panel-border)] text-[var(--text)] lg:hidden cursor-pointer"
-            title="Close Menu"
+            onClick={() => setIsDrawerOpen(true)}
+            className="w-10 h-10 bg-indigo-600 hover:bg-indigo-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 shrink-0 transition-colors md:ms-2"
           >
-            <X className="w-4 h-4" />
+            <Menu className="w-5 h-5" />
           </button>
         </div>
+      </header>
 
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          <div className="px-3 py-2.5 bg-blue-500/10 text-blue-400 rounded-xl flex items-center justify-between border border-blue-500/20">
-            <div className="flex items-center gap-3">
-              <div className="w-5 h-5 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
-              </div>
-              <span className="font-semibold text-sm">{t.dashboardTitle}</span>
-            </div>
-            <span className="text-[10px] bg-blue-500/20 text-blue-300 px-2 py-0.5 rounded-md border border-blue-500/30">{t.dashboardActive}</span>
-          </div>
-
-          <div className="px-3 py-2.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded-xl flex items-center justify-between transition-all cursor-pointer">
-            <div className="flex items-center gap-3">
-              <List className="w-4 h-4 text-slate-500" />
-              <span className="text-sm">{t.savedLists}</span>
-            </div>
-            <span className="text-xs text-slate-600 font-mono">{t.savedListsCount}</span>
-          </div>
-
-          <div className="px-3 py-2.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded-xl flex items-center gap-3 transition-all cursor-pointer">
-            <User className="w-4 h-4 text-slate-500" />
-            <span className="text-sm">{t.householdProfile}</span>
-          </div>
-
-          <div className="px-3 py-2.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 rounded-xl flex items-center gap-3 transition-all cursor-pointer">
-            <TrendingDown className="w-4 h-4 text-slate-500" />
-            <span className="text-sm">{t.historicalPriceAnalysis}</span>
-          </div>
-
-          {/* Visual Divider */}
-          <div className="border-t border-[var(--panel-border)] my-4"></div>
-
-          {/* Customization / התאמה אישית Section */}
-          <div className="space-y-3 px-1">
-            <div className="flex items-center gap-1.5 text-[var(--text-highlight)] px-2">
-              <Palette className="w-3.5 h-3.5 text-[var(--primary)]" />
-              <span className="text-xs font-bold uppercase tracking-wider">
-                {lang === "he" ? "התאמה אישית" : "Customization / התאמה אישית"}
-              </span>
-            </div>
-
-            {/* Bilingual Language toggles */}
-            <div className="grid grid-cols-2 gap-1 bg-[var(--background)] p-1 rounded-lg border border-[var(--panel-border)]">
-              <button
-                onClick={() => setLang("he")}
-                className={`py-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                  lang === "he"
-                    ? "bg-[var(--primary)] text-[var(--text-highlight)] shadow-sm"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
-                }`}
-              >
-                עברית
-              </button>
-              <button
-                onClick={() => setLang("en")}
-                className={`py-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                  lang === "en"
-                    ? "bg-[var(--primary)] text-[var(--text-highlight)] shadow-sm"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
-                }`}
-              >
-                EN
-              </button>
-            </div>
-
-            {/* 3-Skin theme palette swapper buttons */}
-            <div className="grid grid-cols-3 gap-1 bg-[var(--background)] p-1 rounded-lg border border-[var(--panel-border)]">
-              <button
-                onClick={() => setSkin("light")}
-                className={`py-1 rounded text-[9px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
-                  skin === "light"
-                    ? "bg-[var(--primary)] text-[var(--text-highlight)]"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
-                }`}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-100 border border-slate-300"></span>
-                <span>{lang === "he" ? "בהיר" : "Light"}</span>
-              </button>
-              <button
-                onClick={() => setSkin("slate")}
-                className={`py-1 rounded text-[9px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
-                  skin === "slate"
-                    ? "bg-[var(--primary)] text-[var(--text-highlight)]"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
-                }`}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                <span>{lang === "he" ? "אמרלד" : "Emerald"}</span>
-              </button>
-              <button
-                onClick={() => setSkin("cyberpunk")}
-                className={`py-1 rounded text-[9px] font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
-                  skin === "cyberpunk"
-                    ? "bg-[var(--primary)] text-[var(--text-highlight)]"
-                    : "text-[var(--text-muted)] hover:text-[var(--text)]"
-                }`}
-              >
-                <span className="w-1.5 h-1.5 rounded-full bg-pink-500"></span>
-                <span>{lang === "he" ? "סייבר" : "Cyber"}</span>
-              </button>
-            </div>
-
-            {/* Log Out option directly inside Customization Section */}
-            {isLoggedIn && (
-              <button
-                onClick={() => {
-                  signOut({ redirect: false });
-                }}
-                className="w-full mt-2 py-1.5 px-3 rounded-lg text-xs font-bold text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all flex items-center justify-between cursor-pointer border border-transparent hover:border-red-500/20"
-              >
-                <span className="flex items-center gap-1.5">
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>{lang === "he" ? "התנתק מהמערכת" : "Sign Out"}</span>
-                </span>
-                <span>➔</span>
-              </button>
-            )}
-          </div>
-
-          <div className="pt-6">
-            <p className="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">{t.sampleLists}</p>
-            <div className="space-y-1.5 px-2">
-              {PRESETS.map((p, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => loadPreset(p.list)}
-                  className="w-full text-start text-xs px-3 py-2 rounded-lg bg-slate-950/40 hover:bg-slate-800 text-slate-300 border border-slate-800/50 hover:border-slate-700 transition-all flex items-center justify-between group"
-                >
-                  <span className="truncate">{p.name[lang]}</span>
-                  <Sparkles className="w-3.5 h-3.5 text-slate-500 group-hover:text-blue-400 transition-colors shrink-0 ms-2" />
-                </button>
-              ))}
-            </div>
-          </div>
-        </nav>
-
-        {/* Sidebar Footer */}
-        <div className="p-5 border-t border-slate-800 bg-slate-950/40">
-          <div className="p-4 bg-blue-950/20 border border-blue-900/50 rounded-xl">
-            <p className="text-[10px] text-blue-400 font-semibold uppercase mb-1 tracking-widest">{t.developmentVersion}</p>
-            <p className="text-xs text-slate-300 font-medium">{t.developmentMilestone}</p>
-            <p className="text-[10px] text-slate-500 mt-2 font-mono">{t.frameworks}</p>
-          </div>
-        </div>
-      </aside>
-
-      {/* Main Container Section */}
-      <main id="main-content-panel" className="flex-1 flex flex-col relative overflow-hidden">
-        {/* Header Component */}
-        <header id="top-navbar-header" className="relative min-h-16 border-b border-[var(--panel-border)] bg-[var(--panel)] flex flex-col lg:flex-row items-center justify-between p-4 md:px-8 gap-4 z-10 shrink-0 transition-all duration-300">
-          
-          {/* Mobile top-row container for brand title + mobile menu toggle */}
-          <div className="flex items-center justify-between w-full lg:hidden">
-            {/* Mobile Left Block: Single Sign In Button / Signed In Badge (Top-left of the header bar) */}
-            <div className="flex flex-col items-start">
-              <div>
-                {isLoggedIn ? (
-                  <div
-                    className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white flex items-center gap-1 text-[10px] font-black select-none shrink-0 border border-emerald-500/20 shadow-md shadow-emerald-950/20"
-                    title={lang === "he" ? "מחובר למערכת" : "Signed In to System"}
-                  >
-                    <Check className="w-3 h-3" />
-                    <span>{lang === "he" ? "✓ מחובר" : "✓ Signed In / מחובר"}</span>
+      {/* Main Content Area */}
+      <AnimatePresence mode="wait">
+        {currentView === 'HOME' ? (
+          <motion.div 
+            key="HOME"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="flex-1 flex flex-col gap-6"
+          >
+            {/* Top Core Panel (List Creator) */}
+            <div className="flex flex-col md:flex-row gap-4">
+              {/* 75% Search Bar */}
+              <div className="md:w-3/4 relative z-20">
+                <div className="relative">
+                  <div className="absolute inset-y-0 start-0 flex items-center ps-4 pointer-events-none">
+                    <Search className="w-5 h-5 text-slate-400" />
                   </div>
-                ) : (
-                  <button
-                    onClick={() => setIsAuthOpen(true)}
-                    className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] text-white hover:scale-105 active:scale-95 transition-all duration-200 flex items-center gap-1 text-[10px] font-extrabold cursor-pointer shadow-lg shadow-[var(--primary-glow)] shrink-0"
-                    title={lang === "he" ? "התחברות למערכת" : "Sign In to System"}
-                  >
-                    <User className="w-3 h-3" />
-                    <span>{lang === "he" ? "התחברות" : "Sign In"}</span>
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-col mt-1 space-y-0.5 text-start">
-                <span className="text-[9px] font-bold text-[var(--text-highlight)]">
-                  {isLoggedIn ? (session?.user?.name || t.userDefaultName) : "אורח / Guest"}
-                </span>
-                <span className="text-[8px] text-[var(--text-muted)] font-medium">
-                  {isLoggedIn ? ((session?.user as any)?.membershipTier || "Premium") : (lang === "he" ? "דרגת בסיס" : "Standard Tier")}
-                </span>
-              </div>
-            </div>
-
-            {/* Mobile Right Block with menu toggle and profile dropdown */}
-            <div className="flex items-center gap-2">
-              {/* Quick Profile Avatar for Mobile */}
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[var(--primary)] to-[var(--accent)] p-0.5 shadow-md select-none">
-                <div className="w-full h-full rounded-[6px] bg-[var(--background)] flex items-center justify-center font-bold text-xs text-[var(--text-highlight)]">
-                  {currentUser ? currentUser.slice(0, 2).toUpperCase() : t.userInitials}
+                  <input 
+                    type="text" 
+                    value={searchQuery}
+                    onChange={(e) => { setSearchQuery(e.target.value); setShowPredictions(true); }}
+                    onFocus={() => setShowPredictions(true)}
+                    placeholder={t.searchPlaceholder}
+                    className="w-full bg-slate-900/80 border border-slate-700/50 text-slate-100 rounded-2xl h-14 ps-12 pe-4 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all shadow-inner"
+                  />
                 </div>
+                {/* Autocomplete Predictions */}
+                <AnimatePresence>
+                  {showPredictions && searchQuery && filteredProducts.length > 0 && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 5 }}
+                      className="absolute top-full start-0 end-0 mt-2 bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-30"
+                    >
+                      {filteredProducts.map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => handleAddProduct(p)}
+                          className="w-full flex items-center justify-between p-4 hover:bg-slate-700/50 transition-colors border-b border-slate-700/50 last:border-0 text-start"
+                        >
+                          <span className="font-medium text-slate-200">{p.name}</span>
+                          <span className="text-emerald-400 font-mono">₪ {p.basePrice.toFixed(2)}</span>
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
-              {/* Brand Logo */}
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 bg-[var(--primary)] rounded flex items-center justify-center font-black text-white text-xs shadow-md">
-                  S
-                </div>
-                <span className="font-bold text-xs text-[var(--text-highlight)]">{t.title}</span>
-              </div>
-
-              {/* Sidebar Menu Toggle */}
-              <button
-                onClick={() => setIsSidebarOpen(true)}
-                className="p-2 rounded-lg hover:bg-[var(--background)] border border-[var(--panel-border)] text-[var(--text)] cursor-pointer"
-                title="Toggle Menu"
-              >
-                <Menu className="w-5 h-5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Desktop Left Block: Single Sign In Button / Signed In Badge (Always at the start corner on desktop) */}
-          <div className="hidden lg:flex flex-col items-start shrink-0 transition-all">
-            <div>
-              {isLoggedIn ? (
-                <div
-                  className="px-4 py-2 rounded-lg bg-emerald-600 text-white flex items-center gap-1.5 text-xs font-bold select-none shrink-0 border border-emerald-500/20 shadow-md shadow-emerald-950/20"
-                  title={lang === "he" ? "מחובר למערכת" : "Signed In to System"}
+              {/* 25% Location Route Button */}
+              <div className="md:w-1/4 relative z-10 group">
+                <button
+                  onClick={() => setCurrentView('LOCATION')}
+                  className="w-full bg-slate-900/80 border border-slate-700/50 text-slate-100 rounded-2xl h-14 px-5 flex items-center justify-between hover:bg-slate-800 hover:border-indigo-500/50 transition-colors shadow-inner"
                 >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>{lang === "he" ? "✓ מחובר" : "✓ Signed In / מחובר"}</span>
+                  <div className="flex items-center gap-3">
+                    <MapPin className="w-5 h-5 text-indigo-400 group-hover:scale-110 transition-transform" />
+                    <span className="font-semibold">{t.location}</span>
+                  </div>
+                  <ChevronDown className="w-5 h-5 text-slate-400 -rotate-90 rtl:rotate-90" />
+                </button>
+              </div>
+            </div>
+
+            {/* Dynamic Interactive List */}
+            <div className="flex-1 bg-slate-900/40 backdrop-blur-sm border border-slate-800/80 rounded-3xl p-6 overflow-y-auto min-h-[300px]">
+              {basket.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-500 min-h-[200px]">
+                  <ShoppingCart className="w-12 h-12 mb-4 opacity-50" />
+                  <p>{t.emptyList}</p>
                 </div>
               ) : (
-                <button
-                  onClick={() => setIsAuthOpen(true)}
-                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] text-white hover:scale-105 active:scale-95 transition-all duration-200 flex items-center gap-1.5 text-xs font-bold cursor-pointer shadow-lg shadow-[var(--primary-glow)] shrink-0"
-                  title={lang === "he" ? "התחברות למערכת" : "Sign In to System"}
-                >
-                  <User className="w-3.5 h-3.5" />
-                  <span>{lang === "he" ? "התחברות" : "Sign In"}</span>
-                </button>
-              )}
-            </div>
-            <div className="flex flex-col mt-1 space-y-0.5 text-start">
-              <span className="text-[11px] font-bold text-[var(--text-highlight)]">
-                {isLoggedIn ? (session?.user?.name || t.userDefaultName) : "אורח / Guest"}
-              </span>
-              <span className="text-[9px] text-[var(--text-muted)] font-medium">
-                {isLoggedIn ? ((session?.user as any)?.membershipTier || "Premium") : (lang === "he" ? "דרגת בסיס" : "Standard Tier")}
-              </span>
-            </div>
-          </div>
-
-          {/* Search bar & Location wrapper (Always centered on desktop) */}
-          <div className="flex flex-col md:flex-row gap-4 items-center w-full lg:flex-1 lg:max-w-2xl">
-            {/* Search Input (Takes 3/4 space on desktop, full on mobile) */}
-            <div className="relative w-full md:w-3/4">
-              <Search className="absolute start-3.5 top-2.5 w-4 h-4 text-[var(--text-muted)]" />
-              <input
-                type="text"
-                placeholder={t.searchPlaceholder}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full h-9 bg-[var(--background)]/80 border border-[var(--panel-border)] hover:border-[var(--primary)]/50 focus:border-[var(--primary)] rounded-full text-xs text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none transition-all ps-10 pe-4"
-              />
-            </div>
-
-            {/* City Branch Selector (Takes 1/4 space on desktop, full on mobile) */}
-            <div 
-              onClick={() => setShowMapDrawer(true)}
-              className="flex items-center gap-2 bg-[var(--background)]/80 border border-[var(--panel-border)] hover:border-[var(--primary)]/50 focus-within:border-[var(--primary)] rounded-full px-3.5 h-9 w-full md:w-1/4 transition-colors duration-300 cursor-pointer"
-            >
-              <MapPin className="w-3.5 h-3.5 text-[var(--primary)] shrink-0 transition-colors duration-300" />
-              <select
-                value={selectedCity.name.he}
-                onChange={(e) => {
-                  const cityObj = CITIES.find(c => c.name.he === e.target.value || c.name.en === e.target.value);
-                  if (cityObj) {
-                    setSelectedCity(cityObj);
-                    setShowMapDrawer(true);
-                  }
-                }}
-                className="w-full bg-transparent text-xs text-[var(--text-highlight)] font-semibold focus:outline-none cursor-pointer pe-1"
-              >
-                {CITIES.map((c, idx) => (
-                  <option key={idx} value={c.name[lang]} className="bg-[var(--background)] text-[var(--text)]">
-                    {c.name[lang]}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Nav Actions (User Profile) (Always at the end corner on desktop) */}
-          <div className="flex items-center justify-center gap-3 md:gap-4 w-full lg:w-auto">
-            {/* Profile Avatar (Desktop) */}
-            <div className="hidden lg:flex items-center gap-3 select-none" title={lang === "he" ? "חשבון משתמש" : "User Account"}>
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[var(--primary)] to-[var(--accent)] p-0.5 shadow-md">
-                <div className="w-full h-full rounded-[6px] bg-[var(--background)] flex items-center justify-center font-bold text-xs text-[var(--text-highlight)] transition-colors duration-300">
-                  {currentUser ? currentUser.slice(0, 2).toUpperCase() : t.userInitials}
-                </div>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        {/* Sliding Branch Map Drawer */}
-        <AnimatePresence>
-          {showMapDrawer && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.3, ease: "easeInOut" }}
-              className="border-b border-[var(--panel-border)] bg-slate-950/90 backdrop-blur-md overflow-hidden shrink-0"
-            >
-              <div className="max-w-7xl mx-auto p-4 md:p-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <h2 className="text-sm font-black text-[var(--text-highlight)] tracking-tight">
-                      {lang === "he" ? "מפת סניפים חכמה ושירותים מבוססי מיקום" : "Smart Branch Map & Location Services"}
-                    </h2>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowMapDrawer(false);
-                    }}
-                    className="text-xs font-bold text-red-400 hover:text-red-300 transition-colors flex items-center gap-1.5 cursor-pointer bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg border border-red-500/20"
-                  >
-                    <span>{lang === "he" ? "✕ סגור מפה" : "✕ Close Map"}</span>
-                  </button>
-                </div>
-                <BranchMapContainer selectedCity={selectedCity} lang={lang} skin={skin} />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Dashboard Dynamic Workspace Grid */}
-        <div id="grid-layout-workspace" className="flex-1 p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 overflow-y-auto lg:overflow-hidden h-full">
-          
-          {/* Raw Text Shopping List Parser Side */}
-          <section id="input-editor-column" className="col-span-1 lg:col-span-4 flex flex-col gap-6 h-auto lg:h-full lg:overflow-hidden">
-            {currentUser && (
-              <div className="bg-[var(--panel)] backdrop-blur-md border border-[var(--panel-border)] p-5 rounded-2xl flex flex-col relative transition-all duration-300 shrink-0">
-                <div className="absolute top-0 right-0 left-0 h-[2px] bg-gradient-to-r from-[var(--primary)] to-[var(--accent)]"></div>
-                
-                {/* Header */}
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Bookmark className="w-4 h-4 text-[var(--primary)]" />
-                    <h3 className="text-sm font-bold text-[var(--text-highlight)]">{t.workspaceTitle}</h3>
-                  </div>
-                  <span className="text-[9px] bg-[var(--primary)]/15 text-[var(--primary)] px-2 py-0.5 rounded font-mono font-bold uppercase">
-                    Premium Active
-                  </span>
-                </div>
-
-                {/* Lifetime metric card */}
-                <div className="bg-[var(--background)] border border-[var(--panel-border)] p-3 rounded-xl flex items-center justify-between mb-4 relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 w-16 h-16 bg-[var(--primary)]/5 rounded-full blur-xl pointer-events-none"></div>
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 bg-[var(--primary)]/10 text-[var(--primary)] rounded-lg">
-                      <Coins className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-wider">{t.lifetimeSavingsTitle}</p>
-                      <p className="text-lg font-black text-[var(--text-highlight)] font-mono">₪{lifetimeSavings}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                    <TrendingUp className="w-3 h-3" />
-                    <span>+12.4%</span>
-                  </div>
-                </div>
-
-                {/* Saved Baskets list */}
-                <p className="text-[10px] text-[var(--text-muted)] font-extrabold uppercase tracking-wider mb-2">{t.savedBasketsTitle}</p>
-                <div className="space-y-2 max-h-[140px] overflow-y-auto scrollbar-thin pr-1">
-                  {savedBaskets.length === 0 ? (
-                    <p className="text-xs text-[var(--text-muted)] italic py-2 text-center">{t.noSavedBaskets}</p>
-                  ) : (
-                    savedBaskets.map((basket) => (
-                      <div 
-                        key={basket.id}
-                        onClick={() => {
-                          const targetText = lang === "he" ? basket.listTextHe : basket.listTextEn;
-                          setRawList(targetText);
-                          handleOptimize(targetText);
-                        }}
-                        className="bg-[var(--background)]/60 hover:bg-[var(--background)] border border-[var(--panel-border)] hover:border-[var(--primary)]/40 p-2.5 rounded-xl flex items-center justify-between cursor-pointer transition-all group"
-                        title={lang === "he" ? "לחץ לטעינת ושערוך הסל" : "Click to load and re-optimize basket"}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-bold text-[var(--text-highlight)] truncate group-hover:text-[var(--primary)] transition-colors">
-                            {lang === "he" ? basket.nameHe : basket.nameEn}
-                          </p>
-                          <div className="flex items-center gap-2 mt-1 text-[10px] text-[var(--text-muted)]">
-                            <span className="flex items-center gap-1">
-                              <Calendar className="w-3 h-3" />
-                              {basket.date}
-                            </span>
-                            <span>•</span>
-                            <span>{basket.itemCount} {t.items}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-xs font-bold text-[var(--primary)] font-mono">
-                            ₪{basket.totalPrice.toFixed(0)}
-                          </span>
-                          <button
-                            onClick={(e) => handleDeleteSavedBasket(basket.id, e)}
-                            className="p-1 rounded hover:bg-red-950/40 text-[var(--text-muted)] hover:text-red-400 border border-transparent hover:border-red-900 transition-all opacity-0 group-hover:opacity-100 cursor-pointer"
-                            title={lang === "he" ? "מחק סל" : "Delete basket"}
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
+                <div className="space-y-3">
+                  {basket.map(item => (
+                    <div key={item.id} className="flex flex-col sm:flex-row items-center justify-between bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50 gap-4 group transition-colors hover:bg-slate-800">
+                      <div className="flex-1 text-start w-full sm:w-auto">
+                        <h3 className="font-semibold text-slate-200 text-lg">{item.name}</h3>
+                        <p className="text-sm text-slate-400 mt-1">{t.basePrice}: <span className="font-mono text-emerald-400/80">₪ {item.basePrice.toFixed(2)}</span></p>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="flex-1 bg-[var(--panel)] backdrop-blur-md border border-[var(--panel-border)] p-5 rounded-2xl flex flex-col overflow-hidden relative">
-              <div className="absolute top-0 right-0 left-0 h-[2px] bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] transition-all duration-300"></div>
-
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <ShoppingCart className="w-4 h-4 text-[var(--primary)]" />
-                  <h3 className="text-base font-bold text-[var(--text-highlight)]">{t.rawListTitle}</h3>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[9px] bg-[var(--accent)]/15 text-[var(--accent)] px-2 py-0.5 rounded border border-[var(--panel-border)] font-bold tracking-wider font-mono uppercase">
-                    AI PARSER READY
-                  </span>
-                  {isAiPowered && (
-                    <span className="text-[9px] bg-[var(--primary)]/15 text-[var(--primary)] px-2 py-0.5 rounded border border-[var(--primary)]/30 font-bold tracking-wider font-mono uppercase">
-                      ACTIVE GEMINI
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <p className="text-xs text-[var(--text-muted)] mb-3 leading-relaxed">
-                {t.rawListDesc}
-              </p>
-
-              <textarea
-                value={rawList}
-                onChange={(e) => setRawList(e.target.value)}
-                className={`flex-1 bg-[var(--background)]/60 border border-[var(--panel-border)] rounded-xl p-4 text-xs font-mono text-[var(--text)] focus:outline-none focus:border-[var(--primary)]/50 resize-none leading-relaxed transition-all scrollbar-thin`}
-                placeholder={t.rawListPlaceholder}
-                dir={lang === "he" ? "rtl" : "ltr"}
-                disabled={isLoading}
-              ></textarea>
-
-              <div className="mt-4 flex flex-col gap-2">
-                <button
-                  onClick={() => handleOptimize()}
-                  disabled={isLoading}
-                  className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:opacity-60 py-3 rounded-xl font-bold text-xs text-white transition-all duration-200 flex items-center justify-center gap-2 shadow-lg shadow-[var(--primary-glow)] cursor-pointer"
-                >
-                  {isLoading ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      {t.optimizingText}
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" />
-                      {t.optimizeBtn}
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </section>
-
-          {/* Left Grid Side (Stats and Comparison Matrix Table) */}
-          <section id="analytics-data-column" className="col-span-1 lg:col-span-8 flex flex-col gap-6 h-auto lg:h-full lg:overflow-y-auto scrollbar-thin pe-1">
-            
-            {/* Top Stats Cards Block */}
-            <div id="quick-metrics-grid" className="h-auto lg:h-[140px] grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
-              
-              {/* Cheapest Basket Metric */}
-              <div className="bg-[var(--panel)] backdrop-blur-md border border-[var(--panel-border)] p-5 rounded-2xl flex flex-col justify-between relative overflow-hidden group hover:border-[var(--primary)]/50 transition-all">
-                <div className="absolute top-0 right-0 w-24 h-24 bg-[var(--primary)]/5 rounded-full blur-2xl pointer-events-none"></div>
-                <div>
-                  <div className="flex items-center justify-between">
-                    <p className="text-[10px] text-[var(--text-muted)] uppercase font-extrabold tracking-widest">{t.cheapestBasket}</p>
-                    <div className="flex items-center gap-1.5">
-                      {currentUser && (
-                        <button
-                          onClick={handleSaveCurrentBasket}
-                          className="px-2 py-1 rounded bg-[var(--primary)]/10 hover:bg-[var(--primary)] text-[var(--primary)] hover:text-white border border-[var(--primary)]/20 hover:border-[var(--primary)] transition-all flex items-center gap-1 text-[9px] font-bold cursor-pointer"
-                          title={t.quickSaveToolTip}
-                        >
-                          <Bookmark className="w-2.5 h-2.5 fill-current" />
-                          <span>{t.saveCurrentBasket}</span>
-                        </button>
-                      )}
-                      <span className="text-[9px] bg-[var(--primary)]/15 text-[var(--primary)] px-2 py-0.5 rounded font-mono border border-[var(--primary)]/30">{t.recommended}</span>
-                    </div>
-                  </div>
-                  <h2 className="text-2xl font-black text-[var(--primary)] mt-2 font-mono">
-                    ₪{cheapest.total.toFixed(2)}
-                  </h2>
-                  <p className="text-xs text-[var(--text-muted)] mt-1.5">
-                    {t.chainLabel} <span className="text-[var(--text-highlight)] font-semibold">{cheapest.name} ({cheapest.branch})</span>
-                  </p>
-                </div>
-                <div className="mt-3">
-                  <div className="h-1.5 w-full bg-[var(--background)] rounded-full overflow-hidden">
-                    <div className="h-full bg-[var(--primary)] w-[100%] rounded-full shadow-[0_0_8px_var(--primary-glow)]"></div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Average Basket Metric */}
-              <div className="bg-[var(--panel)] backdrop-blur-md border border-[var(--panel-border)] p-5 rounded-2xl flex flex-col justify-between relative overflow-hidden hover:border-[var(--primary)]/50 transition-all">
-                <div>
-                  <p className="text-[10px] text-[var(--text-muted)] uppercase font-extrabold tracking-widest">{t.averageBasket}</p>
-                  <h2 className="text-2xl font-black text-[var(--text-highlight)] mt-3 font-mono">
-                    ₪{averageTotal.toFixed(2)}
-                  </h2>
-                  <p className="text-xs text-[var(--text-muted)] mt-1.5">
-                    {t.averageBasketDesc}
-                  </p>
-                </div>
-                <div className="mt-3">
-                  <div className="h-1.5 w-full bg-[var(--background)] rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-[var(--accent)] rounded-full transition-all duration-500"
-                      style={{ width: `${Math.min(100, (cheapest.total / (averageTotal || 1)) * 100)}%` }}
-                    ></div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Potential Savings Metric */}
-              <div className="bg-[var(--panel)] backdrop-blur-md border border-[var(--panel-border)] p-5 rounded-2xl flex flex-col justify-between relative overflow-hidden hover:border-[var(--primary)]/50 transition-all">
-                <div className="absolute top-0 right-0 w-24 h-24 bg-[var(--accent)]/5 rounded-full blur-2xl pointer-events-none"></div>
-                <div>
-                  <div className="flex items-center justify-between">
-                    <p className="text-[10px] text-[var(--text-muted)] uppercase font-extrabold tracking-widest">{t.potentialSavings}</p>
-                    <span className="text-[9px] bg-[var(--accent)]/15 text-[var(--accent)] px-2 py-0.5 rounded font-mono border border-[var(--panel-border)] font-bold">{t.calculated}</span>
-                  </div>
-                  <h2 className="text-2xl font-black text-[var(--accent)] mt-2 font-mono">
-                    {savingsPercent.toFixed(1)}%
-                  </h2>
-                  <p className="text-xs text-[var(--text-muted)] mt-1.5">
-                    {t.savingsDesc}
-                  </p>
-                </div>
-                <div className="mt-3">
-                  <div className="h-1.5 w-full bg-[var(--background)] rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-[var(--accent)] rounded-full shadow-[0_0_8px_var(--accent-glow)] transition-all duration-500"
-                      style={{ width: `${Math.min(100, Math.max(10, savingsPercent * 3))}%` }}
-                    ></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Price Comparison Matrix Board */}
-            <div id="price-comparison-matrix-card" className="flex-1 bg-[var(--panel)] backdrop-blur-md border border-[var(--panel-border)] rounded-2xl flex flex-col overflow-hidden transition-all duration-300">
-              
-              {/* Card Header */}
-              <div className="p-5 border-b border-[var(--panel-border)] flex items-center justify-between shrink-0 bg-[var(--background)]/20 transition-all duration-300">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-2.5 h-2.5 rounded-full bg-[var(--primary)] animate-pulse"></div>
-                  <h3 className="font-bold text-[var(--text-highlight)] text-sm">{t.matrixTitle}</h3>
-                  <span className="text-[10px] text-[var(--text-muted)] font-mono">({filteredItems.length} {t.itemsCount})</span>
-                </div>
-                
-                <div className="flex items-center gap-3">
-                  {currentUser && (
-                    <button
-                      onClick={handleSaveCurrentBasket}
-                      className="h-8 px-3 rounded-lg bg-[var(--primary)]/10 hover:bg-[var(--primary)] border border-[var(--primary)]/30 text-xs font-semibold text-[var(--primary)] hover:text-white transition-all flex items-center gap-1.5 cursor-pointer"
-                      title={t.quickSaveToolTip}
-                    >
-                      <Bookmark className="w-3.5 h-3.5" />
-                      <span>{t.saveCurrentBasket}</span>
-                    </button>
-                  )}
-
-                  {/* Inline Add Item Trigger */}
-                  <button
-                    onClick={() => setShowAddForm(!showAddForm)}
-                    className="h-8 px-3 rounded-lg bg-[var(--background)]/80 hover:bg-[var(--background)] border border-[var(--panel-border)] text-xs font-semibold text-[var(--text)] transition-all flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-[var(--primary)]" />
-                    {t.manualAddBtn}
-                  </button>
-
-                  {/* Print / Download Button */}
-                  <button
-                    onClick={triggerDownload}
-                    className="h-8 px-3 rounded-lg bg-[var(--background)]/80 hover:bg-[var(--background)] border border-[var(--panel-border)] text-xs font-semibold text-[var(--text)] transition-all flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                    {isDownloaded ? t.exportingText : t.exportBtn}
-                  </button>
-                </div>
-              </div>
-
-              {/* Inline Add Item Form (Optional Drawer) */}
-              {showAddForm && (
-                <form onSubmit={handleAddItemSubmit} className="p-4 bg-[var(--background)]/90 border-b border-[var(--panel-border)] flex flex-col md:grid md:grid-cols-12 gap-3 items-stretch md:items-end animate-fade-in shrink-0 transition-all duration-300">
-                  <div className="md:col-span-3">
-                    <label className="block text-[10px] text-[var(--text-muted)] mb-1">{t.addFormProductName}</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder={t.addFormProductPlaceholder}
-                      value={newProductName}
-                      onChange={(e) => setNewProductName(e.target.value)}
-                      className="w-full h-8 bg-[var(--panel)] border border-[var(--panel-border)] rounded px-2.5 text-xs text-[var(--text)] focus:outline-none focus:border-[var(--primary)]"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-[10px] text-[var(--text-muted)] mb-1">{t.addFormQtyText}</label>
-                    <input
-                      type="text"
-                      placeholder={t.addFormQtyPlaceholder}
-                      value={newQuantity}
-                      onChange={(e) => setNewQuantity(e.target.value)}
-                      className="w-full h-8 bg-[var(--panel)] border border-[var(--panel-border)] rounded px-2.5 text-xs text-[var(--text)] focus:outline-none focus:border-[var(--primary)]"
-                    />
-                  </div>
-                  <div className="md:col-span-1">
-                    <label className="block text-[10px] text-[var(--text-muted)] mb-1">{t.addFormMultiplier}</label>
-                    <input
-                      type="number"
-                      required
-                      min="1"
-                      value={newQuantityValue}
-                      onChange={(e) => setNewQuantityValue(Number(e.target.value))}
-                      className="w-full h-8 bg-[var(--panel)] border border-[var(--panel-border)] rounded px-2 text-xs text-[var(--text)] focus:outline-none focus:border-[var(--primary)] text-center font-mono"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-[10px] text-[var(--text-muted)] mb-1">{t.addFormShufersalPrice}</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      required
-                      value={newShufersalPrice}
-                      onChange={(e) => setNewShufersalPrice(Number(e.target.value))}
-                      className="w-full h-8 bg-[var(--panel)] border border-[var(--panel-border)] rounded px-2 text-xs text-[var(--text)] focus:outline-none focus:border-[var(--primary)] font-mono"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-[10px] text-[var(--text-muted)] mb-1">{t.addFormYohananofPrice}</label>
-                    <input
-                      type="number"
-                      step="0.1"
-                      required
-                      value={newYohananofPrice}
-                      onChange={(e) => setNewYohananofPrice(Number(e.target.value))}
-                      className="w-full h-8 bg-[var(--panel)] border border-[var(--panel-border)] rounded px-2 text-xs text-[var(--text)] focus:outline-none focus:border-[var(--primary)] font-mono"
-                    />
-                  </div>
-                  <div className="md:col-span-2 flex items-end gap-1.5">
-                    <div className="flex-1">
-                      <label className="block text-[10px] text-[var(--text-muted)] mb-1">{t.addFormVictoryPrice}</label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        required
-                        value={newVictoryPrice}
-                        onChange={(e) => setNewVictoryPrice(Number(e.target.value))}
-                        className="w-full h-8 bg-[var(--panel)] border border-[var(--panel-border)] rounded px-2 text-xs text-[var(--text)] focus:outline-none focus:border-[var(--primary)] font-mono"
-                      />
-                    </div>
-                    <button
-                      type="submit"
-                      className="h-8 px-4 bg-[var(--primary)] hover:bg-[var(--primary-hover)] rounded text-xs font-bold text-white shrink-0 cursor-pointer transition-colors"
-                    >
-                      {t.addBtn}
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {/* Data Grid Table View */}
-              <div className="flex-1 overflow-y-auto scrollbar-thin">
-                {filteredItems.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] p-8">
-                    <ShoppingCart className="w-12 h-12 text-[var(--panel-border)] mb-3 animate-pulse" />
-                    <p className="text-sm">{t.noProductsFound}</p>
-                    <p className="text-xs text-[var(--text-muted)] mt-1">{t.tryEditing}</p>
-                  </div>
-                ) : (
-                  <table className="w-full text-start text-xs relative">
-                    <thead>
-                      <tr className="bg-[var(--background)] border-b border-[var(--panel-border)] text-[var(--text-muted)] font-bold uppercase tracking-wider sticky top-0 z-10 transition-colors duration-300">
-                        <th className="p-4 font-semibold text-[var(--text)]">{t.tableColProduct}</th>
-                        <th className="p-4 font-semibold text-[var(--text)] text-center">{t.tableColQty}</th>
-                        <th className="p-4 font-semibold text-[var(--text)] text-end">{t.tableColShufersal} ({selectedCity.name[lang]})</th>
-                        <th className="p-4 font-semibold text-[var(--text)] text-end">{t.tableColYohananof} ({selectedCity.name[lang]})</th>
-                        <th className="p-4 font-semibold text-[var(--text)] text-end">{t.tableColVictory} ({selectedCity.name[lang]})</th>
-                        <th className="p-4 font-semibold text-[var(--text)] text-center w-12">{t.tableColDelete}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[var(--panel-border)]/60">
-                      {filteredItems.map((item, idx) => {
-                        // Find the lowest price for this specific row
-                        const minPrice = Math.min(item.shufersalPrice, item.yohananofPrice, item.victoryPrice);
-
-                        return (
-                          <tr key={idx} className="hover:bg-[var(--background)]/30 transition-colors group">
-                            <td className="p-4 font-medium text-[var(--text-highlight)] max-w-xs truncate">
-                              <span className="flex items-center gap-2">
-                                <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] transition-colors duration-300"></span>
-                                {lang === "en" && item.productNameEn ? item.productNameEn : item.productName}
-                              </span>
-                            </td>
-                            <td className="p-4 text-center text-[var(--text)] font-mono font-bold">
-                              {lang === "en" && item.quantityEn ? item.quantityEn : item.quantity}
-                            </td>
-                            
-                            {/* Shufersal Price Cell */}
-                            <td className={`p-4 text-end font-mono text-sm ${
-                              item.shufersalPrice === minPrice 
-                                ? "text-[var(--primary)] font-bold bg-[var(--primary)]/5" 
-                                : "text-[var(--text)]"
-                            }`}>
-                              ₪{item.shufersalPrice.toFixed(2)}
-                              {item.shufersalPrice === minPrice && (
-                                <span className="text-[9px] bg-[var(--primary)]/15 text-[var(--primary)] px-1 py-0.5 rounded ms-1">{t.cheapBadge}</span>
-                              )}
-                            </td>
-
-                            {/* Yohananof Price Cell */}
-                            <td className={`p-4 text-end font-mono text-sm ${
-                              item.yohananofPrice === minPrice 
-                                ? "text-[var(--primary)] font-bold bg-[var(--primary)]/5" 
-                                : "text-[var(--text)]"
-                            }`}>
-                              ₪{item.yohananofPrice.toFixed(2)}
-                              {item.yohananofPrice === minPrice && (
-                                <span className="text-[9px] bg-[var(--primary)]/15 text-[var(--primary)] px-1 py-0.5 rounded ms-1">{t.cheapBadge}</span>
-                              )}
-                            </td>
-
-                            {/* Victory Price Cell */}
-                            <td className={`p-4 text-end font-mono text-sm ${
-                              item.victoryPrice === minPrice 
-                                ? "text-[var(--primary)] font-bold bg-[var(--primary)]/5" 
-                                : "text-[var(--text)]"
-                            }`}>
-                              ₪{item.victoryPrice.toFixed(2)}
-                              {item.victoryPrice === minPrice && (
-                                <span className="text-[9px] bg-[var(--primary)]/15 text-[var(--primary)] px-1 py-0.5 rounded ms-1">{t.cheapBadge}</span>
-                              )}
-                            </td>
-
-                            {/* Delete Cell */}
-                            <td className="p-4 text-center">
-                              <button
-                                onClick={() => handleDeleteItem(idx)}
-                                className="p-1 rounded bg-[var(--background)] hover:bg-red-950/40 text-[var(--text-muted)] hover:text-red-400 border border-[var(--panel-border)] hover:border-red-900 transition-all opacity-40 group-hover:opacity-100 cursor-pointer"
-                                title="מחיקת פריט"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    
-                    {/* Totals Row */}
-                    <tfoot>
-                      <tr className="bg-[var(--background)]/85 border-t border-[var(--panel-border)] text-xs font-bold font-mono transition-colors duration-300">
-                        <td className="p-4 text-[var(--text-highlight)] font-sans text-sm">{t.totalCalculated}</td>
-                        <td className="p-4"></td>
+                      
+                      <div className="flex items-center gap-4 sm:gap-6 w-full sm:w-auto justify-between sm:justify-end">
+                        {/* Quantity Controls */}
+                        <div className="flex items-center bg-slate-900 rounded-xl border border-slate-700 p-1">
+                          <button onClick={() => updateQuantity(item.id, -1)} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors">-</button>
+                          <span className="w-10 text-center font-mono font-medium text-slate-200">{item.quantity}</span>
+                          <button onClick={() => updateQuantity(item.id, 1)} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors">+</button>
+                        </div>
                         
-                        {/* Shufersal Total Column */}
-                        <td className={`p-4 text-end text-sm ${
-                          shufersalTotal === cheapest.total ? "text-[var(--primary)] font-black" : "text-[var(--text)]"
-                        }`}>
-                          ₪{shufersalTotal.toFixed(2)}
-                          {shufersalTotal === cheapest.total && (
-                            <div className="text-[8px] bg-[var(--primary)]/15 text-[var(--primary)] px-1 py-0.5 rounded mt-1 text-center font-sans">{t.cheapestBasket}</div>
-                          )}
-                        </td>
+                        {/* Item Total */}
+                        <div className="w-24 text-end">
+                          <span className="font-mono font-bold text-emerald-400 text-lg">₪ {(item.basePrice * item.quantity).toFixed(2)}</span>
+                        </div>
+                        
+                        {/* Remove */}
+                        <button 
+                          onClick={() => removeProduct(item.id)}
+                          className="w-10 h-10 flex items-center justify-center text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors sm:opacity-0 group-hover:opacity-100 shrink-0"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {/* Total Footer */}
+                  <div className="mt-8 pt-6 border-t border-slate-800 flex justify-between items-end">
+                    <span className="text-slate-400 text-lg">{t.listTotal}</span>
+                    <span className="text-4xl font-bold font-mono text-white tracking-tight">₪ {basketTotal.toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        ) : currentView === 'PROFILE' ? (
+          <motion.div
+            key="PROFILE"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="flex-1 w-full max-w-4xl mx-auto flex flex-col gap-8 text-start mt-6"
+          >
+             <h2 className="text-3xl font-bold text-slate-100">{t.navProfile}</h2>
+             
+             <div className="bg-slate-900/60 backdrop-blur-xl rounded-3xl p-8 border border-slate-800 shadow-xl">
+               <h3 className="text-lg font-semibold text-slate-200 mb-6">{t.themeSettings}</h3>
+               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {[
+                    { id: 'warm-rose', name: t.skinWarmRose, colorClass: 'bg-[#EDB490]' },
+                    { id: 'earth-slate', name: t.skinEarthSlate, colorClass: 'bg-[#c9beb1]' },
+                    { id: 'neon-acid', name: t.skinNeonAcid, colorClass: 'bg-[#BEDF1D]' },
+                    { id: 'ocean-steel', name: t.skinOceanSteel, colorClass: 'bg-[#0D659D]' }
+                  ].map(skinOption => (
+                    <button 
+                      key={skinOption.id}
+                      onClick={() => setSkin(skinOption.id as Skin)}
+                      className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all ${skin === skinOption.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-800 hover:border-slate-600 bg-slate-950/50'}`}
+                    >
+                       <div className={`w-12 h-12 rounded-full shadow-lg border border-white/10 ${skinOption.colorClass}`}></div>
+                       <span className="text-sm font-medium text-slate-300 text-center">{skinOption.name}</span>
+                    </button>
+                  ))}
+               </div>
+             </div>
 
-                        {/* Yohananof Total Column */}
-                        <td className={`p-4 text-end text-sm ${
-                          yohananofTotal === cheapest.total ? "text-[var(--primary)] font-black" : "text-[var(--text)]"
-                        }`}>
-                          ₪{yohananofTotal.toFixed(2)}
-                          {yohananofTotal === cheapest.total && (
-                            <div className="text-[8px] bg-[var(--primary)]/15 text-[var(--primary)] px-1 py-0.5 rounded mt-1 text-center font-sans">{t.cheapestBasket}</div>
-                          )}
-                        </td>
+             {currentUser && (
+               <>
+                 <div className="bg-slate-900/60 backdrop-blur-xl rounded-3xl p-8 border border-slate-800 shadow-xl">
+                   <h3 className="text-lg font-semibold text-slate-200 mb-6">{t.avatarPickerTitle}</h3>
+                   <div className="flex flex-wrap gap-4 items-center">
+                     {[
+                       { id: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_01_u3edkv.png' },
+                       { id: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_02_tnpgez.png' },
+                       { id: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_03_uhw4sf.png' },
+                       { id: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_04_ddolur.png' },
+                       { id: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869113/Avatars_05_oijkrm.png' },
+                       { id: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_06_yoitrw.png' },
+                       { id: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_07_nzpzef.png' },
+                       { id: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_08_ydwbsy.png' },
+                       { id: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869113/Avatars_09_b7puvl.png' },
+                       { id: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_10_z5bvxg.png' },
+                     ].map(avatar => {
+                       const isSelected = currentUser.avatar === avatar.id;
+                       return (
+                         <button
+                           key={avatar.id}
+                           onClick={() => setCurrentUser({ ...currentUser, avatar: avatar.id })}
+                           className={`w-16 h-16 rounded-2xl flex items-center justify-center border-2 transition-all overflow-hidden ${isSelected ? 'border-indigo-500 shadow-lg shadow-indigo-500/20 bg-indigo-500/10' : 'border-slate-700 bg-slate-800/50 hover:border-slate-500'}`}
+                         >
+                           {/* eslint-disable-next-line @next/next/no-img-element */}
+                           <img src={avatar.id} alt="Avatar" className="w-full h-full object-cover" />
+                         </button>
+                       );
+                     })}
+                     
+                     <label className="w-40 h-16 rounded-2xl flex flex-col items-center justify-center border-2 border-dashed border-slate-700 hover:border-indigo-500 hover:bg-indigo-500/10 cursor-pointer transition-colors text-slate-400 hover:text-indigo-400 group">
+                       <Plus className="w-5 h-5 mb-1 group-hover:scale-110 transition-transform" />
+                       <span className="text-[10px] font-medium uppercase tracking-wider">{t.uploadPicture}</span>
+                       <input type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
+                     </label>
+                   </div>
+                 </div>
 
-                        {/* Victory Total Column */}
-                        <td className={`p-4 text-end text-sm ${
-                          victoryTotal === cheapest.total ? "text-[var(--primary)] font-black" : "text-[var(--text)]"
-                        }`}>
-                          ₪{victoryTotal.toFixed(2)}
-                          {victoryTotal === cheapest.total && (
-                            <div className="text-[8px] bg-[var(--primary)]/15 text-[var(--primary)] px-1 py-0.5 rounded mt-1 text-center font-sans">{t.cheapestBasket}</div>
-                          )}
-                        </td>
-                        <td className="p-4"></td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                )}
+                 <div className="bg-slate-900/60 backdrop-blur-xl rounded-3xl p-8 border border-slate-800 shadow-xl">
+                   <h3 className="text-lg font-semibold text-slate-200 mb-6">{t.profileDataTitle}</h3>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                     <div>
+                       <label className="block text-sm font-medium text-slate-400 mb-2">{t.nicknameLabel}</label>
+                       <input 
+                         type="text"
+                         value={currentUser.nickname}
+                         onChange={(e) => setCurrentUser({ ...currentUser, nickname: e.target.value })}
+                         disabled={!isEditingCredentials}
+                         className={`w-full bg-slate-950/50 border rounded-xl px-4 py-3 text-slate-100 focus:outline-none transition-colors ${isEditingCredentials ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-700 opacity-75 cursor-not-allowed'}`}
+                       />
+                     </div>
+                     <div>
+                       <label className="block text-sm font-medium text-slate-400 mb-2">{t.emailLabel}</label>
+                       <input 
+                         type="email"
+                         value={currentUser.email}
+                         onChange={(e) => setCurrentUser({ ...currentUser, email: e.target.value })}
+                         disabled={!isEditingCredentials}
+                         className={`w-full bg-slate-950/50 border rounded-xl px-4 py-3 text-slate-100 focus:outline-none transition-colors ${isEditingCredentials ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-700 opacity-75 cursor-not-allowed'}`}
+                       />
+                     </div>
+                     <div>
+                       <label className="block text-sm font-medium text-slate-400 mb-2">{t.phoneLabel}</label>
+                       <input 
+                         type="tel"
+                         value={currentUser.phone}
+                         placeholder={t.phonePlaceholder}
+                         onChange={(e) => setCurrentUser({ ...currentUser, phone: e.target.value })}
+                         disabled={!isEditingCredentials}
+                         className={`w-full bg-slate-950/50 border rounded-xl px-4 py-3 text-slate-100 focus:outline-none transition-colors ${isEditingCredentials ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-700 opacity-75 cursor-not-allowed'}`}
+                       />
+                     </div>
+                   </div>
+                   
+                   <div className="mt-6 flex justify-end items-center gap-4">
+                     <AnimatePresence>
+                       {verificationFlash && (
+                         <motion.span 
+                           initial={{ opacity: 0, x: -10 }}
+                           animate={{ opacity: 1, x: 0 }}
+                           exit={{ opacity: 0, x: 10 }}
+                           className="text-sm font-bold text-emerald-400 flex items-center gap-2"
+                         >
+                           <Zap className="w-4 h-4" />
+                           {t.verificationSent}
+                         </motion.span>
+                       )}
+                     </AnimatePresence>
+                     
+                     {isEditingCredentials ? (
+                       <button
+                         onClick={handleSaveCredentials}
+                         disabled={isVerifying}
+                         className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-semibold shadow-lg shadow-indigo-500/20 transition-colors flex items-center gap-2 disabled:opacity-50"
+                       >
+                         {isVerifying && <Clock className="w-4 h-4 animate-spin" />}
+                         {t.saveAndVerify}
+                       </button>
+                     ) : (
+                       <button
+                         onClick={() => setIsEditingCredentials(true)}
+                         className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-semibold transition-colors"
+                       >
+                         {t.editCredentials}
+                       </button>
+                     )}
+                   </div>
+                 </div>
+               </>
+             )}
+          </motion.div>
+        ) : currentView === 'LOCATION' ? (
+          <motion.div
+            key="LOCATION"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="flex-1 w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-6 text-start h-full mt-6"
+          >
+            {/* Left Column: Interactive Map Placeholder */}
+            <div className="w-full lg:w-2/3 bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-2 min-h-[500px] relative overflow-hidden flex flex-col shadow-xl">
+              <div className="absolute inset-0 bg-slate-800/50 opacity-20 pointer-events-none"></div>
+              
+              {/* Map UI Elements */}
+              <div className="absolute top-6 start-6 end-6 flex justify-between items-start pointer-events-none z-10">
+                <div className="bg-slate-950/80 backdrop-blur-md px-4 py-2 rounded-xl border border-slate-700/50 text-sm font-bold text-slate-200 pointer-events-auto shadow-xl">
+                  {t.currentGpsLocation}
+                </div>
+                <div className="flex flex-col gap-2 pointer-events-auto">
+                  <button className="w-10 h-10 bg-slate-950/80 backdrop-blur-md rounded-xl border border-slate-700/50 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 shadow-xl transition-colors">
+                    <Plus className="w-5 h-5" />
+                  </button>
+                  <button className="w-10 h-10 bg-slate-950/80 backdrop-blur-md rounded-xl border border-slate-700/50 flex items-center justify-center text-slate-300 hover:text-white hover:bg-slate-800 shadow-xl transition-colors">
+                    <div className="w-3 h-px bg-current"></div>
+                  </button>
+                </div>
+              </div>
+              
+              {/* Simulated Markers */}
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
+                <div className="w-6 h-6 bg-indigo-500 rounded-full border-4 border-white shadow-[0_0_20px_rgba(99,102,241,0.6)] animate-pulse"></div>
+              </div>
+              <div className="absolute top-1/3 left-1/4">
+                <MapPin className="w-8 h-8 text-rose-500 drop-shadow-lg" />
+              </div>
+              <div className="absolute bottom-1/3 right-1/4">
+                <MapPin className="w-8 h-8 text-emerald-500 drop-shadow-lg" />
               </div>
             </div>
-          </section>
-        </div>
 
-        {/* Footer Navigation Area */}
-        <footer id="bottom-status-footer" className="h-12 border-t border-[var(--panel-border)] bg-[var(--panel)]/80 backdrop-blur-md px-8 flex items-center justify-between z-10 shrink-0 transition-all duration-300">
-          <div className="flex items-center gap-4 text-[10px] text-[var(--text-muted)] tracking-widest uppercase font-semibold">
-            <span>{t.milestone3}</span>
-            <div className="w-4 h-px bg-[var(--panel-border)]"></div>
-            {geoAuthStatus === "granted" ? (
-              <span className="text-[var(--primary)] flex items-center gap-1 font-semibold">
-                <Check className="w-3 h-3" /> {t.branchMapActive}
-              </span>
-            ) : geoAuthStatus === "requesting" ? (
-              <span className="text-[var(--accent)] animate-pulse">{t.requestingGeo}</span>
-            ) : (
-              <button 
-                onClick={requestGeolocation} 
-                className="text-[var(--accent)] hover:text-[var(--primary)] flex items-center gap-1 hover:underline font-semibold cursor-pointer"
-              >
-                {t.lockedGeo}
-              </button>
-            )}
-          </div>
-          
-          <div className="flex gap-4 items-center">
-            {isDownloaded && (
-              <span className="text-[10px] text-[var(--primary)] bg-[var(--primary)]/15 px-2.5 py-1 border border-[var(--primary)]/20 rounded-md animate-bounce">
-                {t.exportSuccess}
-              </span>
-            )}
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-[var(--primary)] shadow-[0_0_8px_var(--primary-glow)] animate-pulse"></span>
-              <span className="text-[10px] text-[var(--text-muted)] font-mono tracking-wider font-semibold uppercase">{t.liveSync}</span>
+            {/* Right Column: Detailed Cards */}
+            <div className="w-full lg:w-1/3 flex flex-col gap-4 overflow-y-auto max-h-[500px] lg:max-h-full pe-2">
+               {liveBranches.map(b => (
+                 <div 
+                   key={b.id} 
+                   onClick={() => setActiveMapPin(b.id)}
+                   className={`bg-slate-900/60 backdrop-blur-xl border ${activeMapPin === b.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-800'} rounded-3xl p-5 flex flex-col gap-4 shadow-xl hover:bg-slate-900 transition-colors shrink-0 cursor-pointer`}
+                 >
+                   <div className="flex items-center gap-4">
+                     <div className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center text-indigo-400 border border-slate-700 shadow-inner">
+                       <Store className="w-6 h-6" />
+                     </div>
+                     <div className="flex-1">
+                       <h4 className="font-bold text-slate-200">{b.name}</h4>
+                       <p className="text-xs text-slate-400 mt-0.5">{b.desc}</p>
+                     </div>
+                   </div>
+                   
+                   <div className="flex items-center justify-between border-t border-slate-800/80 pt-4">
+                     <div className="flex items-center gap-1.5 text-slate-300">
+                       <Navigation className="w-4 h-4 text-emerald-400" />
+                       <span className="font-mono text-sm">{b.dist}</span>
+                     </div>
+                     
+                     <a 
+                      href={b.mapsLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 px-4 py-2 rounded-xl text-sm font-semibold transition-colors border border-indigo-500/20 text-center"
+                     >
+                       {t.quickNavigate}
+                     </a>
+                   </div>
+                 </div>
+               ))}
             </div>
-          </div>
-        </footer>
-      </main>
-
-      <AuthModal
-        isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
-        lang={lang}
-      />
-
-
-
-      {/* Toast Notification */}
-      <AnimatePresence>
-        {showSaveToast && (
+          </motion.div>
+        ) : (
           <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 50, scale: 0.95 }}
-            className="fixed bottom-16 right-8 z-50 p-4 bg-[var(--panel)] border border-[var(--primary)]/30 rounded-xl shadow-xl flex items-center gap-3 backdrop-blur-xl"
-            dir={lang === "he" ? "rtl" : "ltr"}
+            key={currentView}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="flex-1 flex flex-col items-center justify-center min-h-[50vh] bg-slate-900/60 backdrop-blur-xl rounded-3xl border border-slate-800 shadow-xl p-8 text-center relative overflow-hidden"
           >
-            <div className="p-2 bg-[var(--primary)]/10 text-[var(--primary)] rounded-lg">
-              <Check className="w-4 h-4" />
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-indigo-500/10 blur-3xl rounded-full pointer-events-none"></div>
+            
+            <div className="w-20 h-20 bg-slate-800/50 rounded-2xl flex items-center justify-center mb-6 border border-slate-700/50 relative z-10 shadow-lg shadow-indigo-500/10 text-indigo-400">
+              {currentView === 'SAVED_LISTS' && <List className="w-10 h-10" />}
+              {currentView === 'PRICE_UPDATES' && <TrendingDown className="w-10 h-10" />}
+              {currentView === 'COMMUNITY' && <Users className="w-10 h-10" />}
             </div>
-            <div>
-              <p className="text-xs font-bold text-[var(--text-highlight)]">{t.basketSavedSuccess}</p>
-              <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
-                {lang === "he" ? "הסל שמור כעת בלוח העבודה האישי" : "The basket is now available in your workspace"}
-              </p>
-            </div>
+            
+            <h2 className="text-2xl font-bold text-slate-100 mb-2 relative z-10">
+              {currentView === 'SAVED_LISTS' && t.navSavedLists}
+              {currentView === 'PRICE_UPDATES' && t.navPriceUpdates}
+              {currentView === 'COMMUNITY' && t.navCommunity}
+            </h2>
+            <p className="text-slate-400 max-w-md relative z-10">{t.placeholderDesc}</p>
+            
+            <button 
+              onClick={() => setCurrentView('HOME')}
+              className="mt-8 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-indigo-500/20 relative z-10"
+            >
+              {t.backToHome}
+            </button>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Footer / Dev Anchor */}
+      <footer className="mt-8 pt-6 border-t border-slate-800/50 flex justify-center md:justify-end">
+         <div className="flex items-center gap-2 bg-slate-900/50 px-4 py-2 rounded-full border border-slate-800/50 opacity-70 hover:opacity-100 transition-opacity cursor-not-allowed">
+            <div className="w-2 h-2 rounded-full bg-slate-500"></div>
+            <span className="text-xs font-mono text-slate-400">{t.devOptionsLocked}</span>
+         </div>
+      </footer>
+
+      {/* Drawer Overlay */}
+      <AnimatePresence>
+        {isDrawerOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsDrawerOpen(false)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-40"
+            />
+            <motion.div
+              initial={{ x: lang === 'he' ? '-100%' : '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: lang === 'he' ? '-100%' : '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className={`fixed top-0 bottom-0 ${lang === 'he' ? 'left-0 border-r' : 'right-0 border-l'} w-72 bg-slate-900 border-slate-800 shadow-2xl z-50 flex flex-col`}
+            >
+              <div className="p-6 flex items-center justify-between border-b border-slate-800">
+                <h2 className="text-lg font-bold text-slate-100">{t.appTitle}</h2>
+                <button onClick={() => setIsDrawerOpen(false)} className="text-slate-400 hover:text-white transition-colors p-2 -m-2">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto py-4 flex flex-col gap-1 px-3">
+                <DrawerItem view="HOME" currentView={currentView} setCurrentView={setCurrentView} icon={Home} label={t.navHome} close={() => setIsDrawerOpen(false)} />
+                <DrawerItem view="PROFILE" currentView={currentView} setCurrentView={setCurrentView} icon={User} label={t.navProfile} close={() => setIsDrawerOpen(false)} />
+                <DrawerItem view="SAVED_LISTS" currentView={currentView} setCurrentView={setCurrentView} icon={List} label={t.navSavedLists} close={() => setIsDrawerOpen(false)} />
+                <DrawerItem view="PRICE_UPDATES" currentView={currentView} setCurrentView={setCurrentView} icon={TrendingDown} label={t.navPriceUpdates} close={() => setIsDrawerOpen(false)} />
+                <DrawerItem view="COMMUNITY" currentView={currentView} setCurrentView={setCurrentView} icon={Users} label={t.navCommunity} close={() => setIsDrawerOpen(false)} />
+              </div>
+              <div className="p-4 border-t border-slate-800">
+                {currentUser ? (
+                   <button onClick={() => { setCurrentUser(null); setIsDrawerOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition-colors">
+                     <LogOut className="w-5 h-5" />
+                     {t.signOut}
+                   </button>
+                ) : (
+                   <button onClick={() => { setAuthMode('SIGN_IN'); setIsDrawerOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 rounded-xl transition-colors">
+                     <LogIn className="w-5 h-5" />
+                     {t.signIn} / {t.signUp}
+                   </button>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Auth Modal Overlay */}
+      {authMode !== 'NONE' && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-800 shadow-2xl rounded-3xl w-full max-w-md overflow-hidden relative">
+            <button 
+              onClick={() => setAuthMode('NONE')}
+              className="absolute top-4 end-4 text-slate-400 hover:text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            
+            <div className="p-8">
+              <h2 className="text-2xl font-bold text-white mb-6 text-center">
+                {authMode === 'SIGN_IN' ? t.authModalTitleIn : t.authModalTitleUp}
+              </h2>
+              
+              <form onSubmit={handleAuthSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">
+                    {authMode === 'SIGN_UP' ? t.nicknameLabel : t.usernameLabel}
+                  </label>
+                  <input 
+                    type="text" 
+                    required
+                    value={usernameInput}
+                    onChange={(e) => setUsernameInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                    dir="auto"
+                  />
+                </div>
+                
+                {authMode === 'SIGN_UP' && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">{t.emailLabel}</label>
+                      <input 
+                        type="email" 
+                        required
+                        value={emailInput}
+                        onChange={(e) => setEmailInput(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                        dir="ltr"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-slate-400 mb-1">{t.phoneLabel}</label>
+                      <input 
+                        type="tel" 
+                        required
+                        placeholder={t.phonePlaceholder}
+                        value={phoneInput}
+                        onChange={(e) => setPhoneInput(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                        dir="ltr"
+                      />
+                    </div>
+                  </>
+                )}
+                
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-1">{t.passwordLabel}</label>
+                  <input 
+                    type="password" 
+                    required
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                    dir="ltr"
+                  />
+                </div>
+                
+                <button 
+                  type="submit"
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors mt-6 shadow-lg shadow-indigo-500/20"
+                >
+                  {t.submit}
+                </button>
+              </form>
+              
+              <div className="mt-6 text-center">
+                <button 
+                  onClick={() => setAuthMode(prev => prev === 'SIGN_IN' ? 'SIGN_UP' : 'SIGN_IN')}
+                  className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors font-medium"
+                >
+                  {authMode === 'SIGN_IN' ? t.switchToSignUp : t.switchToSignIn}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
