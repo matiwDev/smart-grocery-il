@@ -22,12 +22,14 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
   const [passwordInput, setPasswordInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [verificationNotice, setVerificationNotice] = useState('');
 
   if (authMode === 'NONE') return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    setVerificationNotice('');
     setIsLoading(true);
 
     let userProfile = {
@@ -48,6 +50,11 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
           const { data: authData, error: authError } = await supabase.auth.signUp({
             email: emailInput.trim(),
             password: passwordInput.trim(),
+            options: {
+              data: {
+                phone: phoneInput.trim()
+              }
+            }
           });
           
           if (authError) throw authError;
@@ -65,6 +72,12 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
             });
             
             if (profileError) throw profileError;
+            
+            if (!authData.session) {
+              setVerificationNotice(t.verificationNotice || 'Please verify your email to log in');
+              setIsLoading(false);
+              return;
+            }
           }
         } else {
           const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -194,6 +207,12 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
                 dir="ltr"
               />
             </div>
+            
+            {verificationNotice && (
+              <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3 rounded-xl mt-4 text-sm text-center">
+                {verificationNotice}
+              </div>
+            )}
             
             <button 
               type="submit"
