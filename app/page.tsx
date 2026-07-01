@@ -351,67 +351,96 @@ export default function SmartGroceryDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
-  useEffect(() => {
-     const syncBasket = async () => {
-        if (!isBasketLoaded || !currentUser?.id || currentUser.id === '00000000-0000-0000-0000-000000000000' || !activeBasketId) return;
-        
-        const getFallbackData = () => {
-          console.log('Using high-fidelity local text-parser fallback for basket items due to offline status.');
-          // Simulate local sync success for uninterrupted experience
-        };
-
-        try {
-           if (!supabase) throw new Error('Supabase not available');
-           
-           const itemsPayload = basket.map(item => ({
-              basket_id: activeBasketId,
-              product_name: item.name,
-              quantity_value: item.quantity
-           }));
-           
-           // Instantly fire asynchronous update directly mapping to basket_items table
-           const { error: deleteErr } = await supabase.from('basket_items').delete().eq('basket_id', activeBasketId);
-           if (deleteErr) throw deleteErr;
-           
-           if (itemsPayload.length > 0) {
-             const { error: insertErr } = await supabase.from('basket_items').insert(itemsPayload);
-             if (insertErr) throw insertErr;
-           }
-        } catch (e) {
-           console.error('Failed to sync basket, switching to local mode', e);
-           getFallbackData();
-        }
-     };
-     
-     const timeoutId = setTimeout(syncBasket, 1000);
-     return () => clearTimeout(timeoutId);
-  }, [basket, isBasketLoaded, currentUser, activeBasketId]);
-
   const filteredProducts = MOCK_PRODUCTS.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  const handleAddProduct = (product: { id: string, name: string, basePrice: number }) => {
+  const handleAddProduct = async (product: { id: string, name: string, basePrice: number }) => {
+    let newItemDbId: string | undefined = undefined;
+    const existing = basket.find(item => item.id === product.id);
+    
+    const getFallbackData = () => {
+       console.log('Using high-fidelity local text-parser fallback for add product due to offline status.');
+    };
+
+    try {
+      if (!supabase) throw new Error("Offline");
+      if (existing) {
+         const newQ = existing.quantity + 1;
+         if (existing.dbId) {
+            const { error } = await supabase.from('basket_items').update({ quantity_value: newQ }).eq('id', existing.dbId);
+            if (error) throw error;
+         }
+      } else {
+         if (activeBasketId) {
+           const { data, error } = await supabase.from('basket_items').insert({
+             basket_id: activeBasketId,
+             product_name: product.name,
+             quantity_value: 1
+           }).select().single();
+           if (error) throw error;
+           if (data) newItemDbId = data.id;
+         }
+      }
+    } catch(e) {
+      console.error(e);
+      getFallbackData();
+    }
+
     setBasket(prev => {
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
         return prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
       }
-      return [...prev, { ...product, quantity: 1 }];
+      return [...prev, { ...product, quantity: 1, dbId: newItemDbId }];
     });
     setSearchQuery('');
     setShowPredictions(false);
   };
 
-  const updateQuantity = (id: string, delta: number) => {
+  const updateQuantity = async (id: string, delta: number) => {
+    const item = basket.find(i => i.id === id);
+    if (!item) return;
+    const newQ = Math.max(1, item.quantity + delta);
+    if (newQ === item.quantity) return;
+    
+    const getFallbackData = () => {
+       console.log('Using high-fidelity local text-parser fallback for update quantity due to offline status.');
+    };
+    
+    try {
+      if (!supabase) throw new Error("Offline");
+      if (item.dbId) {
+         const { error } = await supabase.from('basket_items').update({ quantity_value: newQ }).eq('id', item.dbId);
+         if (error) throw error;
+      }
+    } catch(e) {
+      console.error(e);
+      getFallbackData();
+    }
+    
     setBasket(prev => prev.map(item => {
       if (item.id === id) {
-        const newQ = Math.max(1, item.quantity + delta);
         return { ...item, quantity: newQ };
       }
       return item;
     }));
   };
 
-  const removeProduct = (id: string) => {
+  const removeProduct = async (id: string) => {
+    const item = basket.find(i => i.id === id);
+    const getFallbackData = () => {
+       console.log('Using high-fidelity local text-parser fallback for remove product due to offline status.');
+    };
+    try {
+      if (!supabase) throw new Error("Offline");
+      if (item && item.dbId) {
+         const { error } = await supabase.from('basket_items').delete().eq('id', item.dbId);
+         if (error) throw error;
+      }
+    } catch(e) {
+      console.error(e);
+      getFallbackData();
+    }
+
     setBasket(prev => prev.filter(item => item.id !== id));
   };
 
@@ -1010,7 +1039,30 @@ export default function SmartGroceryDashboard() {
       <AuthModal 
         authMode={authMode} 
         setAuthMode={setAuthMode} 
-        onAuthSuccess={setCurrentUser} 
+        onAuthSuccess={async (nickname) => {
+           if (supabase) {
+             const { data: { user } } = await supabase.auth.getUser();
+             if (user) {
+               const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+               setCurrentUser({
+                 id: user.id,
+                 nickname: nickname || profile?.nickname || 'User',
+                 email: profile?.email || user.email || '',
+                 phone: profile?.phone_number || '',
+                 avatar: profile?.avatar_url || 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_01_u3edkv.png'
+               });
+               if (profile?.selected_skin) setSkin(profile.selected_skin as Skin);
+             }
+           } else {
+             setCurrentUser({
+               id: '00000000-0000-0000-0000-000000000000',
+               nickname: nickname || 'Mock User',
+               email: 'mock@example.com',
+               phone: '',
+               avatar: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_01_u3edkv.png'
+             });
+           }
+        }} 
         t={t} 
       />
 

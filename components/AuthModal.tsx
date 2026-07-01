@@ -8,12 +8,12 @@ const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supa
 
 export type AuthMode = 'SIGN_IN' | 'SIGN_UP' | 'NONE';
 
-interface AuthModalProps {
-  authMode: AuthMode;
-  setAuthMode: (mode: AuthMode) => void;
-  onAuthSuccess: (userProfile: any) => void;
-  t: any;
-}
+  interface AuthModalProps {
+    authMode: AuthMode;
+    setAuthMode: (mode: AuthMode) => void;
+    onAuthSuccess: (nickname: string) => void;
+    t: any;
+  }
 
 export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModalProps) {
   const [usernameInput, setUsernameInput] = useState('');
@@ -94,7 +94,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
             }
           }
         }
-        onAuthSuccess(userProfile);
+        onAuthSuccess(userProfile.nickname);
         setAuthMode('NONE');
       } catch (err: any) {
         console.error('Auth error:', err);
@@ -103,7 +103,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
         const getFallbackData = () => {
           console.log('Using high-fidelity local text-parser fallback for auth due to offline status.');
           // Simulate local sync success for uninterrupted experience
-          onAuthSuccess(userProfile);
+          onAuthSuccess(userProfile.nickname);
           setAuthMode('NONE');
         };
         getFallbackData();
@@ -112,7 +112,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
       }
     } else {
       // Offline / no DB fallback
-      onAuthSuccess(userProfile);
+      onAuthSuccess(userProfile.nickname);
       setAuthMode('NONE');
       setIsLoading(false);
     }
