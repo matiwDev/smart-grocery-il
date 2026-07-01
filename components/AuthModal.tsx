@@ -123,7 +123,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
       <div className="bg-slate-900 border border-slate-800 shadow-2xl rounded-3xl w-full max-w-md overflow-hidden relative">
         <button 
           onClick={() => setAuthMode('NONE')}
-          className="absolute top-4 end-4 text-slate-400 hover:text-white transition-colors"
+          className="absolute top-4 end-4 text-slate-400 hover:text-white transition-colors p-3 -m-3"
         >
           <X className="w-5 h-5" />
         </button>
@@ -150,7 +150,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
                    required
                    value={usernameInput}
                    onChange={(e) => setUsernameInput(e.target.value)}
-                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                   className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
                    dir="auto"
                  />
                </div>
@@ -163,7 +163,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
                 required
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
                 dir="ltr"
               />
             </div>
@@ -177,7 +177,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
                    placeholder={t.phonePlaceholder}
                    value={phoneInput}
                    onChange={(e) => setPhoneInput(e.target.value)}
-                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                   className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
                    dir="ltr"
                  />
                </div>
@@ -190,7 +190,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
                 required
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
                 dir="ltr"
               />
             </div>

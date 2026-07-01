@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, ExternalLink, Zap, BarChart3, Clock, TrendingDown, LogIn, LogOut, Globe, User, X, Menu, Home, List, Users, Search, MapPin, Trash2, Plus, Navigation, ChevronDown, ShoppingBag, ChefHat, Store, Box } from 'lucide-react';
+import { ShoppingCart, ExternalLink, Zap, BarChart3, Clock, TrendingDown, LogIn, LogOut, Globe, User, X, Menu, Home, List, Users, Search, MapPin, Trash2, Plus, Navigation, ChevronDown, ShoppingBag, ChefHat, Store, Box, LifeBuoy, MessageCircle, Mail } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { createClient } from '@supabase/supabase-js';
 import { BranchMapContainer } from '@/components/BranchMapContainer';
@@ -104,6 +104,11 @@ const DICTIONARY = {
     verificationSent: "קוד אימות נשלח",
     location: "מיקום",
     uploadPicture: "העלה תמונה",
+    dataIngestionWindow: "חלון עדכון נתוני רשתות",
+    dataIngestionDesc: "למניעת עיכובים במהלך הקניות ביום ולייעול עומס השרתים, עדכוני נתוני הרשתות מתבצעים אוטומטית בשעות השפל.",
+    supportChannel: "תמיכה ושירות",
+    whatsappExpress: "WhatsApp אקספרס",
+    emailSupport: "טופס פנייה במייל",
   },
   en: {
     appTitle: "Smart Grocery IL",
@@ -186,6 +191,11 @@ const DICTIONARY = {
     verificationSent: "Verification code sent",
     location: "Location",
     uploadPicture: "Upload Picture",
+    dataIngestionWindow: "Provider Data Ingestion Window",
+    dataIngestionDesc: "To ensure zero-lag shopping trips and optimized server utilization during high-volume daylight hours, data processing is automatically delayed to these hours.",
+    supportChannel: "Customer Support",
+    whatsappExpress: "WhatsApp Express Support",
+    emailSupport: "Email Support Form",
   }
 };
 
@@ -243,6 +253,9 @@ export default function SmartGroceryDashboard() {
   const [isEditingCredentials, setIsEditingCredentials] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationFlash, setVerificationFlash] = useState(false);
+  
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [dataWindow, setDataWindow] = useState('02:00 AM - 04:00 AM');
 
   // List Creator State
   const [basket, setBasket] = useState<BasketItem[]>([]);
@@ -709,9 +722,9 @@ export default function SmartGroceryDashboard() {
                       <div className="flex items-center gap-4 sm:gap-6 w-full sm:w-auto justify-between sm:justify-end">
                         {/* Quantity Controls */}
                         <div className="flex items-center bg-slate-900 rounded-xl border border-slate-700 p-1">
-                          <button onClick={() => updateQuantity(item.id, -1)} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors">-</button>
+                          <button onClick={() => updateQuantity(item.id, -1)} className="w-11 h-11 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors">-</button>
                           <span className="w-10 text-center font-mono font-medium text-slate-200">{item.quantity}</span>
-                          <button onClick={() => updateQuantity(item.id, 1)} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors">+</button>
+                          <button onClick={() => updateQuantity(item.id, 1)} className="w-11 h-11 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors">+</button>
                         </div>
                         
                         {/* Item Total */}
@@ -722,7 +735,7 @@ export default function SmartGroceryDashboard() {
                         {/* Remove */}
                         <button 
                           onClick={() => removeProduct(item.id)}
-                          className="w-10 h-10 flex items-center justify-center text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors sm:opacity-0 group-hover:opacity-100 shrink-0"
+                          className="w-11 h-11 flex items-center justify-center text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors sm:opacity-0 group-hover:opacity-100 shrink-0"
                         >
                           <Trash2 className="w-5 h-5" />
                         </button>
@@ -843,6 +856,22 @@ export default function SmartGroceryDashboard() {
                          className={`w-full bg-slate-950/50 border rounded-xl px-4 py-3 text-slate-100 focus:outline-none transition-colors ${isEditingCredentials ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-700 opacity-75 cursor-not-allowed'}`}
                        />
                      </div>
+                   </div>
+                   
+                   <div className="mt-8 pt-8 border-t border-slate-800">
+                     <h3 className="text-lg font-semibold text-slate-200 mb-4">{t.dataIngestionWindow}</h3>
+                     <p className="text-sm text-slate-400 mb-4 leading-relaxed">{t.dataIngestionDesc}</p>
+                     <select 
+                       value={dataWindow} 
+                       onChange={(e) => setDataWindow(e.target.value)} 
+                       disabled={!isEditingCredentials}
+                       className={`w-full md:w-auto min-w-[250px] bg-slate-950/50 border rounded-xl px-4 py-3 text-slate-100 focus:outline-none transition-colors ${isEditingCredentials ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-700 opacity-75 cursor-not-allowed'}`}
+                       dir="ltr"
+                     >
+                       <option value="00:00 AM - 02:00 AM">00:00 AM - 02:00 AM</option>
+                       <option value="02:00 AM - 04:00 AM">02:00 AM - 04:00 AM [Off-Peak Minimal Traffic]</option>
+                       <option value="04:00 AM - 06:00 AM">04:00 AM - 06:00 AM</option>
+                     </select>
                    </div>
                    
                    <div className="mt-6 flex justify-end items-center gap-4">
@@ -1007,7 +1036,7 @@ export default function SmartGroceryDashboard() {
             >
               <div className="p-6 flex items-center justify-between border-b border-slate-800">
                 <h2 className="text-lg font-bold text-slate-100">{t.appTitle}</h2>
-                <button onClick={() => setIsDrawerOpen(false)} className="text-slate-400 hover:text-white transition-colors p-2 -m-2">
+                <button onClick={() => setIsDrawerOpen(false)} className="text-slate-400 hover:text-white transition-colors p-3 -m-3">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -1017,6 +1046,13 @@ export default function SmartGroceryDashboard() {
                 <DrawerItem view="SAVED_LISTS" currentView={currentView} setCurrentView={setCurrentView} icon={List} label={t.navSavedLists} close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="PRICE_UPDATES" currentView={currentView} setCurrentView={setCurrentView} icon={TrendingDown} label={t.navPriceUpdates} close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="COMMUNITY" currentView={currentView} setCurrentView={setCurrentView} icon={Users} label={t.navCommunity} close={() => setIsDrawerOpen(false)} />
+                <button
+                  onClick={() => { setIsDrawerOpen(false); setIsSupportOpen(true); }}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-slate-100"
+                >
+                  <LifeBuoy className="w-5 h-5" />
+                  {t.supportChannel}
+                </button>
               </div>
               <div className="p-4 border-t border-slate-800">
                 {currentUser ? (
@@ -1033,6 +1069,65 @@ export default function SmartGroceryDashboard() {
               </div>
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Support Modal */}
+      <AnimatePresence>
+        {isSupportOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsSupportOpen(false)}
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative bg-slate-900 border border-slate-800 shadow-2xl rounded-3xl w-full max-w-md overflow-hidden"
+            >
+              <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <LifeBuoy className="w-6 h-6 text-indigo-400" />
+                  <h2 className="text-xl font-bold text-white">{t.supportChannel}</h2>
+                </div>
+                <button onClick={() => setIsSupportOpen(false)} className="text-slate-400 hover:text-white transition-colors p-3 -m-3">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="p-6 space-y-4">
+                <a
+                  href={`https://wa.me/972500000000?text=${encodeURIComponent(lang === 'he' ? 'שלום, אני זקוק לעזרה באפליקציית Smart Grocery.' : 'Hello, I need help with the Smart Grocery app.')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full flex items-center justify-between p-4 bg-[#25D366]/10 border border-[#25D366]/30 hover:bg-[#25D366]/20 transition-colors rounded-2xl group"
+                >
+                  <div className="flex items-center gap-3">
+                    <MessageCircle className="w-6 h-6 text-[#25D366]" />
+                    <span className="font-semibold text-slate-100">{t.whatsappExpress}</span>
+                  </div>
+                  <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-white transition-colors" />
+                </a>
+
+                <form action="https://formspree.io/f/mbllygkq" method="POST" className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50 space-y-3">
+                  <div className="flex items-center gap-3 mb-2">
+                    <Mail className="w-5 h-5 text-indigo-400" />
+                    <span className="font-semibold text-slate-100">{t.emailSupport}</span>
+                  </div>
+                  <input type="email" name="email" required placeholder={t.emailLabel} className="w-full bg-slate-950/50 border border-slate-700 rounded-xl px-4 py-2.5 min-h-[44px] text-sm text-slate-100 focus:outline-none focus:border-indigo-500" dir="ltr" />
+                  <input type="text" name="subject" required placeholder="Subject / נושא הפנייה" className="w-full bg-slate-950/50 border border-slate-700 rounded-xl px-4 py-2.5 min-h-[44px] text-sm text-slate-100 focus:outline-none focus:border-indigo-500" dir="auto" />
+                  <textarea name="message" required placeholder="Your message... / תוכן הפנייה..." rows={3} className="w-full bg-slate-950/50 border border-slate-700 rounded-xl px-4 py-3 min-h-[44px] text-sm text-slate-100 focus:outline-none focus:border-indigo-500 resize-none" dir="auto"></textarea>
+                  <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 rounded-xl transition-colors shadow-lg shadow-indigo-500/20 min-h-[44px] mt-2">
+                    {t.submit}
+                  </button>
+                </form>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
