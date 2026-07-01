@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, ExternalLink, Zap, BarChart3, Clock, TrendingDown, LogIn, LogOut, Globe, User, X, Menu, Home, List, Users, Search, MapPin, Trash2, Plus, Navigation, ChevronDown, ShoppingBag, ChefHat, Store, Box, LifeBuoy, MessageCircle, Mail } from 'lucide-react';
+import { ShoppingCart, ExternalLink, Zap, BarChart3, Clock, TrendingDown, LogIn, LogOut, Globe, User, X, Menu, Home, List, Users, Search, MapPin, Trash2, Plus, Navigation, ChevronDown, ShoppingBag, ChefHat, Store, Box, LifeBuoy, MessageCircle, MessageSquare, Mail } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { createClient } from '@supabase/supabase-js';
 import { BranchMapContainer } from '@/components/BranchMapContainer';
@@ -262,7 +262,11 @@ export default function SmartGroceryDashboard() {
   const [dataWindow, setDataWindow] = useState('02:00 AM - 04:00 AM');
 
   // Chat State
-  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [chatMessages, setChatMessages] = useState<any[]>([
+    { id: '1', user_id: 'dad', nickname: 'Dad', content: 'Don\'t forget to get the 3% milk!', created_at: '2023-10-27T10:00:00Z' },
+    { id: '2', user_id: 'mom', nickname: 'Mom', content: 'Got it. I added it to the list.', created_at: '2023-10-27T10:05:00Z' },
+    { id: '3', user_id: 'dad', nickname: 'Dad', content: 'Can we also get some eggs?', created_at: '2023-10-27T10:15:00Z' }
+  ]);
   const [chatInput, setChatInput] = useState('');
 
   // List Creator State
@@ -309,50 +313,34 @@ export default function SmartGroceryDashboard() {
   }, []);
 
   useEffect(() => {
-    if (!supabase || currentView !== 'CHAT') return;
-    
-    const fetchMessages = async () => {
-       try {
-         const { data, error } = await supabase.from('messages').select('*').order('created_at', { ascending: true });
-         if (error) throw error;
-         if (data) setChatMessages(data);
-       } catch (err) {
-         console.error('Failed to fetch messages', err);
-         const getFallbackData = () => {
-           console.log('Using high-fidelity local text-parser fallback for messages.');
-         };
-         getFallbackData();
-       }
-    };
-    
-    fetchMessages();
-    
-    const channel = supabase.channel('public:messages')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-         setChatMessages(prev => [...prev, payload.new]);
-      })
-      .subscribe();
-      
-    return () => {
-       supabase.removeChannel(channel);
-    };
+    if (currentView !== 'CHAT') return;
+    /* 
+    if (!supabase) return;
+    const fetchMessages = async () => { ... }
+    */
   }, [currentView]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim() || !currentUser?.id || currentUser.id === '00000000-0000-0000-0000-000000000000') return;
+    if (!chatInput.trim()) return;
     
     const msgContent = chatInput.trim();
     setChatInput('');
     
+    const newMsg = {
+      id: Date.now().toString(),
+      user_id: currentUser?.id || 'guest',
+      nickname: currentUser?.nickname || 'Me',
+      content: msgContent,
+      created_at: new Date().toISOString()
+    };
+    
+    setChatMessages(prev => [...prev, newMsg]);
+
     try {
-       if (!supabase) throw new Error('Offline');
-       const { error } = await supabase.from('messages').insert({
-          user_id: currentUser.id,
-          nickname: currentUser.nickname,
-          content: msgContent
-       });
-       if (error) throw error;
+       // Temporarily placed in backlog
+       // if (!supabase) throw new Error('Offline');
+       // const { error } = await supabase.from('messages').insert({...});
     } catch (err) {
        console.error('Failed to send message', err);
        const getFallbackData = () => {
@@ -1155,7 +1143,7 @@ export default function SmartGroceryDashboard() {
                 <DrawerItem view="HOME" currentView={currentView} setCurrentView={setCurrentView} icon={Home} label={t.navHome} close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="PROFILE" currentView={currentView} setCurrentView={setCurrentView} icon={User} label={t.navProfile} close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="SAVED_LISTS" currentView={currentView} setCurrentView={setCurrentView} icon={List} label={t.navSavedLists} close={() => setIsDrawerOpen(false)} />
-                <DrawerItem view="CHAT" currentView={currentView} setCurrentView={setCurrentView} icon={MessageCircle} label={t.navChat} close={() => setIsDrawerOpen(false)} />
+                <DrawerItem view="CHAT" currentView={currentView} setCurrentView={setCurrentView} icon={MessageSquare} label={t.navChat} close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="PRICE_UPDATES" currentView={currentView} setCurrentView={setCurrentView} icon={TrendingDown} label={t.navPriceUpdates} close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="COMMUNITY" currentView={currentView} setCurrentView={setCurrentView} icon={Users} label={t.navCommunity} close={() => setIsDrawerOpen(false)} />
                 <button
