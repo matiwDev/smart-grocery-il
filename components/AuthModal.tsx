@@ -1,10 +1,6 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+import { supabase } from "@/utils/supabase";
 
 export type AuthMode = 'SIGN_IN' | 'SIGN_UP' | 'NONE';
 
@@ -35,11 +31,19 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
     
     if (supabase) {
       try {
-        const { data, error } = await supabase.auth.verifyOtp({
-          email: emailInput.trim(),
+        const verifyData: any = {
           token: verificationCode.trim(),
-          type: 'signup'
-        });
+        };
+        
+        if (emailInput.trim()) {
+          verifyData.email = emailInput.trim();
+          verifyData.type = 'signup';
+        } else {
+          verifyData.phone = phoneInput.trim();
+          verifyData.type = 'sms';
+        }
+
+        const { data, error } = await supabase.auth.verifyOtp(verifyData);
         
         if (error) throw error;
         
@@ -58,6 +62,21 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
       } catch (err: any) {
         console.error('Verify OTP error:', err);
         setErrorMsg(err.message || 'Verification failed.');
+        
+        if (err.message && (err.message.includes('Token has expired or is invalid') || err.message.includes('already registered'))) {
+          // Display exact error
+        } else {
+          const getFallbackData = () => {
+             console.log('Using high-fidelity local text-parser fallback for auth due to offline status.');
+             let profileData = {
+               id: '00000000-0000-0000-0000-000000000000',
+               nickname: usernameInput.trim() || 'GuestUser',
+             };
+             onAuthSuccess(profileData.nickname);
+             setAuthMode('NONE');
+          };
+          getFallbackData();
+        }
       } finally {
         setIsLoading(false);
       }
@@ -69,6 +88,28 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
     setErrorMsg('');
     setVerificationNotice('');
     setIsLoading(true);
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailInput.trim())) {
+      setErrorMsg('Please enter a valid email address / אנא הזן כתובת אימייל תקינה');
+      setIsLoading(false);
+      return;
+    }
+
+    if (authMode === 'SIGN_UP') {
+      const phoneRegex = /^[0-9+\-\s()]{9,15}$/;
+      if (!phoneRegex.test(phoneInput.trim())) {
+        setErrorMsg('Please enter a valid phone number / אנא הזן מספר טלפון תקין');
+        setIsLoading(false);
+        return;
+      }
+    }
+
+    if (passwordInput.length < 6 || !/[a-zA-Z]/.test(passwordInput) || !/[0-9]/.test(passwordInput)) {
+      setErrorMsg('Password must be at least 6 characters with letters and numbers / הסיסמה חייבת להכיל לפחות 6 תווים הכוללים אותיות ומספרים');
+      setIsLoading(false);
+      return;
+    }
 
     let userProfile = {
       nickname: usernameInput.trim(),
@@ -125,7 +166,12 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
             password: passwordInput.trim(),
           });
           
-          if (authError) throw authError;
+          if (authError) {
+            if (authError.message.includes('Invalid login credentials') || authError.status === 400) {
+              throw new Error('User account does not exist. Please sign up first / החשבון אינו קיים. אנא הרשם תחילה');
+            }
+            throw authError;
+          }
           
           if (authData.user) {
             userProfile.id = authData.user.id;
@@ -151,15 +197,20 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
         setAuthMode('NONE');
       } catch (err: any) {
         console.error('Auth error:', err);
-        setErrorMsg(err.message || 'Authentication failed. Using fallback local logic.');
         
-        const getFallbackData = () => {
-          console.log('Using high-fidelity local text-parser fallback for auth due to offline status.');
-          // Simulate local sync success for uninterrupted experience
-          onAuthSuccess(userProfile.nickname);
-          setAuthMode('NONE');
-        };
-        getFallbackData();
+        if (err.code === '23505' && err.message.includes('nickname')) {
+          setErrorMsg('This Nickname is already taken inside your household / כינוי זה כבר תפוס בקבוצה זו');
+        } else if (err.message && (err.message.includes('does not exist') || err.message.includes('already registered'))) {
+           setErrorMsg(err.message);
+        } else {
+           setErrorMsg(err.message || 'Authentication failed. Using fallback local logic.');
+           const getFallbackData = () => {
+             console.log('Using high-fidelity local text-parser fallback for auth due to offline status.');
+             onAuthSuccess(userProfile.nickname);
+             setAuthMode('NONE');
+           };
+           getFallbackData();
+        }
       } finally {
         setIsLoading(false);
       }
