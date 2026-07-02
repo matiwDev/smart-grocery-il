@@ -23,8 +23,46 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [verificationNotice, setVerificationNotice] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
 
   if (authMode === 'NONE') return null;
+
+  const handleVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setIsLoading(true);
+    
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.auth.verifyOtp({
+          email: emailInput.trim(),
+          token: verificationCode.trim(),
+          type: 'signup'
+        });
+        
+        if (error) throw error;
+        
+        if (data.session) {
+          // Success
+          let profileData = {
+            id: data.user?.id,
+            nickname: usernameInput.trim(),
+            email: emailInput.trim(),
+            phone: phoneInput.trim(),
+            avatar: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_01_u3edkv.png'
+          };
+          onAuthSuccess(profileData.nickname);
+          setAuthMode('NONE');
+        }
+      } catch (err: any) {
+        console.error('Verify OTP error:', err);
+        setErrorMsg(err.message || 'Verification failed.');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,7 +90,8 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
             password: passwordInput.trim(),
             options: {
               data: {
-                phone: phoneInput.trim()
+                phone: phoneInput.trim(),
+                nickname: usernameInput.trim()
               }
             }
           });
@@ -75,6 +114,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
             
             if (!authData.session) {
               setVerificationNotice(t.verificationNotice || 'Please verify your email to log in');
+              setIsVerifying(true);
               setIsLoading(false);
               return;
             }
@@ -152,76 +192,101 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
             </div>
           )}
           
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {authMode === 'SIGN_UP' && (
-               <div>
-                 <label className="block text-sm font-medium text-slate-400 mb-1">
-                   {t.nicknameLabel}
-                 </label>
-                 <input 
-                   type="text" 
-                   required
-                   value={usernameInput}
-                   onChange={(e) => setUsernameInput(e.target.value)}
-                   className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-                   dir="auto"
-                 />
-               </div>
-            )}
-            
-            <div>
-              <label className="block text-sm font-medium text-slate-400 mb-1">{t.emailLabel}</label>
-              <input 
-                type="email" 
-                required
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-                dir="ltr"
-              />
-            </div>
-            
-            {authMode === 'SIGN_UP' && (
-               <div>
-                 <label className="block text-sm font-medium text-slate-400 mb-1">{t.phoneLabel}</label>
-                 <input 
-                   type="tel" 
-                   required
-                   placeholder={t.phonePlaceholder}
-                   value={phoneInput}
-                   onChange={(e) => setPhoneInput(e.target.value)}
-                   className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-                   dir="ltr"
-                 />
-               </div>
-            )}
-            
-            <div>
-              <label className="block text-sm font-medium text-slate-400 mb-1">{t.passwordLabel}</label>
-              <input 
-                type="password" 
-                required
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
-                dir="ltr"
-              />
-            </div>
-            
-            {verificationNotice && (
-              <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3 rounded-xl mt-4 text-sm text-center">
+          {isVerifying ? (
+            <form onSubmit={handleVerify} className="space-y-4 mt-6">
+              <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3 rounded-xl mb-6 text-sm text-center font-medium">
                 {verificationNotice}
               </div>
-            )}
-            
-            <button 
-              type="submit"
-              disabled={isLoading}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors mt-6 shadow-lg shadow-indigo-500/20 disabled:opacity-50"
-            >
-              {isLoading ? '...' : t.submit}
-            </button>
-          </form>
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-1 text-center">
+                  {t.enterVerificationCode || "Enter 6-digit code"}
+                </label>
+                <input 
+                  type="text" 
+                  required
+                  maxLength={6}
+                  value={verificationCode}
+                  onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
+                  className="w-full text-center tracking-widest text-2xl font-mono min-h-[56px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                  dir="ltr"
+                />
+              </div>
+              
+              <button 
+                type="submit"
+                disabled={isLoading || verificationCode.length !== 6}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors mt-6 shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+              >
+                {isLoading ? '...' : (t.verify || 'Verify')}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {authMode === 'SIGN_UP' && (
+                 <div>
+                   <label className="block text-sm font-medium text-slate-400 mb-1">
+                     {t.nicknameLabel}
+                   </label>
+                   <input 
+                     type="text" 
+                     required
+                     value={usernameInput}
+                     onChange={(e) => setUsernameInput(e.target.value)}
+                     className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                     dir="auto"
+                   />
+                 </div>
+              )}
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-1">{t.emailLabel}</label>
+                <input 
+                  type="email" 
+                  required
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                  dir="ltr"
+                />
+              </div>
+              
+              {authMode === 'SIGN_UP' && (
+                 <div>
+                   <label className="block text-sm font-medium text-slate-400 mb-1">{t.phoneLabel}</label>
+                   <input 
+                     type="tel" 
+                     required
+                     placeholder={t.phonePlaceholder}
+                     value={phoneInput}
+                     onChange={(e) => setPhoneInput(e.target.value)}
+                     className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                     dir="ltr"
+                   />
+                 </div>
+              )}
+              
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-1">{t.passwordLabel}</label>
+                <input 
+                  type="password" 
+                  required
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                  dir="ltr"
+                />
+              </div>
+              
+              <button 
+                type="submit"
+                disabled={isLoading}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors mt-6 shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+              >
+                {isLoading ? '...' : t.submit}
+              </button>
+            </form>
+          )}
           
           <div className="mt-6 text-center">
             <button 

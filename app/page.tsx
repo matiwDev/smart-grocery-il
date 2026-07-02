@@ -110,6 +110,8 @@ const DICTIONARY = {
     whatsappExpress: "WhatsApp אקספרס",
     emailSupport: "טופס פנייה במייל",
     verificationNotice: "אנא אמת את כתובת האימייל שלך כדי להתחבר",
+    enterVerificationCode: "הזן קוד בן 6 ספרות",
+    verify: "אימות",
     navChat: "צ'אט משפחתי",
   },
   en: {
@@ -199,6 +201,8 @@ const DICTIONARY = {
     whatsappExpress: "WhatsApp Express Support",
     emailSupport: "Email Support Form",
     verificationNotice: "Please verify your email to log in",
+    enterVerificationCode: "Enter 6-digit code",
+    verify: "Verify",
     navChat: "Household Chat",
   }
 };
@@ -1156,7 +1160,16 @@ export default function SmartGroceryDashboard() {
               </div>
               <div className="p-4 border-t border-slate-800">
                 {currentUser ? (
-                   <button onClick={() => { setCurrentUser(null); setIsDrawerOpen(false); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition-colors">
+                   <button onClick={async () => {
+                     try {
+                       if (supabase) await supabase.auth.signOut();
+                     } catch (e) {
+                       console.error('Signout error', e);
+                     }
+                     setCurrentUser(null);
+                     setIsDrawerOpen(false);
+                     setCurrentView('HOME');
+                   }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition-colors">
                      <LogOut className="w-5 h-5" />
                      {t.signOut}
                    </button>
