@@ -12,7 +12,6 @@
 
 # production process manager tracking
 .build
-build/
 
 # debug logs
 npm-debug.log*
