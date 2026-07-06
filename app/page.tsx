@@ -652,7 +652,7 @@ export default function SmartGroceryDashboard() {
         <div className="flex flex-wrap items-center gap-4">
           <button
             onClick={() => setLang((l) => l === 'he' ? 'en' : 'he')}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 transition-colors px-3 py-1.5 rounded-full border border-slate-700 text-xs font-semibold text-slate-200"
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 transition-colors px-3 rounded-full border border-slate-700 text-xs font-semibold text-slate-200 min-h-[44px]"
           >
             <Globe className="w-4 h-4 text-indigo-400" />
             {lang === 'he' ? 'EN' : 'עברית'}
@@ -675,7 +675,7 @@ export default function SmartGroceryDashboard() {
 
           <button
             onClick={() => setIsDrawerOpen(true)}
-            className="w-10 h-10 bg-indigo-600 hover:bg-indigo-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 transition-colors"
+            className="w-11 h-11 bg-indigo-600 hover:bg-indigo-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 transition-colors"
           >
             <Menu className="w-5 h-5" />
           </button>
