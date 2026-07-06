@@ -9,13 +9,9 @@ import {
   ArrowDown, Loader2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { createClient } from '@supabase/supabase-js';
 import { BranchMapContainer } from '@/components/BranchMapContainer';
 import { AuthModal, AuthMode } from '@/components/AuthModal';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+import { supabase } from '@/utils/supabase';
 
 type Lang = 'he' | 'en';
 type View = 'HOME' | 'PROFILE' | 'SAVED_LISTS' | 'PRICE_UPDATES' | 'COMMUNITY' | 'LOCATION' | 'CHAT';
@@ -315,6 +311,15 @@ export default function SmartGroceryDashboard() {
   const t = DICTIONARY[lang];
   const currentPalette = PALETTES[skin];
 
+  // ── Chain metadata (needed for display names before any search happens) ──────
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.from('chains').select('id, name_he, name_en, color_hex').then(({ data }) => {
+      if (data) setChains(data);
+    });
+  }, []);
+
   // ── Auth & profile load ──────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -353,9 +358,43 @@ export default function SmartGroceryDashboard() {
       .then(async ({ data: bData }) => {
         if (bData) {
           setActiveBasketId(bData.id);
-          // basket_items only have product_name — we need to re-resolve to product IDs
-          // For now we start with an empty basket and let user re-add
-          // Full resume-basket flow comes in Phase 1
+
+          const items = (bData.basket_items ?? []) as Array<{
+            id: string; product_id: string | null; product_name: string; quantity_value: number;
+          }>;
+          const productIds = items.map((i) => i.product_id).filter((id): id is string => !!id);
+
+          if (productIds.length > 0) {
+            const [{ data: products }, { data: prices }] = await Promise.all([
+              supabase.from('products').select('id, name_he, name_en, category').in('id', productIds),
+              supabase.from('latest_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', productIds),
+            ]);
+
+            const pricesByProduct: Record<string, Record<string, ChainPrice>> = {};
+            for (const p of prices ?? []) {
+              if (!pricesByProduct[p.product_id]) pricesByProduct[p.product_id] = {};
+              pricesByProduct[p.product_id][p.chain_id] = p as ChainPrice;
+            }
+
+            const rehydrated: BasketItem[] = items
+              .filter((i) => i.product_id)
+              .map((i) => {
+                const product = products?.find((p) => p.id === i.product_id);
+                const productPrices = pricesByProduct[i.product_id!] ?? {};
+                const priceValues = Object.values(productPrices).map((p) => p.price);
+                return {
+                  id: i.product_id!,
+                  dbId: i.id,
+                  name_he: product?.name_he ?? i.product_name,
+                  name_en: product?.name_en ?? null,
+                  category: product?.category ?? null,
+                  prices: productPrices,
+                  min_price: priceValues.length > 0 ? Math.min(...priceValues) : null,
+                  quantity: i.quantity_value ?? 1,
+                };
+              });
+            setBasket(rehydrated);
+          }
         } else {
           const { data: newB } = await supabase.from('baskets').insert({
             user_id: currentUser.id,
@@ -446,6 +485,7 @@ export default function SmartGroceryDashboard() {
     if (supabase && activeBasketId) {
       const { data } = await supabase.from('basket_items').insert({
         basket_id: activeBasketId,
+        product_id: product.id,
         product_name: product.name_he,
         quantity_value: 1,
       }).select().single();
