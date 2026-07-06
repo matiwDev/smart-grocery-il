@@ -718,8 +718,16 @@ export default function SmartGroceryDashboard() {
                       className="absolute top-full start-0 end-0 mt-2 bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-30"
                     >
                       {isSearching && (
-                        <div className="flex items-center gap-3 p-4 text-slate-400 text-sm">
-                          <Loader2 className="w-4 h-4 animate-spin" /> {t.searching}
+                        <div className="animate-pulse">
+                          {[0, 1, 2].map((i) => (
+                            <div key={i} className="flex items-center justify-between p-4 border-b border-slate-700/50 last:border-0">
+                              <div className="space-y-2">
+                                <div className="h-3.5 w-32 bg-slate-700/60 rounded-full" />
+                                <div className="h-2.5 w-20 bg-slate-700/40 rounded-full" />
+                              </div>
+                              <div className="h-3.5 w-14 bg-slate-700/60 rounded-full" />
+                            </div>
+                          ))}
                         </div>
                       )}
                       {!isSearching && searchResults.length === 0 && searchQuery && (
