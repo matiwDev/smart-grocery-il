@@ -300,6 +300,7 @@ export default function SmartGroceryDashboard() {
   const [location, setLocation] = useState('GPS');
   const [liveBranches, setLiveBranches] = useState<any[]>([]);
   const [activeMapPin, setActiveMapPin] = useState('gps');
+  const [preferredChainId, setPreferredChainId] = useState<string | null>(null);
 
   // Chat
   const [chatMessages, setChatMessages] = useState<any[]>([
@@ -552,10 +553,20 @@ export default function SmartGroceryDashboard() {
             ? `https://waze.com/ul?ll=${b.lat},${b.lng}&navigate=yes`
             : 'https://waze.com/ul',
           chain_id: b.chain_id,
+          lat: b.lat,
+          lng: b.lng,
+          color_hex: chains.find((c) => c.id === b.chain_id)?.color_hex ?? '#6366f1',
         })));
       }
     });
-  }, [currentView, lang]);
+  }, [currentView, lang, chains]);
+
+  // Pre-select the cheapest chain's first branch when arriving via "Navigate to cheapest"
+  useEffect(() => {
+    if (!preferredChainId || liveBranches.length === 0) return;
+    const match = liveBranches.find((b) => b.chain_id === preferredChainId);
+    if (match) setActiveMapPin(match.id);
+  }, [preferredChainId, liveBranches]);
 
   // ── Saved lists load ─────────────────────────────────────────────────────────
 
@@ -881,7 +892,11 @@ export default function SmartGroceryDashboard() {
                   {/* Navigate to cheapest button */}
                   {comparison.length > 0 && (
                     <button
-                      onClick={() => setCurrentView('LOCATION')}
+                      onClick={() => {
+                        const cheapest = comparison.slice().sort((a, b) => a.total - b.total)[0];
+                        setPreferredChainId(cheapest?.chain_id ?? null);
+                        setCurrentView('LOCATION');
+                      }}
                       className="mt-auto w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors shadow-lg shadow-indigo-500/20"
                     >
                       <Navigation className="w-4 h-4" />
@@ -904,6 +919,7 @@ export default function SmartGroceryDashboard() {
               liveBranches={liveBranches}
               activeMapPin={activeMapPin}
               setActiveMapPin={setActiveMapPin}
+              preferredChainId={preferredChainId}
               t={t}
             />
           </motion.div>
