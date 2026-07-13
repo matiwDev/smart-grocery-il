@@ -30,7 +30,9 @@ components/
   AuthModal.tsx                   # OTP sign-in / sign-up modal + "Dev Login" button (dev only)
   BranchMapContainer.tsx          # Branch list + map layout; dynamically imports BranchLeafletMap
   BranchLeafletMap.tsx            # Actual react-leaflet map — pins colored by chain color_hex,
-                                   # popups with Waze deep link, flyTo on active-pin change
+                                   # popups with Waze deep link, flyTo on active-pin change,
+                                   # optional userPosition prop renders a blue "you are here" pin
+                                   # and flies the map to it on first fix
 lib/
   supabaseServer.ts               # Service-role Supabase client (API routes only)
 utils/
@@ -170,6 +172,29 @@ profile/UI flows locally.
 - [ ] Either wire `app/api/baskets/sync/route.ts` into the frontend or remove it —
       it's currently unused dead code
 
+**Phase 3 in progress:**
+- [x] Chat message bubbles show a timestamp (today → time only, e.g. `14:32`;
+      older → `DD/MM HH:mm`, he-IL locale when `lang==='he'`). Still local mock
+      state (`chatMessages`) — not read from the `messages` table yet (see above).
+- [x] Save List / Clear List buttons under the Home basket. Save List prompts for
+      a name (default: today's date, `he-IL` format), inserts a new `baskets` row
+      + copies the current items into new `basket_items` rows, then clears the
+      *active* basket's items (the working basket keeps its `id`, it's just
+      emptied — the saved copy is the new row). Clear List just empties the
+      active basket's items after a `window.confirm`.
+- [x] Per-product price breakdown: each row under "מחיר לפריט" in the Price
+      Comparison panel is now a toggle button; expanding it shows every chain's
+      price for that product with cheapest/most-expensive highlighted
+      (green/red). Purely a `expandedPriceItemId` UI state, no new data fetch.
+- [x] GPS location + distance filter in the Location view: requests
+      `navigator.geolocation` on view load, centers the map + drops a blue
+      "you are here" pin on success, and adds a 1/3/5/10 km radius slider that
+      filters `liveBranches` client-side via a haversine distance calc. On
+      denial (or no `navigator.geolocation`), shows a city-search text input
+      that matches against both `city_he` and `city_en` instead. The
+      granted/denied/manual-city preference persists in `localStorage` under
+      `sg_location_pref` so a repeat visit can prefill the last city typed.
+
 ## Coding conventions
 - All components: functional, TypeScript strict
 - API routes: always use `lib/supabaseServer.ts` (service role), never the anon client
@@ -225,8 +250,24 @@ are run.
   `fetch(...)` + the service-role key instead of instantiating a full client
 - The slide-in nav drawer's open/close spring animation (`isDrawerOpen`, damping 25/
   stiffness 200) is slow to settle — automated clicks on drawer items can silently
-  land on stale coordinates mid-animation. Wait ~3-4s after opening it before clicking
-  a nav item, or drive it in code instead of through the browser
+  land on stale coordinates mid-animation. A 3-4s wait is sometimes not enough (seen
+  it still visibly sliding at 6s in one session); always take a fresh screenshot
+  right before clicking to confirm it's fully settled, don't just wait-and-click
+  blind, and prefer clicking by ref from a read_page taken after that screenshot
+  rather than a coordinate computed earlier
+- ESLint (`npm run lint`) currently fails outright with "Failed to patch ESLint
+  because the calling module was not recognized" from `@rushstack/eslint-patch`
+  (ESLint 9.39.1 incompatibility) — this is a tooling/config issue, not a sign your
+  change broke something. Use `npx tsc --noEmit` to typecheck instead until the
+  ESLint config is fixed
+- To check whether a `supabase/migrations/*.sql` file has actually been applied,
+  don't guess from the code — hit PostgREST directly with the service-role key
+  from `.env.local`: `curl "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/<table>?select=id&limit=1"
+  -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer
+  $SUPABASE_SERVICE_ROLE_KEY"`. A `PGRST205` (table) or `PGRST202`/`42703` (function/
+  column) response means it's not applied yet; 200 means it is. Faster and more
+  reliable than logging in through the UI, and works from Bash (`set -a && source
+  .env.local && set +a`) without hitting the Node 20 WebSocket issue below
 - The dev server's `.next` cache can get into a bad state after enough hot-reloads in
   one session — API routes start throwing `ENOENT ... .next/server/app/api/.../route.js`
   (500s) even though the route compiles fine. Fix: stop the server, `rm -rf .next`,
