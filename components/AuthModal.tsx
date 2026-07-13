@@ -24,6 +24,33 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
 
   if (authMode === 'NONE') return null;
 
+  const isDev = process.env.NODE_ENV === 'development';
+
+  const handleDevLogin = async () => {
+    setErrorMsg('');
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/dev/login', { method: 'POST' });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'Dev login failed');
+
+      if (!supabase) throw new Error('Supabase client not configured');
+      const { error } = await supabase.auth.signInWithPassword({
+        email: body.email,
+        password: body.password,
+      });
+      if (error) throw error;
+
+      onAuthSuccess(body.nickname);
+      setAuthMode('NONE');
+    } catch (err: any) {
+      console.error('Dev login error:', err);
+      setErrorMsg(err.message || 'Dev login failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
@@ -44,39 +71,27 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
         }
 
         const { data, error } = await supabase.auth.verifyOtp(verifyData);
-        
+
         if (error) throw error;
-        
-        if (data.session) {
-          // Success
-          let profileData = {
-            id: data.user?.id,
-            nickname: usernameInput.trim(),
+
+        if (data.session && data.user) {
+          // Now that the session is live, auth.uid() satisfies the profiles RLS check
+          const { error: profileError } = await supabase.from('profiles').upsert({
+            id: data.user.id,
             email: emailInput.trim(),
-            phone: phoneInput.trim(),
-            avatar: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_01_u3edkv.png'
-          };
-          onAuthSuccess(profileData.nickname);
+            nickname: usernameInput.trim(),
+            phone_number: phoneInput.trim(),
+            avatar_url: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_01_u3edkv.png',
+            selected_skin: 'warm-rose',
+          });
+          if (profileError) throw profileError;
+
+          onAuthSuccess(usernameInput.trim());
           setAuthMode('NONE');
         }
       } catch (err: any) {
         console.error('Verify OTP error:', err);
         setErrorMsg(err.message || 'Verification failed.');
-        
-        if (err.message && (err.message.includes('Token has expired or is invalid') || err.message.includes('already registered'))) {
-          // Display exact error
-        } else {
-          const getFallbackData = () => {
-             console.log('Using high-fidelity local text-parser fallback for auth due to offline status.');
-             let profileData = {
-               id: '00000000-0000-0000-0000-000000000000',
-               nickname: usernameInput.trim() || 'GuestUser',
-             };
-             onAuthSuccess(profileData.nickname);
-             setAuthMode('NONE');
-          };
-          getFallbackData();
-        }
       } finally {
         setIsLoading(false);
       }
@@ -138,10 +153,20 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
           });
           
           if (authError) throw authError;
-          
+
           if (authData.user) {
             userProfile.id = authData.user.id;
-            
+
+            if (!authData.session) {
+              // No session yet (email confirmation required) — the profiles RLS check
+              // needs auth.uid(), so the profile row is created after OTP verification instead.
+              setVerificationNotice(t.verificationNotice || 'Please verify your email to log in');
+              setIsVerifying(true);
+              setIsLoading(false);
+              return;
+            }
+
+            // Auto-confirm is enabled and we already have a session — safe to write now.
             const { error: profileError } = await supabase.from('profiles').upsert({
               id: authData.user.id,
               email: emailInput.trim(),
@@ -150,15 +175,8 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
               avatar_url: userProfile.avatar,
               selected_skin: 'warm-rose'
             });
-            
+
             if (profileError) throw profileError;
-            
-            if (!authData.session) {
-              setVerificationNotice(t.verificationNotice || 'Please verify your email to log in');
-              setIsVerifying(true);
-              setIsLoading(false);
-              return;
-            }
           }
         } else {
           const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -203,13 +221,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
         } else if (err.message && (err.message.includes('does not exist') || err.message.includes('already registered'))) {
            setErrorMsg(err.message);
         } else {
-           setErrorMsg(err.message || 'Authentication failed. Using fallback local logic.');
-           const getFallbackData = () => {
-             console.log('Using high-fidelity local text-parser fallback for auth due to offline status.');
-             onAuthSuccess(userProfile.nickname);
-             setAuthMode('NONE');
-           };
-           getFallbackData();
+           setErrorMsg(err.message || 'Authentication failed.');
         }
       } finally {
         setIsLoading(false);
@@ -242,7 +254,18 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
               {errorMsg}
             </div>
           )}
-          
+
+          {isDev && !isVerifying && (
+            <button
+              type="button"
+              onClick={handleDevLogin}
+              disabled={isLoading}
+              className="w-full mb-4 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 border-dashed rounded-xl py-2.5 text-sm font-semibold transition-colors disabled:opacity-50"
+            >
+              {isLoading ? '...' : '⚡ Dev Login (skips email, local only)'}
+            </button>
+          )}
+
           {isVerifying ? (
             <form onSubmit={handleVerify} className="space-y-4 mt-6">
               <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3 rounded-xl mb-6 text-sm text-center font-medium">
