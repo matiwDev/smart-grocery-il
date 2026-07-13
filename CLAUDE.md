@@ -11,6 +11,7 @@ Users build a shopping basket, the app compares total cost across 4 supermarket 
 - **Auth:** Supabase OTP (email + phone), profiles auto-created via DB trigger
 - **Styling:** 4 switchable color palettes via CSS variables, RTL/LTR Hebrew/English toggle
 - **Animation:** motion (framer-motion v12)
+- **Map:** react-leaflet + leaflet (client-only, dynamically imported — see gotchas)
 
 ## Repo structure
 ```
@@ -20,16 +21,29 @@ app/
   api/
     products/search/route.ts      # GET ?q=<query> — returns products + latest prices per chain
     prices/compare/route.ts       # POST {items:[{product_id,quantity}]} — returns cost per chain
-    baskets/sync/route.ts         # Basket UPSERT/sync
+    baskets/sync/route.ts         # Basket UPSERT/sync — NOT called from the frontend (dead code);
+                                   # page.tsx writes to basket_items directly via the anon client
+    dev/login/route.ts            # Dev-only: get-or-creates a fixed pre-confirmed test user via
+                                   # the admin API and returns its credentials. 404s unless
+                                   # NODE_ENV=development. Never sends real email.
 components/
-  AuthModal.tsx                   # OTP sign-in / sign-up modal
-  BranchMapContainer.tsx          # Branch list + map placeholder
+  AuthModal.tsx                   # OTP sign-in / sign-up modal + "Dev Login" button (dev only)
+  BranchMapContainer.tsx          # Branch list + map layout; dynamically imports BranchLeafletMap
+  BranchLeafletMap.tsx            # Actual react-leaflet map — pins colored by chain color_hex,
+                                   # popups with Waze deep link, flyTo on active-pin change
 lib/
   supabaseServer.ts               # Service-role Supabase client (API routes only)
 utils/
-  supabase.ts                     # Anon Supabase client (browser only)
+  supabase.ts                     # Anon Supabase client (browser only) — always import this one;
+                                   # do not call createClient() inline elsewhere (caused a
+                                   # "Multiple GoTrueClient instances" warning previously)
 supabase/
-  FULL_RESET_v2.sql               # Full schema — run this to reset the DB
+  schema.sql                      # STALE — only covers profiles/households/baskets/basket_items/
+                                   # price_snapshots. The live DB additionally has products, chains,
+                                   # branches, price_history, latest_prices, and basket_items.product_id,
+                                   # none of which are in this file. Treat the "Database schema" section
+                                   # below (and the live PostgREST schema) as the source of truth, not
+                                   # this file, until it's regenerated via `supabase db pull` or similar.
 ```
 
 ## Environment variables
@@ -89,21 +103,45 @@ is pasting it into the dashboard — the running app does not call Resend direct
 - baskets, basket_items: user owns their own rows (auth.uid() = user_id)
 - profiles: user owns their own row
 - price writes: service_role only
+- **Gotcha:** don't write to `profiles` right after `supabase.auth.signUp()`. When email
+  confirmation is required, `signUp()` returns `session: null`, so the anon client has no
+  JWT yet and `auth.uid()` is null — the profiles RLS check silently rejects the insert.
+  Create/upsert the profile row only after a real session exists (i.e. after OTP
+  verification, or immediately if auto-confirm is on and `signUp()` already returned a
+  session). See `components/AuthModal.tsx`'s `handleVerify`.
+
+## Dev-mode auth bypass
+`AuthModal.tsx` shows a "Dev Login" button when `NODE_ENV=development`. It calls
+`POST /api/dev/login`, which get-or-creates a fixed test account
+(`dev@smartgrocery.local`) via `supabase.auth.admin.createUser` with
+`email_confirm: true`, upserts its `profiles` row, and returns credentials for the
+client to call `signInWithPassword` with. No email is ever sent by this path, and the
+route 404s outside development — use this instead of real signups when testing basket/
+profile/UI flows locally.
 
 ## Current roadmap phase
 **Phase 0 complete** — schema, seed data, API routes in place.
 
-**Phase 1 in progress:**
-- [ ] Fix product search returning empty results (suspect: RLS on latest_prices or missing service role key)
-- [ ] Verify /api/products/search?q=חלב returns 4 products with prices
-- [ ] Verify /api/prices/compare returns chain totals for a test basket
-- [ ] Wire basket_items.product_id to real products.id on add
-- [ ] Load saved basket items back into UI state on login
-- [ ] Replace BranchMapContainer placeholder with real Leaflet map
+**Phase 1 complete:**
+- [x] Fixed product search returning empty results — root cause was a corrupted
+      SUPABASE_SERVICE_ROLE_KEY (stray leading char) in the linked env file, plus
+      .env.local having been a symlink instead of a real file
+- [x] /api/products/search?q=חלב returns products with prices per chain
+- [x] /api/prices/compare returns sorted chain totals + cheapest_chain + max_savings
+- [x] basket_items.product_id wired to real products.id on add
+- [x] Basket items + prices rehydrate into UI state on login
+- [x] Real Leaflet map (react-leaflet) replacing the placeholder, pins colored by
+      chain, Waze deep links, "Navigate to cheapest" pre-selects that chain's branches
+- [x] Search autocomplete loading skeleton
+- [x] 44×44px touch target audit (header had two undersized buttons, now fixed)
+- [x] Auth flow tested end-to-end incl. profile row + auto-created basket
 
 **Phase 2 next:**
-- Leaflet map showing branches coloured by basket cost
-- Waze/Google Maps deep link from cheapest branch
+- [ ] Color/rank map pins by this basket's cost at that branch, not just by chain
+- [ ] Wire CHAT view to the `messages` table (currently local mock state only)
+- [ ] Regenerate `supabase/schema.sql` (or a migration) so it matches the live DB
+- [ ] Either wire `app/api/baskets/sync/route.ts` into the frontend or remove it —
+      it's currently unused dead code
 
 ## Coding conventions
 - All components: functional, TypeScript strict
@@ -122,8 +160,11 @@ npm run env:link   # Restore .env.local from ~/.config/smartgrocery/.env.local
 ```
 
 ## How to reset the database
-Go to Supabase Dashboard → SQL Editor → paste and run `supabase/FULL_RESET_v2.sql`
-Then refresh the latest_prices view:
+`supabase/schema.sql` is stale and does NOT reproduce the full live schema (see
+"Repo structure" above) — running it alone will not recreate products, chains,
+branches, price_history, or latest_prices. Until a current dump/migration
+exists, reset via the Supabase Dashboard SQL Editor using the live schema as
+reference, then refresh the materialized view:
 ```sql
 SELECT refresh_latest_prices();
 ```
@@ -135,3 +176,13 @@ SELECT refresh_latest_prices();
 - The `households` RLS policy must be defined AFTER `household_members` table exists
 - Tailwind 4 uses @tailwindcss/postcss — do not add a tailwind.config.js, it's not needed
 - motion is imported from 'motion/react', not 'framer-motion'
+- Leaflet needs `window`/`document` at import time — `BranchLeafletMap` is loaded via
+  `next/dynamic(..., { ssr: false })` from `BranchMapContainer`; don't import react-leaflet
+  directly into a component that can render server-side
+- If you edit a hook's dependency array while the dev server is running, Fast Refresh can
+  throw a spurious "final argument passed to useEffect changed size between renders" error.
+  It's not a real bug — restart the dev server (or hard-reload) and it clears
+- Ad-hoc debug scripts (`node -e "..."` using @supabase/supabase-js) fail with a
+  WebSocket error on Node 20 because realtime-js needs a native WebSocket (Node 22+).
+  Either upgrade Node for scripting, or just hit the REST endpoints directly with
+  `fetch(...)` + the service-role key instead of instantiating a full client
