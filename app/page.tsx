@@ -160,6 +160,10 @@ const DICTIONARY = {
     joinSuccess: 'הצטרפת בהצלחה!',
     joinError: 'קוד לא תקין או שגיאה',
     generateCode: 'צור קוד הזמנה',
+    saveList: 'שמור רשימה',
+    clearList: 'רוקן רשימה',
+    saveListPrompt: 'שם לרשימה השמורה:',
+    clearListConfirm: 'לרוקן את הסל? הפעולה בלתי הפיכה.',
   },
   en: {
     appTitle: 'Smart Grocery IL',
@@ -235,6 +239,10 @@ const DICTIONARY = {
     joinSuccess: 'Joined successfully!',
     joinError: 'Invalid code or error',
     generateCode: 'Generate invite code',
+    saveList: 'Save List',
+    clearList: 'Clear List',
+    saveListPrompt: 'Name for the saved list:',
+    clearListConfirm: 'Clear the basket? This cannot be undone.',
   },
 };
 
@@ -619,6 +627,43 @@ export default function SmartGroceryDashboard() {
     }
   };
 
+  const handleSaveList = async () => {
+    if (!supabase || !currentUser?.id || basket.length === 0) return;
+    const defaultName = new Date().toLocaleDateString('he-IL');
+    const name = window.prompt(t.saveListPrompt, defaultName);
+    if (!name || !name.trim()) return;
+
+    const { data: newBasket } = await supabase.from('baskets').insert({
+      user_id: currentUser.id,
+      name: name.trim(),
+    }).select().single();
+
+    if (newBasket) {
+      await supabase.from('basket_items').insert(
+        basket.map((item) => ({
+          basket_id: newBasket.id,
+          product_id: item.id,
+          product_name: item.name_he,
+          quantity_value: item.quantity,
+        }))
+      );
+    }
+
+    if (activeBasketId) {
+      await supabase.from('basket_items').delete().eq('basket_id', activeBasketId);
+    }
+    setBasket([]);
+  };
+
+  const handleClearList = async () => {
+    if (basket.length === 0) return;
+    if (!window.confirm(t.clearListConfirm)) return;
+    if (supabase && activeBasketId) {
+      await supabase.from('basket_items').delete().eq('basket_id', activeBasketId);
+    }
+    setBasket([]);
+  };
+
   const basketTotal = (chainId?: string) => {
     if (!chainId) {
       // Use min price across all chains
@@ -953,6 +998,22 @@ export default function SmartGroceryDashboard() {
                     <div className="mt-6 pt-5 border-t border-slate-800 flex justify-between items-end">
                       <span className="text-slate-400">{t.listTotal}</span>
                       <span className="text-3xl font-bold font-mono text-white">₪{basketTotal().toFixed(2)}</span>
+                    </div>
+
+                    {/* Save List / Clear List */}
+                    <div className="flex gap-3">
+                      <button
+                        onClick={handleSaveList}
+                        className="flex-1 min-h-[44px] bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-indigo-500/20"
+                      >
+                        {t.saveList}
+                      </button>
+                      <button
+                        onClick={handleClearList}
+                        className="flex-1 min-h-[44px] bg-slate-800 hover:bg-rose-500/10 text-slate-300 hover:text-rose-400 border border-slate-700 hover:border-rose-500/30 rounded-xl text-sm font-semibold transition-colors"
+                      >
+                        {t.clearList}
+                      </button>
                     </div>
                   </div>
                 )}
