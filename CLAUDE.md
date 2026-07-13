@@ -26,6 +26,17 @@ app/
     dev/login/route.ts            # Dev-only: get-or-creates a fixed pre-confirmed test user via
                                    # the admin API and returns its credentials. 404s unless
                                    # NODE_ENV=development. Never sends real email.
+    prices/ingest/route.ts        # Old webhook-style endpoint writing to the STALE
+                                   # `price_snapshots` table (see schema.sql note below). Not
+                                   # part of the real ingestion pipeline — see
+                                   # scripts/ingest-prices.ts instead. Unused/dead, predates
+                                   # Phase 4, left as-is.
+scripts/
+  ingest-prices.ts                # Standalone Phase 4 ingestion script — see "Price ingestion
+                                   # pipeline" below. Run with `npm run ingest`.
+  tsconfig.json                   # Overrides module/moduleResolution to commonjs/node for
+                                   # ts-node; the root tsconfig targets Next.js's bundler
+                                   # resolution, which ts-node can't execute directly.
 components/
   AuthModal.tsx                   # OTP sign-in / sign-up modal + "Dev Login" button (dev only)
   BranchMapContainer.tsx          # Branch list + map layout; dynamically imports BranchLeafletMap
@@ -54,6 +65,9 @@ supabase/
     003_household_invite.sql      # households.invite_code column + get_or_create_own_household()/
                                    # join_household_by_code() RPC functions (see below). Also NOT
                                    # YET APPLIED — same manual SQL Editor step required.
+    004_ingest_log.sql            # ingest_log table (see "Price ingestion pipeline" below). Also
+                                   # NOT YET APPLIED — same manual SQL Editor step required. The
+                                   # ingest script tolerates this (logs a warning, doesn't crash).
 ```
 
 ## Environment variables
@@ -83,6 +97,9 @@ basket_items   — id, basket_id, product_id, product_name, quantity_value
 messages       — id, user_id, nickname, message_text, created_at
 price_alerts   — id, product_id, user_id, target_price, chain_id, is_active
                  (migration 002, NOT YET APPLIED — see below)
+ingest_log     — id, chain_id, started_at, finished_at, products_fetched,
+                 products_matched, products_inserted, error_text
+                 (migration 004, NOT YET APPLIED — see below)
 ```
 
 RPC functions (migration 003, NOT YET APPLIED):
@@ -118,6 +135,52 @@ Minimum interval between emails: lower from default if still testing OTP a lot
 ```
 `RESEND_API_KEY` only needs to live in `.env.local` as a reference for whoever
 is pasting it into the dashboard — the running app does not call Resend directly.
+
+## Price ingestion pipeline
+Israel's Food Act (2014) requires the major chains to publish real-time prices
+as public XML/JSON feeds. `scripts/ingest-prices.ts` is a standalone script
+(not a Next.js API route — see Node 20 gotcha below) that pulls real data from
+two of them and loads it into `price_history`:
+
+```
+Shufersal:  https://prices.shufersal.co.il/FileObject/UpdateCategory?catID=2&storeId=0
+Rami Levy:  https://url.rami-levy.co.il/api/delivery/prices
+```
+
+**Shufersal** — that URL is not itself an XML feed; it's an HTML page listing
+one gzipped `PriceFull*.gz` XML file per branch (Azure Blob Storage links with
+short-lived SAS signatures, ~hundreds of branches, paginated). The script
+fetches that listing, regexes out the blob URLs, downloads + gunzips the first
+`SHUFERSAL_STORE_LIMIT` files (default 3, override via env var), and parses
+each with `fast-xml-parser`. Each `<Item>` has `ItemCode` (barcode), `ItemName`,
+`ItemPrice`, `Quantity`, `UnitOfMeasure`. Verified working end to end against
+the live feed.
+
+**Rami Levy** — the URL given for this chain does not resolve (DNS failure as
+of this writing). The script still has a JSON ingestion path for it (guesses
+a `{items:[...]}` / `{products:[...]}` / bare-array shape and reads
+`barcode`/`price`-ish fields), but this is unverified against a real payload
+since the endpoint isn't reachable. Treat it as a starting point, not a tested
+integration, if the real URL is ever found.
+
+**Barcode match rate with the current seed data is 0.** Verified by manually
+downloading and grepping ~20 real Shufersal branch files (~125k line items,
+all realistic 13-digit `729...` EAN-13 codes) for all 18 seeded
+`products.barcode` values — none appear anywhere in Shufersal's real catalog.
+The seeded barcodes are plausible-looking placeholders, not live retailer
+SKUs. The ingestion mechanics (fetch → parse → barcode lookup → insert →
+`refresh_latest_prices()`) are confirmed correct (verified the REST
+`barcode=in.(...)` filter directly matches a real seeded barcode when given
+one), but a real test run against live Shufersal data will report
+`matched=0, inserted=0` until the seed data is replaced with barcodes that
+actually exist in a chain's real catalog.
+
+Run manually: `npm run ingest` (uses `SUPABASE_SERVICE_ROLE_KEY` from
+`.env.local`, same as everything else). Retries once per attempt on
+HTTP 429/503 (3 attempts, 2s delay); any other feed failure is logged per-chain
+and the script continues rather than crashing. Prints a summary line per chain
+and writes a row to `ingest_log` (skipped with a warning if migration 004
+hasn't been applied yet).
 
 ## RLS rules
 - products, chains, branches, price_history, latest_prices: public SELECT (authenticated + anon)
@@ -195,6 +258,36 @@ profile/UI flows locally.
       granted/denied/manual-city preference persists in `localStorage` under
       `sg_location_pref` so a repeat visit can prefill the last city typed.
 
+**Lint cleanup (pre-Phase 4):**
+- [x] Fixed `eslint.config.mjs` — ESLint 9's flat config doesn't auto-ignore
+      dotfolders the way the old `.eslintrc.json` did, so it was linting
+      `.next/` build output. Added an `ignores` block; also dropped a rule
+      override for `react-hooks/set-state-in-effect`, which isn't registered
+      by the installed `eslint-plugin-react-hooks` version and was
+      hard-erroring lint regardless of severity.
+- [x] Replaced all `any` types in `page.tsx`, `AuthModal.tsx`,
+      `BranchMapContainer.tsx` with real types (`Dictionary`, `LiveBranch`,
+      `SavedBasket`, `ChatMessage`, `BranchRow`); `Dictionary` is exported
+      from `page.tsx` as `typeof DICTIONARY['he']` and imported by the two
+      components. `npx tsc --noEmit` and `npm run lint` are both clean
+      (warnings remain only in `app/api/baskets/sync/route.ts` and
+      `app/api/prices/ingest/route.ts`, which were out of scope).
+- [x] Removed dead code: unused lucide icon imports, `CHAIN_ORDER`,
+      `dataWindow`/`isBasketLoaded`/`location` state (set but never read),
+      `handleAvatarUpload` (never wired to an input).
+
+**Phase 4 in progress — real price ingestion pipeline:**
+- [x] `scripts/ingest-prices.ts` — see "Price ingestion pipeline" above.
+      Shufersal ingestion verified against the live feed; Rami Levy's given
+      URL doesn't resolve. Barcode match rate against seed data is 0 (seed
+      barcodes aren't real chain SKUs) — mechanics are verified correct via
+      a direct REST check, not a script bug.
+- [ ] Apply `004_ingest_log.sql` via the Supabase SQL Editor
+- [ ] Victory (zipped XML) and Yohananof ingestion — not started
+- [ ] Replace seed barcodes with real ones (or seed against a chain's actual
+      catalog) so ingestion runs produce non-zero matches or set up
+      seed products with real barcodes for a full end to end test
+
 ## Coding conventions
 - All components: functional, TypeScript strict
 - API routes: always use `lib/supabaseServer.ts` (service role), never the anon client
@@ -209,6 +302,7 @@ npm run dev        # Start dev server on localhost:3000
 npm run build      # Production build
 npm run lint       # ESLint check
 npm run env:link   # Restore .env.local from ~/.config/smartgrocery/.env.local
+npm run ingest     # Run the price ingestion pipeline (see "Price ingestion pipeline")
 ```
 
 ## How to reset the database
@@ -225,11 +319,13 @@ SELECT refresh_latest_prices();
 There is no `supabase` CLI or direct Postgres connection configured for this
 repo (no `SUPABASE_DB_URL`, no linked project) — `supabase/migrations/*.sql`
 files are written here but must be pasted into the Supabase Dashboard SQL
-Editor by hand to actually take effect. As of this writing, `002_price_alerts.sql`
-and `003_household_invite.sql` are unapplied; the corresponding app features
-(price alert bell, household invite/join) are wired correctly end-to-end but
-will fail with PostgREST "not found" errors (PGRST205/PGRST202) until those
-are run.
+Editor by hand to actually take effect. As of this writing, `002_price_alerts.sql`,
+`003_household_invite.sql`, and `004_ingest_log.sql` are unapplied; the
+corresponding app features (price alert bell, household invite/join,
+`scripts/ingest-prices.ts` writing its summary row) are wired correctly
+end-to-end but will fail with PostgREST "not found" errors (PGRST205/PGRST202)
+until those are run. The ingest script specifically tolerates 004 being
+missing (catches the PGRST205 and logs a warning instead of crashing).
 
 ## Known issues / gotchas
 - latest_prices is a materialized view — after any price_history insert, call refresh_latest_prices()
@@ -255,11 +351,9 @@ are run.
   right before clicking to confirm it's fully settled, don't just wait-and-click
   blind, and prefer clicking by ref from a read_page taken after that screenshot
   rather than a coordinate computed earlier
-- ESLint (`npm run lint`) currently fails outright with "Failed to patch ESLint
-  because the calling module was not recognized" from `@rushstack/eslint-patch`
-  (ESLint 9.39.1 incompatibility) — this is a tooling/config issue, not a sign your
-  change broke something. Use `npx tsc --noEmit` to typecheck instead until the
-  ESLint config is fixed
+- `npm run lint` and `npx tsc --noEmit` are both clean as of the lint cleanup
+  pass — if either starts failing, it's a real regression, not a known
+  pre-existing tooling issue
 - To check whether a `supabase/migrations/*.sql` file has actually been applied,
   don't guess from the code — hit PostgREST directly with the service-role key
   from `.env.local`: `curl "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/<table>?select=id&limit=1"
