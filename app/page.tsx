@@ -355,6 +355,9 @@ export default function SmartGroceryDashboard() {
   // Price alerts: product_id -> price_alerts row id (present only while active)
   const [priceAlerts, setPriceAlerts] = useState<Record<string, string>>({});
 
+  // Per-item price breakdown: which basket item is expanded in the comparison panel
+  const [expandedPriceItemId, setExpandedPriceItemId] = useState<string | null>(null);
+
   // Saved lists + map
   const [savedBaskets, setSavedBaskets] = useState<any[]>([]);
   const [isLoadingSaved, setIsLoadingSaved] = useState(false);
@@ -1067,24 +1070,71 @@ export default function SmartGroceryDashboard() {
                         })()}
                       </div>
 
-                      {/* Per-item cheapest chain */}
+                      {/* Per-item cheapest chain (tap to expand full breakdown) */}
                       <div className="mt-2 pt-4 border-t border-slate-800 flex flex-col gap-2">
                         <p className="text-xs text-slate-400 font-medium">{lang === 'he' ? 'מחיר לפריט' : 'Price per item'}</p>
                         {basket.map((item) => {
-                          const cheapestEntry = Object.entries(item.prices).reduce<[string, ChainPrice] | null>(
+                          const priceEntries = Object.entries(item.prices);
+                          const cheapestEntry = priceEntries.reduce<[string, ChainPrice] | null>(
                             (best, [cid, cp]) => (!best || cp.price < best[1].price) ? [cid, cp] : best,
                             null
                           );
                           const chainName = cheapestEntry
                             ? (chains.find((c) => c.id === cheapestEntry[0])?.[lang === 'he' ? 'name_he' : 'name_en'] ?? cheapestEntry[0])
                             : '—';
+                          const isExpanded = expandedPriceItemId === item.id;
+                          const minPrice = priceEntries.length > 0 ? Math.min(...priceEntries.map(([, cp]) => cp.price)) : null;
+                          const maxPrice = priceEntries.length > 0 ? Math.max(...priceEntries.map(([, cp]) => cp.price)) : null;
                           return (
-                            <div key={item.id} className="flex items-center justify-between text-xs text-slate-400">
-                              <span className="truncate me-2" style={{ maxWidth: '55%' }}>{item.name_he}</span>
-                              <span className="text-emerald-400 font-mono shrink-0">
-                                ₪{(cheapestEntry?.[1].price ?? 0).toFixed(2)}
-                                <span className="text-slate-500 ms-1">{chainName}</span>
-                              </span>
+                            <div key={item.id}>
+                              <button
+                                onClick={() => setExpandedPriceItemId(isExpanded ? null : item.id)}
+                                className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-slate-200 transition-colors py-1"
+                              >
+                                <span className="truncate me-2" style={{ maxWidth: '55%' }}>{item.name_he}</span>
+                                <span className="flex items-center gap-1 shrink-0">
+                                  <span className="text-emerald-400 font-mono">
+                                    ₪{(cheapestEntry?.[1].price ?? 0).toFixed(2)}
+                                    <span className="text-slate-500 ms-1">{chainName}</span>
+                                  </span>
+                                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                                </span>
+                              </button>
+                              <AnimatePresence>
+                                {isExpanded && (
+                                  <motion.div
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: 'auto' }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    transition={{ duration: 0.15 }}
+                                    className="overflow-hidden"
+                                  >
+                                    <div className="flex flex-col gap-1.5 py-2 ps-2 border-s-2 border-slate-800 mt-1 mb-1">
+                                      {priceEntries
+                                        .slice()
+                                        .sort((a, b) => a[1].price - b[1].price)
+                                        .map(([cid, cp]) => {
+                                          const cName = chains.find((c) => c.id === cid)?.[lang === 'he' ? 'name_he' : 'name_en'] ?? cid;
+                                          const isCheapest = cp.price === minPrice;
+                                          const isExpensive = cp.price === maxPrice && minPrice !== maxPrice;
+                                          return (
+                                            <div
+                                              key={cid}
+                                              className={`flex items-center justify-between text-xs px-2 py-1.5 rounded-lg ${
+                                                isCheapest ? 'bg-emerald-500/10 text-emerald-400' :
+                                                isExpensive ? 'bg-rose-500/10 text-rose-400' :
+                                                'text-slate-400'
+                                              }`}
+                                            >
+                                              <span>{cName}</span>
+                                              <span className="font-mono font-medium">₪{cp.price.toFixed(2)}</span>
+                                            </div>
+                                          );
+                                        })}
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
                             </div>
                           );
                         })}
