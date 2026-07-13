@@ -6,7 +6,7 @@ import {
   LogIn, LogOut, Globe, User, X, Menu, Home, List, Users, Search,
   MapPin, Trash2, Plus, Navigation, ChevronDown, ShoppingBag,
   LifeBuoy, MessageCircle, MessageSquare, Mail, CheckCircle, AlertCircle,
-  ArrowDown, Loader2, Bell,
+  ArrowDown, Loader2, Bell, Copy, UserPlus,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BranchMapContainer } from '@/components/BranchMapContainer';
@@ -304,6 +304,13 @@ export default function SmartGroceryDashboard() {
   const [verificationFlash, setVerificationFlash] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [dataWindow, setDataWindow] = useState('02:00 AM - 04:00 AM');
+
+  // Household invite state
+  const [household, setHousehold] = useState<{ id: string; name: string; invite_code: string | null } | null>(null);
+  const [isLoadingHousehold, setIsLoadingHousehold] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [joinCodeInput, setJoinCodeInput] = useState('');
+  const [joinStatus, setJoinStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
   // Product search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -669,6 +676,37 @@ export default function SmartGroceryDashboard() {
     }
     setVerificationFlash(true);
     setTimeout(() => { setVerificationFlash(false); setIsEditingCredentials(false); }, 1500);
+  };
+
+  // ── Household invite ─────────────────────────────────────────────────────────
+
+  const handleGenerateInviteCode = async () => {
+    if (!supabase || !currentUser?.id) return;
+    setIsLoadingHousehold(true);
+    const { data } = await supabase.rpc('get_or_create_own_household').single();
+    if (data) setHousehold(data as { id: string; name: string; invite_code: string | null });
+    setIsLoadingHousehold(false);
+  };
+
+  const handleCopyInviteCode = () => {
+    if (!household?.invite_code) return;
+    navigator.clipboard.writeText(household.invite_code);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  };
+
+  const handleJoinHousehold = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase || !joinCodeInput.trim()) return;
+    setJoinStatus('loading');
+    const { error } = await supabase.rpc('join_household_by_code', { code: joinCodeInput.trim() }).single();
+    if (error) {
+      setJoinStatus('error');
+    } else {
+      setJoinStatus('success');
+      setJoinCodeInput('');
+    }
+    setTimeout(() => setJoinStatus('idle'), 3000);
   };
 
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1112,6 +1150,73 @@ export default function SmartGroceryDashboard() {
                     <button onClick={() => setIsEditingCredentials(true)} className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-semibold transition-colors">
                       {t.editCredentials}
                     </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Household invite */}
+            {currentUser && (
+              <div className="bg-slate-900/60 backdrop-blur-xl rounded-3xl p-8 border border-slate-800">
+                <h3 className="text-lg font-semibold text-slate-200 mb-6 flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-indigo-400" /> {t.inviteToHousehold}
+                </h3>
+
+                {household?.invite_code ? (
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-2">{t.yourInviteCode}</label>
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-2xl tracking-[0.3em] font-bold text-indigo-300 bg-slate-950/50 border border-slate-700 rounded-xl px-5 py-3">
+                        {household.invite_code}
+                      </span>
+                      <button
+                        onClick={handleCopyInviteCode}
+                        className="min-h-[44px] px-4 flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-semibold transition-colors"
+                      >
+                        {codeCopied ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                        {codeCopied ? t.codeCopied : t.copyCode}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleGenerateInviteCode}
+                    disabled={isLoadingHousehold}
+                    className="min-h-[44px] px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-semibold shadow-lg shadow-indigo-500/20 transition-colors disabled:opacity-50"
+                  >
+                    {isLoadingHousehold ? <Loader2 className="w-4 h-4 animate-spin" /> : t.generateCode}
+                  </button>
+                )}
+
+                <div className="mt-8 pt-6 border-t border-slate-800">
+                  <h4 className="text-sm font-medium text-slate-400 mb-3">{t.joinHousehold}</h4>
+                  <form onSubmit={handleJoinHousehold} className="flex flex-col sm:flex-row gap-3">
+                    <input
+                      type="text"
+                      value={joinCodeInput}
+                      onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
+                      placeholder={t.enterInviteCode}
+                      maxLength={6}
+                      className="flex-1 bg-slate-950/50 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 font-mono tracking-widest focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
+                      dir="ltr"
+                    />
+                    <button
+                      type="submit"
+                      disabled={joinStatus === 'loading' || !joinCodeInput.trim()}
+                      className="min-h-[44px] px-6 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-semibold transition-colors disabled:opacity-50"
+                    >
+                      {t.joinButton}
+                    </button>
+                  </form>
+                  {joinStatus === 'success' && (
+                    <p className="mt-3 text-sm font-bold text-emerald-400 flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4" /> {t.joinSuccess}
+                    </p>
+                  )}
+                  {joinStatus === 'error' && (
+                    <p className="mt-3 text-sm font-bold text-rose-400 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4" /> {t.joinError}
+                    </p>
                   )}
                 </div>
               </div>
