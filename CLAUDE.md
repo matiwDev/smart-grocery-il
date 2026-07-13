@@ -227,3 +227,14 @@ are run.
   stiffness 200) is slow to settle — automated clicks on drawer items can silently
   land on stale coordinates mid-animation. Wait ~3-4s after opening it before clicking
   a nav item, or drive it in code instead of through the browser
+- The dev server's `.next` cache can get into a bad state after enough hot-reloads in
+  one session — API routes start throwing `ENOENT ... .next/server/app/api/.../route.js`
+  (500s) even though the route compiles fine. Fix: stop the server, `rm -rf .next`,
+  restart — don't chase it as an app bug
+- To verify a Supabase RPC/table is wired correctly without going through the UI (e.g. when
+  navigation is being flaky, or before a migration has been applied): read the session token
+  from `localStorage["sb-<project-ref>-auth-token"].access_token` and POST directly to
+  `https://<project-ref>.supabase.co/rest/v1/rpc/<fn>` with `apikey`/`Authorization` headers
+  set from the anon key + that token. A `PGRST202`/`PGRST205` response confirms the call
+  reached PostgREST with the right function/table name and params — it's just missing the
+  migration — as opposed to a bug in the client code
