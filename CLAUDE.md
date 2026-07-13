@@ -44,6 +44,14 @@ supabase/
                                    # none of which are in this file. Treat the "Database schema" section
                                    # below (and the live PostgREST schema) as the source of truth, not
                                    # this file, until it's regenerated via `supabase db pull` or similar.
+  migrations/
+    002_price_alerts.sql          # price_alerts table (see below). NOT YET APPLIED to the live
+                                   # project — run it in the Supabase Dashboard SQL Editor (no
+                                   # `supabase` CLI/DB connection is configured for this repo, so
+                                   # these migration files are applied manually, not automatically).
+    003_household_invite.sql      # households.invite_code column + get_or_create_own_household()/
+                                   # join_household_by_code() RPC functions (see below). Also NOT
+                                   # YET APPLIED — same manual SQL Editor step required.
 ```
 
 ## Environment variables
@@ -66,11 +74,22 @@ branches       — id, chain_id, name_he, name_en, city_he, city_en, lat, lng, i
 price_history  — id, product_id, chain_id, branch_id, price, captured_at, source
 latest_prices  — MATERIALIZED VIEW: latest price per (product_id, chain_id)
 profiles       — id (= auth.users.id), nickname, phone_number, avatar_url, selected_skin
-households     — id, name
+households     — id, name, invite_code (unique, nullable — migration 003, NOT YET APPLIED)
 household_members — household_id, user_id, role
 baskets        — id, user_id, household_id, name, is_archived
 basket_items   — id, basket_id, product_id, product_name, quantity_value
 messages       — id, user_id, nickname, message_text, created_at
+price_alerts   — id, product_id, user_id, target_price, chain_id, is_active
+                 (migration 002, NOT YET APPLIED — see below)
+```
+
+RPC functions (migration 003, NOT YET APPLIED):
+```
+generate_invite_code()             — internal helper, 6-char alphanumeric code
+get_or_create_own_household()      — lazily creates the caller's household + invite
+                                      code on first call, returns (id, name, invite_code)
+join_household_by_code(code text)  — inserts a household_members row for the caller
+                                      into the household matching invite_code
 ```
 
 ## Seeded data
@@ -136,8 +155,16 @@ profile/UI flows locally.
 - [x] 44×44px touch target audit (header had two undersized buttons, now fixed)
 - [x] Auth flow tested end-to-end incl. profile row + auto-created basket
 
-**Phase 2 next:**
-- [ ] Color/rank map pins by this basket's cost at that branch, not just by chain
+**Phase 2 in progress:**
+- [x] Color/rank map pins by this basket's cost at that branch (green/amber/red via
+      `/api/prices/compare` comparison data), basket total shown in the marker popup
+- [x] Price alerts: bell icon per basket item persists a row to `price_alerts`
+      (no notification delivery yet — persistence only). **Needs migration
+      `002_price_alerts.sql` applied via the Supabase SQL Editor before it works.**
+- [x] Household invite flow in Profile view: generate/copy a 6-char invite code,
+      join by code. **Needs migration `003_household_invite.sql` applied via the
+      Supabase SQL Editor before it works** (adds `households.invite_code` +
+      the `get_or_create_own_household`/`join_household_by_code` RPCs).
 - [ ] Wire CHAT view to the `messages` table (currently local mock state only)
 - [ ] Regenerate `supabase/schema.sql` (or a migration) so it matches the live DB
 - [ ] Either wire `app/api/baskets/sync/route.ts` into the frontend or remove it —
@@ -169,6 +196,16 @@ reference, then refresh the materialized view:
 SELECT refresh_latest_prices();
 ```
 
+## Applying migrations
+There is no `supabase` CLI or direct Postgres connection configured for this
+repo (no `SUPABASE_DB_URL`, no linked project) — `supabase/migrations/*.sql`
+files are written here but must be pasted into the Supabase Dashboard SQL
+Editor by hand to actually take effect. As of this writing, `002_price_alerts.sql`
+and `003_household_invite.sql` are unapplied; the corresponding app features
+(price alert bell, household invite/join) are wired correctly end-to-end but
+will fail with PostgREST "not found" errors (PGRST205/PGRST202) until those
+are run.
+
 ## Known issues / gotchas
 - latest_prices is a materialized view — after any price_history insert, call refresh_latest_prices()
 - SUPABASE_SERVICE_ROLE_KEY must be in .env.local (not just the anon key) for API routes to work
@@ -186,3 +223,7 @@ SELECT refresh_latest_prices();
   WebSocket error on Node 20 because realtime-js needs a native WebSocket (Node 22+).
   Either upgrade Node for scripting, or just hit the REST endpoints directly with
   `fetch(...)` + the service-role key instead of instantiating a full client
+- The slide-in nav drawer's open/close spring animation (`isDrawerOpen`, damping 25/
+  stiffness 200) is slow to settle — automated clicks on drawer items can silently
+  land on stale coordinates mid-animation. Wait ~3-4s after opening it before clicking
+  a nav item, or drive it in code instead of through the browser
