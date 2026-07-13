@@ -261,6 +261,19 @@ function DrawerItem({ view, currentView, setCurrentView, icon: Icon, label, clos
   );
 }
 
+// Formats a chat message timestamp: today shows time only (e.g. 14:32),
+// older messages show date + time (e.g. 03/07 14:32).
+function formatMessageTimestamp(iso: string, lang: Lang): string {
+  const date = new Date(iso);
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  const locale = lang === 'he' ? 'he-IL' : 'en-US';
+  const timeStr = date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (isToday) return timeStr;
+  const dateStr = date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit' });
+  return `${dateStr} ${timeStr}`;
+}
+
 // Price comparison bar for a single chain
 function ChainBar({ chain, total, maxTotal, isMin, lang }: {
   chain: ComparisonResult; total: number; maxTotal: number; isMin: boolean; lang: Lang;
@@ -1235,7 +1248,9 @@ export default function SmartGroceryDashboard() {
                     <div className={`px-4 py-2 rounded-2xl max-w-[80%] text-sm ${msg.user_id === currentUser?.id ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-200'}`}>
                       {msg.content}
                     </div>
-                    <span className="text-[10px] text-slate-500 mt-1">{msg.nickname}</span>
+                    <span className="text-[10px] text-slate-500 mt-1">
+                      {msg.nickname} · {formatMessageTimestamp(msg.created_at, lang)}
+                    </span>
                   </div>
                 ))}
               </div>
