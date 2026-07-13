@@ -24,6 +24,8 @@ interface BranchLeafletMapProps {
   costColorByChain?: Record<string, string>;
   costTotalByChain?: Record<string, number>;
   basketAtBranchLabel?: string;
+  userPosition?: { lat: number; lng: number } | null;
+  youAreHereLabel?: string;
 }
 
 const DEFAULT_CENTER: [number, number] = [32.0853, 34.7818]; // Tel Aviv fallback
@@ -54,11 +56,37 @@ function FlyToActive({ branches, activeMapPin }: { branches: LiveBranch[]; activ
   return null;
 }
 
-export function BranchLeafletMap({ branches, activeMapPin, setActiveMapPin, quickNavigateLabel, costColorByChain, costTotalByChain, basketAtBranchLabel }: BranchLeafletMapProps) {
+function FlyToUser({ userPosition }: { userPosition: { lat: number; lng: number } | null | undefined }) {
+  const map = useMap();
+  useEffect(() => {
+    if (userPosition) {
+      map.flyTo([userPosition.lat, userPosition.lng], 13, { duration: 0.6 });
+    }
+  }, [userPosition, map]);
+  return null;
+}
+
+function userPositionIcon() {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:18px;height:18px;border-radius:50%;
+      background:#3b82f6;
+      border:3px solid white;
+      box-shadow:0 0 0 4px rgba(59,130,246,0.3), 0 2px 6px rgba(0,0,0,0.4);
+    "></div>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+  });
+}
+
+export function BranchLeafletMap({ branches, activeMapPin, setActiveMapPin, quickNavigateLabel, costColorByChain, costTotalByChain, basketAtBranchLabel, userPosition, youAreHereLabel }: BranchLeafletMapProps) {
   const withCoords = branches.filter((b) => b.lat && b.lng);
-  const center: [number, number] = withCoords.length > 0
-    ? [withCoords[0].lat as number, withCoords[0].lng as number]
-    : DEFAULT_CENTER;
+  const center: [number, number] = userPosition
+    ? [userPosition.lat, userPosition.lng]
+    : withCoords.length > 0
+      ? [withCoords[0].lat as number, withCoords[0].lng as number]
+      : DEFAULT_CENTER;
 
   return (
     <MapContainer center={center} zoom={12} scrollWheelZoom className="w-full h-full rounded-3xl" style={{ zIndex: 0 }}>
@@ -67,6 +95,12 @@ export function BranchLeafletMap({ branches, activeMapPin, setActiveMapPin, quic
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <FlyToActive branches={withCoords} activeMapPin={activeMapPin} />
+      <FlyToUser userPosition={userPosition} />
+      {userPosition && (
+        <Marker position={[userPosition.lat, userPosition.lng]} icon={userPositionIcon()}>
+          <Popup>{youAreHereLabel ?? 'You are here'}</Popup>
+        </Marker>
+      )}
       {withCoords.map((b) => {
         const costColor = costColorByChain?.[b.chain_id];
         const basketTotal = costTotalByChain?.[b.chain_id];

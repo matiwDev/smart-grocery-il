@@ -164,6 +164,10 @@ const DICTIONARY = {
     clearList: 'רוקן רשימה',
     saveListPrompt: 'שם לרשימה השמורה:',
     clearListConfirm: 'לרוקן את הסל? הפעולה בלתי הפיכה.',
+    myLocation: 'המיקום שלי',
+    locationDenied: 'הגישה למיקום נדחתה',
+    distanceFilter: 'טווח מרחק',
+    searchByCity: 'חפש לפי עיר',
   },
   en: {
     appTitle: 'Smart Grocery IL',
@@ -243,6 +247,10 @@ const DICTIONARY = {
     clearList: 'Clear List',
     saveListPrompt: 'Name for the saved list:',
     clearListConfirm: 'Clear the basket? This cannot be undone.',
+    myLocation: 'My Location',
+    locationDenied: 'Location access denied',
+    distanceFilter: 'Distance',
+    searchByCity: 'Search by city',
   },
 };
 
@@ -281,6 +289,18 @@ function formatMessageTimestamp(iso: string, lang: Lang): string {
   const dateStr = date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit' });
   return `${dateStr} ${timeStr}`;
 }
+
+// Great-circle distance between two lat/lng points, in kilometers.
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+const LOCATION_PREF_KEY = 'sg_location_pref';
+const DISTANCE_OPTIONS = [1, 3, 5, 10] as const;
 
 // Price comparison bar for a single chain
 function ChainBar({ chain, total, maxTotal, isMin, lang }: {
@@ -365,6 +385,13 @@ export default function SmartGroceryDashboard() {
   const [liveBranches, setLiveBranches] = useState<any[]>([]);
   const [activeMapPin, setActiveMapPin] = useState('gps');
   const [preferredChainId, setPreferredChainId] = useState<string | null>(null);
+
+  // GPS location + distance filter
+  const [userPosition, setUserPosition] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationStatus, setLocationStatus] = useState<'idle' | 'requesting' | 'granted' | 'denied'>('idle');
+  const [distanceKm, setDistanceKm] = useState<number>(5);
+  const [cityQuery, setCityQuery] = useState('');
+  const hasLoadedLocationPrefRef = useRef(false);
 
   // Chat
   const [chatMessages, setChatMessages] = useState<any[]>([
@@ -688,6 +715,8 @@ export default function SmartGroceryDashboard() {
           id: b.id,
           name: lang === 'he' ? b.name_he : (b.name_en || b.name_he),
           desc: lang === 'he' ? b.city_he : (b.city_en || b.city_he),
+          cityHe: b.city_he,
+          cityEn: b.city_en,
           dist: b.lat && b.lng ? '~' : '?',
           mapsLink: b.lat && b.lng
             ? `https://waze.com/ul?ll=${b.lat},${b.lng}&navigate=yes`
@@ -701,12 +730,83 @@ export default function SmartGroceryDashboard() {
     });
   }, [currentView, lang, chains]);
 
+  // ── GPS geolocation request ──────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (currentView !== 'LOCATION') return;
+
+    if (!hasLoadedLocationPrefRef.current) {
+      hasLoadedLocationPrefRef.current = true;
+      try {
+        const raw = localStorage.getItem(LOCATION_PREF_KEY);
+        if (raw) {
+          const pref = JSON.parse(raw) as { status: string; city?: string };
+          if (pref.city) setCityQuery(pref.city);
+        }
+      } catch {}
+    }
+
+    if (!navigator.geolocation) {
+      setLocationStatus('denied');
+      return;
+    }
+
+    setLocationStatus('requesting');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setLocationStatus('granted');
+        try { localStorage.setItem(LOCATION_PREF_KEY, JSON.stringify({ status: 'granted' })); } catch {}
+      },
+      () => {
+        setUserPosition(null);
+        setLocationStatus('denied');
+        try { localStorage.setItem(LOCATION_PREF_KEY, JSON.stringify({ status: 'denied' })); } catch {}
+      },
+      { enableHighAccuracy: false, timeout: 8000 }
+    );
+  }, [currentView]);
+
+  // Persist the manually-chosen city once the user types one after being denied
+  useEffect(() => {
+    if (locationStatus !== 'denied') return;
+    const trimmed = cityQuery.trim();
+    try {
+      localStorage.setItem(LOCATION_PREF_KEY, JSON.stringify({
+        status: trimmed ? 'manual' : 'denied',
+        city: trimmed || undefined,
+      }));
+    } catch {}
+  }, [cityQuery, locationStatus]);
+
+  // Branches within the selected radius of the user's GPS position, or matching
+  // the manually-entered city when location access was denied.
+  const filteredBranches = React.useMemo(() => {
+    if (userPosition) {
+      return liveBranches
+        .filter((b) => b.lat && b.lng)
+        .map((b) => {
+          const distKm = haversineKm(userPosition.lat, userPosition.lng, b.lat, b.lng);
+          return { ...b, dist: `${distKm.toFixed(1)} ${lang === 'he' ? 'ק"מ' : 'km'}`, _distKm: distKm };
+        })
+        .filter((b) => b._distKm <= distanceKm)
+        .sort((a, b) => a._distKm - b._distKm);
+    }
+    if (locationStatus === 'denied' && cityQuery.trim()) {
+      const q = cityQuery.trim().toLowerCase();
+      return liveBranches.filter((b) =>
+        (b.cityHe ?? '').includes(cityQuery.trim()) || (b.cityEn ?? '').toLowerCase().includes(q)
+      );
+    }
+    return liveBranches;
+  }, [liveBranches, userPosition, distanceKm, locationStatus, cityQuery, lang]);
+
   // Pre-select the cheapest chain's first branch when arriving via "Navigate to cheapest"
   useEffect(() => {
-    if (!preferredChainId || liveBranches.length === 0) return;
-    const match = liveBranches.find((b) => b.chain_id === preferredChainId);
+    if (!preferredChainId || filteredBranches.length === 0) return;
+    const match = filteredBranches.find((b) => b.chain_id === preferredChainId);
     if (match) setActiveMapPin(match.id);
-  }, [preferredChainId, liveBranches]);
+  }, [preferredChainId, filteredBranches]);
 
   // ── Saved lists load ─────────────────────────────────────────────────────────
 
@@ -1165,15 +1265,55 @@ export default function SmartGroceryDashboard() {
         {/* ═══ LOCATION ═══ */}
         {currentView === 'LOCATION' && (
           <motion.div key="LOCATION" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1">
+
+            {/* Location filter bar */}
+            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+              {userPosition ? (
+                <div className="flex items-center gap-3 bg-slate-900/60 border border-slate-800 rounded-2xl px-4 py-3">
+                  <span className="text-xs font-semibold text-slate-300 whitespace-nowrap">{t.distanceFilter}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={DISTANCE_OPTIONS.length - 1}
+                    step={1}
+                    value={DISTANCE_OPTIONS.indexOf(distanceKm as typeof DISTANCE_OPTIONS[number])}
+                    onChange={(e) => setDistanceKm(DISTANCE_OPTIONS[Number(e.target.value)])}
+                    className="w-40 accent-indigo-500"
+                  />
+                  <span className="font-mono text-sm text-indigo-400 shrink-0 w-14 text-end">
+                    {distanceKm} {lang === 'he' ? 'ק"מ' : 'km'}
+                  </span>
+                </div>
+              ) : locationStatus === 'denied' ? (
+                <div className="flex items-center gap-2 bg-slate-900/60 border border-slate-800 rounded-2xl px-4 h-12 flex-1 sm:flex-none sm:w-72">
+                  <Search className="w-4 h-4 text-slate-400 shrink-0" />
+                  <input
+                    type="text"
+                    value={cityQuery}
+                    onChange={(e) => setCityQuery(e.target.value)}
+                    placeholder={t.searchByCity}
+                    className="bg-transparent outline-none text-sm text-slate-100 w-full"
+                    dir="auto"
+                  />
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-xs text-slate-500 h-12">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t.currentGpsLocation}...
+                </div>
+              )}
+            </div>
+
             <BranchMapContainer
               city={t.telAviv}
               lang={lang}
               skin={skin}
-              liveBranches={liveBranches}
+              liveBranches={filteredBranches}
               activeMapPin={activeMapPin}
               setActiveMapPin={setActiveMapPin}
               preferredChainId={preferredChainId}
               comparison={comparison}
+              userPosition={userPosition}
+              youAreHereLabel={t.myLocation}
               t={t}
             />
           </motion.div>

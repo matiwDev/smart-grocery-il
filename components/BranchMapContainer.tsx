@@ -38,6 +38,8 @@ interface BranchMapContainerProps {
   setActiveMapPin: (id: string) => void;
   preferredChainId?: string | null;
   comparison?: ComparisonResult[];
+  userPosition?: { lat: number; lng: number } | null;
+  youAreHereLabel?: string;
   t: any;
 }
 
@@ -60,7 +62,7 @@ function buildCostRanking(comparison: ComparisonResult[] | undefined) {
   return { colorByChain, totalByChain };
 }
 
-export function BranchMapContainer({ city, lang, liveBranches, activeMapPin, setActiveMapPin, preferredChainId, comparison, t }: BranchMapContainerProps) {
+export function BranchMapContainer({ city, lang, liveBranches, activeMapPin, setActiveMapPin, preferredChainId, comparison, userPosition, youAreHereLabel, t }: BranchMapContainerProps) {
   const sortedBranches = preferredChainId
     ? liveBranches.slice().sort((a, b) => (a.chain_id === preferredChainId ? -1 : 0) - (b.chain_id === preferredChainId ? -1 : 0))
     : liveBranches;
@@ -84,6 +86,8 @@ export function BranchMapContainer({ city, lang, liveBranches, activeMapPin, set
           costColorByChain={colorByChain}
           costTotalByChain={totalByChain}
           basketAtBranchLabel={t.basketAtBranch}
+          userPosition={userPosition}
+          youAreHereLabel={youAreHereLabel}
         />
       </div>
 
