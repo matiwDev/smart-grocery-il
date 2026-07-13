@@ -1,6 +1,7 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 import { Navigation, Tag } from 'lucide-react';
+import type { Dictionary } from '@/app/page';
 
 const BranchLeafletMap = dynamic(
   () => import('@/components/BranchLeafletMap').then((mod) => mod.BranchLeafletMap),
@@ -40,7 +41,7 @@ interface BranchMapContainerProps {
   comparison?: ComparisonResult[];
   userPosition?: { lat: number; lng: number } | null;
   youAreHereLabel?: string;
-  t: any;
+  t: Dictionary;
 }
 
 const COST_COLORS = { cheap: '#10b981', mid: '#f59e0b', expensive: '#ef4444' } as const;

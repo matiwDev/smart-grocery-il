@@ -2,10 +2,10 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  ShoppingCart, ExternalLink, Zap, BarChart3, Clock, TrendingDown,
+  ShoppingCart, ExternalLink, TrendingDown,
   LogIn, LogOut, Globe, User, X, Menu, Home, List, Users, Search,
-  MapPin, Trash2, Plus, Navigation, ChevronDown, ShoppingBag,
-  LifeBuoy, MessageCircle, MessageSquare, Mail, CheckCircle, AlertCircle,
+  MapPin, Trash2, Navigation, ChevronDown,
+  LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   ArrowDown, Loader2, Bell, Copy, UserPlus,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -23,8 +23,6 @@ const PALETTES = {
   'neon-acid':   { background: '#2F2408', panel: '#5C840B', primary: '#BEDF1D', textHighlight: '#EBF094' },
   'ocean-steel': { background: '#323244', panel: '#91A1BA', primary: '#0D659D', textHighlight: '#CCDAEB' },
 };
-
-const CHAIN_ORDER = ['rami_levy', 'victory', 'yohananof', 'shufersal'];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,6 +78,53 @@ interface UserProfile {
   email: string;
   phone: string;
   avatar: string;
+}
+
+interface BranchRow {
+  id: string;
+  name_he: string;
+  name_en: string | null;
+  city_he: string;
+  city_en: string | null;
+  chain_id: string;
+  lat: number | null;
+  lng: number | null;
+}
+
+interface LiveBranch {
+  id: string;
+  name: string;
+  desc: string;
+  cityHe: string;
+  cityEn: string | null;
+  dist: string;
+  mapsLink: string;
+  chain_id: string;
+  lat: number | null;
+  lng: number | null;
+  color_hex: string;
+}
+
+interface SavedBasketItem {
+  id: string;
+  product_id: string | null;
+  product_name: string;
+  quantity_value: number;
+}
+
+interface SavedBasket {
+  id: string;
+  name: string;
+  updated_at: string;
+  basket_items?: SavedBasketItem[];
+}
+
+interface ChatMessage {
+  id: string;
+  user_id: string;
+  nickname: string;
+  content: string;
+  created_at: string;
 }
 
 // ─── Dictionary ───────────────────────────────────────────────────────────────
@@ -254,6 +299,8 @@ const DICTIONARY = {
   },
 };
 
+export type Dictionary = typeof DICTIONARY['he'];
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 interface DrawerItemProps {
@@ -344,7 +391,6 @@ export default function SmartGroceryDashboard() {
   const [isEditingCredentials, setIsEditingCredentials] = useState(false);
   const [verificationFlash, setVerificationFlash] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
-  const [dataWindow, setDataWindow] = useState('02:00 AM - 04:00 AM');
 
   // Household invite state
   const [household, setHousehold] = useState<{ id: string; name: string; invite_code: string | null } | null>(null);
@@ -365,7 +411,6 @@ export default function SmartGroceryDashboard() {
   // Basket state
   const [basket, setBasket] = useState<BasketItem[]>([]);
   const [activeBasketId, setActiveBasketId] = useState<string | null>(null);
-  const [isBasketLoaded, setIsBasketLoaded] = useState(false);
 
   // Price comparison state
   const [comparison, setComparison] = useState<ComparisonResult[]>([]);
@@ -379,10 +424,9 @@ export default function SmartGroceryDashboard() {
   const [expandedPriceItemId, setExpandedPriceItemId] = useState<string | null>(null);
 
   // Saved lists + map
-  const [savedBaskets, setSavedBaskets] = useState<any[]>([]);
+  const [savedBaskets, setSavedBaskets] = useState<SavedBasket[]>([]);
   const [isLoadingSaved, setIsLoadingSaved] = useState(false);
-  const [location, setLocation] = useState('GPS');
-  const [liveBranches, setLiveBranches] = useState<any[]>([]);
+  const [liveBranches, setLiveBranches] = useState<LiveBranch[]>([]);
   const [activeMapPin, setActiveMapPin] = useState('gps');
   const [preferredChainId, setPreferredChainId] = useState<string | null>(null);
 
@@ -394,7 +438,7 @@ export default function SmartGroceryDashboard() {
   const hasLoadedLocationPrefRef = useRef(false);
 
   // Chat
-  const [chatMessages, setChatMessages] = useState<any[]>([
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { id: '1', user_id: 'dad', nickname: 'Dad', content: 'Don\'t forget the 3% milk!', created_at: new Date().toISOString() },
     { id: '2', user_id: 'mom', nickname: 'Mom', content: 'Added to the list ✓', created_at: new Date().toISOString() },
   ]);
@@ -435,10 +479,9 @@ export default function SmartGroceryDashboard() {
 
   useEffect(() => {
     if (!currentUser?.id || currentUser.id === '00000000-0000-0000-0000-000000000000') {
-      setIsBasketLoaded(true);
       return;
     }
-    if (!supabase) { setIsBasketLoaded(true); return; }
+    if (!supabase) return;
 
     supabase.from('baskets')
       .select('*, basket_items(*)')
@@ -494,7 +537,6 @@ export default function SmartGroceryDashboard() {
           }).select().single();
           if (newB) setActiveBasketId(newB.id);
         }
-        setIsBasketLoaded(true);
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
@@ -711,7 +753,7 @@ export default function SmartGroceryDashboard() {
     if (currentView !== 'LOCATION' || !supabase) return;
     supabase.from('branches').select('*').eq('is_active', true).then(({ data }) => {
       if (data) {
-        setLiveBranches(data.map((b: any) => ({
+        setLiveBranches((data as BranchRow[]).map((b) => ({
           id: b.id,
           name: lang === 'he' ? b.name_he : (b.name_en || b.name_he),
           desc: lang === 'he' ? b.city_he : (b.city_en || b.city_he),
@@ -784,7 +826,7 @@ export default function SmartGroceryDashboard() {
   const filteredBranches = React.useMemo(() => {
     if (userPosition) {
       return liveBranches
-        .filter((b) => b.lat && b.lng)
+        .filter((b): b is LiveBranch & { lat: number; lng: number } => !!(b.lat && b.lng))
         .map((b) => {
           const distKm = haversineKm(userPosition.lat, userPosition.lng, b.lat, b.lng);
           return { ...b, dist: `${distKm.toFixed(1)} ${lang === 'he' ? 'ק"מ' : 'km'}`, _distKm: distKm };
@@ -868,14 +910,6 @@ export default function SmartGroceryDashboard() {
       setJoinCodeInput('');
     }
     setTimeout(() => setJoinStatus('idle'), 3000);
-  };
-
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !currentUser) return;
-    const reader = new FileReader();
-    reader.onloadend = () => setCurrentUser({ ...currentUser, avatar: reader.result as string });
-    reader.readAsDataURL(file);
   };
 
   const handleSendMessage = (e: React.FormEvent) => {
@@ -1388,7 +1422,7 @@ export default function SmartGroceryDashboard() {
                   ] as const).map(({ label, key, type }) => (
                     <div key={key}>
                       <label className="block text-sm font-medium text-slate-400 mb-2">{label}</label>
-                      <input type={type} value={(currentUser as any)[key]}
+                      <input type={type} value={currentUser[key]}
                         onChange={(e) => setCurrentUser({ ...currentUser, [key]: e.target.value })}
                         disabled={!isEditingCredentials}
                         className={`w-full bg-slate-950/50 border rounded-xl px-4 py-3 text-slate-100 focus:outline-none transition-colors ${isEditingCredentials ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-700 opacity-75 cursor-not-allowed'}`}

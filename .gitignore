@@ -10,6 +10,9 @@
 /.next/
 /out/
 
+# typescript build info
+*.tsbuildinfo
+
 # production process manager tracking
 .build
 

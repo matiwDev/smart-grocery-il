@@ -1,14 +1,25 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { supabase } from "@/utils/supabase";
+import type { Dictionary } from '@/app/page';
 
 export type AuthMode = 'SIGN_IN' | 'SIGN_UP' | 'NONE';
+
+function getErrorMessage(err: unknown): string | undefined {
+  return err instanceof Error ? err.message : undefined;
+}
+
+function getErrorCode(err: unknown): string | undefined {
+  return typeof err === 'object' && err !== null && 'code' in err
+    ? String((err as { code?: unknown }).code)
+    : undefined;
+}
 
   interface AuthModalProps {
     authMode: AuthMode;
     setAuthMode: (mode: AuthMode) => void;
     onAuthSuccess: (nickname: string) => void;
-    t: any;
+    t: Dictionary;
   }
 
 export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModalProps) {
@@ -43,9 +54,9 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
 
       onAuthSuccess(body.nickname);
       setAuthMode('NONE');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Dev login error:', err);
-      setErrorMsg(err.message || 'Dev login failed');
+      setErrorMsg(getErrorMessage(err) || 'Dev login failed');
     } finally {
       setIsLoading(false);
     }
@@ -58,19 +69,17 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
     
     if (supabase) {
       try {
-        const verifyData: any = {
-          token: verificationCode.trim(),
-        };
-        
-        if (emailInput.trim()) {
-          verifyData.email = emailInput.trim();
-          verifyData.type = 'signup';
-        } else {
-          verifyData.phone = phoneInput.trim();
-          verifyData.type = 'sms';
-        }
-
-        const { data, error } = await supabase.auth.verifyOtp(verifyData);
+        const { data, error } = emailInput.trim()
+          ? await supabase.auth.verifyOtp({
+              email: emailInput.trim(),
+              token: verificationCode.trim(),
+              type: 'signup',
+            })
+          : await supabase.auth.verifyOtp({
+              phone: phoneInput.trim(),
+              token: verificationCode.trim(),
+              type: 'sms',
+            });
 
         if (error) throw error;
 
@@ -89,9 +98,9 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
           onAuthSuccess(usernameInput.trim());
           setAuthMode('NONE');
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Verify OTP error:', err);
-        setErrorMsg(err.message || 'Verification failed.');
+        setErrorMsg(getErrorMessage(err) || 'Verification failed.');
       } finally {
         setIsLoading(false);
       }
@@ -213,15 +222,16 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
         }
         onAuthSuccess(userProfile.nickname);
         setAuthMode('NONE');
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Auth error:', err);
-        
-        if (err.code === '23505' && err.message.includes('nickname')) {
+
+        const message = getErrorMessage(err);
+        if (getErrorCode(err) === '23505' && message?.includes('nickname')) {
           setErrorMsg('This Nickname is already taken inside your household / כינוי זה כבר תפוס בקבוצה זו');
-        } else if (err.message && (err.message.includes('does not exist') || err.message.includes('already registered'))) {
-           setErrorMsg(err.message);
+        } else if (message && (message.includes('does not exist') || message.includes('already registered'))) {
+           setErrorMsg(message);
         } else {
-           setErrorMsg(err.message || 'Authentication failed.');
+           setErrorMsg(message || 'Authentication failed.');
         }
       } finally {
         setIsLoading(false);
