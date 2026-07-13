@@ -21,6 +21,9 @@ interface BranchLeafletMapProps {
   activeMapPin: string;
   setActiveMapPin: (id: string) => void;
   quickNavigateLabel: string;
+  costColorByChain?: Record<string, string>;
+  costTotalByChain?: Record<string, number>;
+  basketAtBranchLabel?: string;
 }
 
 const DEFAULT_CENTER: [number, number] = [32.0853, 34.7818]; // Tel Aviv fallback
@@ -51,7 +54,7 @@ function FlyToActive({ branches, activeMapPin }: { branches: LiveBranch[]; activ
   return null;
 }
 
-export function BranchLeafletMap({ branches, activeMapPin, setActiveMapPin, quickNavigateLabel }: BranchLeafletMapProps) {
+export function BranchLeafletMap({ branches, activeMapPin, setActiveMapPin, quickNavigateLabel, costColorByChain, costTotalByChain, basketAtBranchLabel }: BranchLeafletMapProps) {
   const withCoords = branches.filter((b) => b.lat && b.lng);
   const center: [number, number] = withCoords.length > 0
     ? [withCoords[0].lat as number, withCoords[0].lng as number]
@@ -64,29 +67,38 @@ export function BranchLeafletMap({ branches, activeMapPin, setActiveMapPin, quic
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       <FlyToActive branches={withCoords} activeMapPin={activeMapPin} />
-      {withCoords.map((b) => (
-        <Marker
-          key={b.id}
-          position={[b.lat as number, b.lng as number]}
-          icon={chainIcon(b.color_hex, b.id === activeMapPin)}
-          eventHandlers={{ click: () => setActiveMapPin(b.id) }}
-        >
-          <Popup>
-            <div className="text-sm font-sans">
-              <p className="font-bold">{b.name}</p>
-              <p className="text-slate-500">{b.desc}</p>
-              <a
-                href={b.mapsLink}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-block mt-2 text-indigo-600 font-semibold underline"
-              >
-                {quickNavigateLabel}
-              </a>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
+      {withCoords.map((b) => {
+        const costColor = costColorByChain?.[b.chain_id];
+        const basketTotal = costTotalByChain?.[b.chain_id];
+        return (
+          <Marker
+            key={b.id}
+            position={[b.lat as number, b.lng as number]}
+            icon={chainIcon(costColor ?? b.color_hex, b.id === activeMapPin)}
+            eventHandlers={{ click: () => setActiveMapPin(b.id) }}
+          >
+            <Popup>
+              <div className="text-sm font-sans">
+                <p className="font-bold">{b.name}</p>
+                <p className="text-slate-500">{b.desc}</p>
+                {basketTotal !== undefined && (
+                  <p className="mt-1 font-mono font-semibold" style={{ color: costColor }}>
+                    {basketAtBranchLabel ?? 'Basket cost here'}: ₪{basketTotal.toFixed(2)}
+                  </p>
+                )}
+                <a
+                  href={b.mapsLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block mt-2 text-indigo-600 font-semibold underline"
+                >
+                  {quickNavigateLabel}
+                </a>
+              </div>
+            </Popup>
+          </Marker>
+        );
+      })}
     </MapContainer>
   );
 }

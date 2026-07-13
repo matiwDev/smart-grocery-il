@@ -145,6 +145,21 @@ const DICTIONARY = {
     dataIngestionWindow: 'חלון עדכון נתונים',
     dataIngestionDesc: 'עדכוני מחירים מתבצעים אוטומטית בשעות השפל.',
     uploadPicture: 'העלה תמונה',
+    basketAtBranch: 'עלות הסל כאן',
+    priceAlerts: 'התראות מחיר',
+    priceAlertSet: 'התראה הופעלה',
+    priceAlertRemoved: 'התראה בוטלה',
+    targetPrice: 'מחיר יעד',
+    inviteToHousehold: 'הזמן למשק בית',
+    yourInviteCode: 'קוד ההזמנה שלך',
+    copyCode: 'העתק קוד',
+    codeCopied: 'הועתק!',
+    joinHousehold: 'הצטרף למשק בית',
+    enterInviteCode: 'הזן קוד הזמנה',
+    joinButton: 'הצטרף',
+    joinSuccess: 'הצטרפת בהצלחה!',
+    joinError: 'קוד לא תקין או שגיאה',
+    generateCode: 'צור קוד הזמנה',
   },
   en: {
     appTitle: 'Smart Grocery IL',
@@ -205,6 +220,21 @@ const DICTIONARY = {
     dataIngestionWindow: 'Data Ingestion Window',
     dataIngestionDesc: 'Price updates are automatically scheduled during off-peak hours.',
     uploadPicture: 'Upload Picture',
+    basketAtBranch: 'Basket cost here',
+    priceAlerts: 'Price Alerts',
+    priceAlertSet: 'Alert enabled',
+    priceAlertRemoved: 'Alert removed',
+    targetPrice: 'Target price',
+    inviteToHousehold: 'Invite to Household',
+    yourInviteCode: 'Your invite code',
+    copyCode: 'Copy code',
+    codeCopied: 'Copied!',
+    joinHousehold: 'Join Household',
+    enterInviteCode: 'Enter invite code',
+    joinButton: 'Join',
+    joinSuccess: 'Joined successfully!',
+    joinError: 'Invalid code or error',
+    generateCode: 'Generate invite code',
   },
 };
 
@@ -928,6 +958,7 @@ export default function SmartGroceryDashboard() {
               activeMapPin={activeMapPin}
               setActiveMapPin={setActiveMapPin}
               preferredChainId={preferredChainId}
+              comparison={comparison}
               t={t}
             />
           </motion.div>
