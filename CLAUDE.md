@@ -38,7 +38,11 @@ Located at `.env.local` (gitignored). If missing, run: `npm run env:link`
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+RESEND_API_KEY=
 ```
+`RESEND_API_KEY` is only used as the custom SMTP credential configured in the
+Supabase dashboard (Auth → Emails → SMTP Settings) — the app code never reads
+it directly. See "Custom SMTP (Resend)" below for the dashboard values.
 
 ## Database schema (key tables)
 ```sql
@@ -61,6 +65,24 @@ messages       — id, user_id, nickname, message_text, created_at
 - 8 branches across Gush Dan area with real coordinates
 - 72 price rows (18 products × 4 chains) with realistic ILS prices
 - latest_prices materialized view populated
+
+## Custom SMTP (Resend)
+Supabase's built-in email service has a very low rate limit (a few emails/hour),
+which breaks OTP testing. Fix: configure Resend as custom SMTP.
+
+Manual steps in Supabase Dashboard → Project Settings → Auth → SMTP Settings:
+```
+Enable Custom SMTP: ON
+Sender email:        onboarding@resend.dev   (or a verified domain sender)
+Sender name:         Smart Grocery IL
+Host:                smtp.resend.com
+Port:                465
+Username:             resend
+Password:             <the RESEND_API_KEY value>
+Minimum interval between emails: lower from default if still testing OTP a lot
+```
+`RESEND_API_KEY` only needs to live in `.env.local` as a reference for whoever
+is pasting it into the dashboard — the running app does not call Resend directly.
 
 ## RLS rules
 - products, chains, branches, price_history, latest_prices: public SELECT (authenticated + anon)
