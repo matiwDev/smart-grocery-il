@@ -6,7 +6,7 @@ import {
   LogIn, LogOut, Globe, User, X, Menu, Home, List, Users, Search,
   MapPin, Trash2, Plus, Navigation, ChevronDown, ShoppingBag,
   LifeBuoy, MessageCircle, MessageSquare, Mail, CheckCircle, AlertCircle,
-  ArrowDown, Loader2,
+  ArrowDown, Loader2, Bell,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BranchMapContainer } from '@/components/BranchMapContainer';
@@ -324,6 +324,9 @@ export default function SmartGroceryDashboard() {
   const [maxSavings, setMaxSavings] = useState(0);
   const [isComparing, setIsComparing] = useState(false);
 
+  // Price alerts: product_id -> price_alerts row id (present only while active)
+  const [priceAlerts, setPriceAlerts] = useState<Record<string, string>>({});
+
   // Saved lists + map
   const [savedBaskets, setSavedBaskets] = useState<any[]>([]);
   const [isLoadingSaved, setIsLoadingSaved] = useState(false);
@@ -437,6 +440,45 @@ export default function SmartGroceryDashboard() {
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
+
+  // ── Price alerts load ────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!currentUser?.id || !supabase) { setPriceAlerts({}); return; }
+    supabase.from('price_alerts')
+      .select('id, product_id')
+      .eq('user_id', currentUser.id)
+      .eq('is_active', true)
+      .then(({ data }) => {
+        const map: Record<string, string> = {};
+        for (const row of data ?? []) map[row.product_id] = row.id;
+        setPriceAlerts(map);
+      });
+  }, [currentUser]);
+
+  const togglePriceAlert = async (item: BasketItem) => {
+    if (!currentUser?.id || !supabase) return;
+    const existingId = priceAlerts[item.id];
+
+    if (existingId) {
+      await supabase.from('price_alerts').delete().eq('id', existingId);
+      setPriceAlerts((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+      return;
+    }
+
+    const cheapestEntry = Object.values(item.prices).sort((a, b) => a.price - b.price)[0];
+    const { data } = await supabase.from('price_alerts').insert({
+      product_id: item.id,
+      user_id: currentUser.id,
+      target_price: item.min_price ?? cheapestEntry?.price ?? 0,
+      chain_id: cheapestEntry?.chain_id ?? null,
+    }).select().single();
+    if (data) setPriceAlerts((prev) => ({ ...prev, [item.id]: data.id }));
+  };
 
   // ── Product search (debounced) ───────────────────────────────────────────────
 
@@ -838,6 +880,17 @@ export default function SmartGroceryDashboard() {
                               ₪{((item.min_price ?? 0) * item.quantity).toFixed(2)}
                             </span>
                           </div>
+                          <button
+                            onClick={() => togglePriceAlert(item)}
+                            title={t.priceAlerts}
+                            className={`w-11 h-11 flex items-center justify-center rounded-xl transition-colors ${
+                              priceAlerts[item.id]
+                                ? 'text-amber-400 bg-amber-500/10 hover:bg-amber-500/20'
+                                : 'text-slate-500 hover:text-amber-400 hover:bg-amber-500/10'
+                            }`}
+                          >
+                            <Bell className="w-5 h-5" fill={priceAlerts[item.id] ? 'currentColor' : 'none'} />
+                          </button>
                           <button onClick={() => removeProduct(item.id)} className="w-11 h-11 flex items-center justify-center text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors">
                             <Trash2 className="w-5 h-5" />
                           </button>
