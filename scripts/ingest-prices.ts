@@ -18,7 +18,11 @@ requireEnv();
 // pulling all of them isn't necessary to prove the pipeline works end to end.
 const SHUFERSAL_STORE_LIMIT = Number(process.env.SHUFERSAL_STORE_LIMIT || 3);
 
-const RAMI_LEVY_URL = 'https://url.rami-levy.co.il/api/delivery/prices';
+// Note: this URL resolves (unlike the earlier url.rami-levy.co.il host) but
+// currently 404s (verified via curl as of this writing) — see CLAUDE.md
+// "Price ingestion pipeline" for details. Kept as the documented correct
+// endpoint; the script logs and continues per-chain on failure either way.
+const RAMI_LEVY_URL = 'https://www.rami-levy.co.il/api/delivery/prices';
 
 // ─── Shared types ───────────────────────────────────────────────────────────
 
@@ -164,21 +168,23 @@ async function ingestShufersal(): Promise<IngestResult> {
 // ─── Rami Levy (JSON) ───────────────────────────────────────────────────────
 
 function extractRamiLevyItems(payload: unknown): FeedItem[] {
-  // The published shape isn't documented anywhere we can verify ahead of time,
-  // so accept a few plausible shapes and otherwise fail loudly rather than
-  // guess silently.
+  // Expected shape per the current integration spec: {data: [{id, name, price}]}
+  // (id = barcode). Also accepts a few other plausible shapes in case the API
+  // evolves, and otherwise fails loudly rather than guessing silently.
   const candidateArray: unknown = Array.isArray(payload)
     ? payload
-    : (payload as Record<string, unknown> | null)?.items ?? (payload as Record<string, unknown> | null)?.products;
+    : (payload as Record<string, unknown> | null)?.data ??
+      (payload as Record<string, unknown> | null)?.items ??
+      (payload as Record<string, unknown> | null)?.products;
 
   if (!Array.isArray(candidateArray)) {
-    throw new Error('Unrecognized Rami Levy JSON response shape (expected an array, or {items:[]}/{products:[]})');
+    throw new Error('Unrecognized Rami Levy JSON response shape (expected an array, or {data:[]}/{items:[]}/{products:[]})');
   }
 
   return candidateArray
     .map((raw): FeedItem | null => {
       const r = raw as Record<string, unknown>;
-      const barcode = String(r.barcode ?? r.itemCode ?? r.ItemCode ?? '').trim();
+      const barcode = String(r.id ?? r.barcode ?? r.itemCode ?? r.ItemCode ?? '').trim();
       const price = Number(r.price ?? r.itemPrice ?? r.ItemPrice);
       if (!barcode || !Number.isFinite(price)) return null;
       return {
