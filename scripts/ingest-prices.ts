@@ -8,96 +8,17 @@
  *
  * Run with: npm run ingest
  */
-import { readFileSync } from 'fs';
-import { gunzipSync } from 'zlib';
-import { join } from 'path';
-import { XMLParser } from 'fast-xml-parser';
+import { requireEnv, restFetch, fetchWithRetry, chunk, refreshLatestPrices } from './supabase-rest';
+import { fetchShufersalFileLinks, fetchAndParseShufersalFile } from './shufersal-feed';
 
-// ─── Env ──────────────────────────────────────────────────────────────────
-
-function loadEnvLocal(): Record<string, string> {
-  const path = join(__dirname, '..', '.env.local');
-  const env: Record<string, string> = {};
-  let raw: string;
-  try {
-    raw = readFileSync(path, 'utf8');
-  } catch {
-    return env;
-  }
-  for (const line of raw.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let value = trimmed.slice(eq + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    env[key] = value;
-  }
-  return env;
-}
-
-const fileEnv = loadEnvLocal();
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || fileEnv.NEXT_PUBLIC_SUPABASE_URL;
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || fileEnv.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-  console.error('Missing NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY (checked process.env and .env.local)');
-  process.exit(1);
-}
+requireEnv();
 
 // How many per-branch Shufersal files to download and parse in one run.
 // The public listing has one PriceFull file per branch (hundreds of them);
 // pulling all of them isn't necessary to prove the pipeline works end to end.
 const SHUFERSAL_STORE_LIMIT = Number(process.env.SHUFERSAL_STORE_LIMIT || 3);
 
-const SHUFERSAL_LISTING_URL = 'https://prices.shufersal.co.il/FileObject/UpdateCategory?catID=2&storeId=0';
 const RAMI_LEVY_URL = 'https://url.rami-levy.co.il/api/delivery/prices';
-
-// ─── REST helpers (PostgREST via service role, no supabase-js) ────────────
-
-async function restFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    ...init,
-    headers: {
-      apikey: SERVICE_ROLE_KEY!,
-      Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-      'Content-Type': 'application/json',
-      ...(init.headers || {}),
-    },
-  });
-}
-
-async function fetchWithRetry(url: string, init: RequestInit = {}, retries = 3, delayMs = 2000): Promise<Response> {
-  let lastErr: unknown;
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(url, init);
-      if (res.status === 429 || res.status === 503) {
-        lastErr = new Error(`HTTP ${res.status} from ${url}`);
-        if (attempt < retries) await sleep(delayMs);
-        continue;
-      }
-      return res;
-    } catch (err) {
-      lastErr = err;
-      if (attempt < retries) await sleep(delayMs);
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function chunk<T>(items: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
-}
 
 // ─── Shared types ───────────────────────────────────────────────────────────
 
@@ -164,13 +85,6 @@ async function matchAndInsert(chainId: string, items: FeedItem[]): Promise<{ mat
   return { matched: rowsToInsert.length, inserted };
 }
 
-async function refreshLatestPrices(): Promise<void> {
-  const res = await restFetch('rpc/refresh_latest_prices', { method: 'POST', body: '{}' });
-  if (!res.ok) {
-    throw new Error(`refresh_latest_prices() failed: HTTP ${res.status} ${await res.text()}`);
-  }
-}
-
 async function writeIngestLog(result: IngestResult, startedAt: string): Promise<void> {
   const res = await restFetch('ingest_log', {
     method: 'POST',
@@ -196,50 +110,7 @@ async function writeIngestLog(result: IngestResult, startedAt: string): Promise<
 }
 
 // ─── Shufersal (XML, gzipped, one file per branch) ─────────────────────────
-
-function toArray<T>(value: T | T[] | undefined): T[] {
-  if (value === undefined) return [];
-  return Array.isArray(value) ? value : [value];
-}
-
-async function fetchShufersalFileLinks(): Promise<string[]> {
-  const res = await fetchWithRetry(SHUFERSAL_LISTING_URL);
-  if (!res.ok) throw new Error(`Shufersal listing fetch failed: HTTP ${res.status}`);
-  const html = await res.text();
-  const linkPattern = /href="(https:\/\/pricesprodpublic\.blob\.core\.windows\.net\/pricefull\/[^"]+)"/g;
-  const links = new Set<string>();
-  let match: RegExpExecArray | null;
-  while ((match = linkPattern.exec(html)) !== null) {
-    links.add(match[1].replace(/&amp;/g, '&'));
-  }
-  return [...links];
-}
-
-async function fetchAndParseShufersalFile(url: string): Promise<FeedItem[]> {
-  const res = await fetchWithRetry(url);
-  if (!res.ok) throw new Error(`Shufersal file fetch failed: HTTP ${res.status}`);
-  const gzBuffer = Buffer.from(await res.arrayBuffer());
-  const xml = gunzipSync(gzBuffer).toString('utf8');
-
-  const parser = new XMLParser();
-  const parsed = parser.parse(xml);
-  const rawItems = toArray(parsed?.Root?.Items?.Item);
-
-  return rawItems
-    .map((raw): FeedItem | null => {
-      const barcode = String(raw.ItemCode ?? '').trim();
-      const price = Number(raw.ItemPrice);
-      if (!barcode || !Number.isFinite(price)) return null;
-      return {
-        barcode,
-        price,
-        unitQty: Number(raw.Quantity) || 1,
-        unitType: String(raw.UnitOfMeasure ?? raw.UnitQty ?? 'unit').trim(),
-        isSale: false,
-      };
-    })
-    .filter((item): item is FeedItem => item !== null);
-}
+// Fetch/parse mechanics live in ./shufersal-feed (shared with seed-products-from-feed.ts).
 
 async function ingestShufersal(): Promise<IngestResult> {
   const startedAt = new Date().toISOString();
@@ -261,7 +132,15 @@ async function ingestShufersal(): Promise<IngestResult> {
     for (const url of filesToProcess) {
       const items = await fetchAndParseShufersalFile(url);
       console.log(`[shufersal]   ${items.length} items from ${url.split('/').pop()?.split('?')[0]}`);
-      allItems.push(...items);
+      allItems.push(
+        ...items.map((item) => ({
+          barcode: item.barcode,
+          price: item.price,
+          unitQty: item.unitQty,
+          unitType: item.unitType,
+          isSale: false,
+        }))
+      );
     }
     fetched = allItems.length;
 
