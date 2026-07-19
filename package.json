@@ -10,9 +10,11 @@
     "clean": "next clean",
     "env:link": "cp ~/.config/smartgrocery/.env.local .env.local",
     "ingest": "ts-node --project scripts/tsconfig.json scripts/ingest-prices.ts",
-    "seed:products": "ts-node --project scripts/tsconfig.json scripts/seed-products-from-feed.ts"
+    "seed:products": "ts-node --project scripts/tsconfig.json scripts/seed-products-from-feed.ts",
+    "enrich:names": "ts-node --project scripts/tsconfig.json scripts/enrich-product-names.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.3",
     "@hookform/resolvers": "^5.2.1",
     "@supabase/supabase-js": "^2.110.0",
     "autoprefixer": "^10.4.21",
