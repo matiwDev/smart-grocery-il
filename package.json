@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "clean": "next clean",
     "env:link": "cp ~/.config/smartgrocery/.env.local .env.local",
-    "ingest": "ts-node --project scripts/tsconfig.json scripts/ingest-prices.ts",
+    "ingest": "ts-node --project scripts/tsconfig.json scripts/run-ingest-cli.ts",
     "seed:products": "ts-node --project scripts/tsconfig.json scripts/seed-products-from-feed.ts",
     "enrich:names": "ts-node --project scripts/tsconfig.json scripts/enrich-product-names.ts"
   },

@@ -1,17 +1,22 @@
 /**
- * Standalone price ingestion script — fetches real price feeds published under
+ * Real price ingestion logic — fetches real price feeds published under
  * Israel's Food Act (2014) transparency requirement and loads them into
  * price_history. Talks to Supabase via plain REST (PostgREST) with the
- * service-role key rather than @supabase/supabase-js: this repo runs on
- * Node 20, and realtime-js (a supabase-js dependency) requires a native
- * WebSocket only available from Node 22+, which crashes standalone scripts.
+ * service-role key rather than @supabase/supabase-js: the standalone-script
+ * caller (scripts/run-ingest-cli.ts) runs on Node 20, and realtime-js (a
+ * supabase-js dependency) requires a native WebSocket only available from
+ * Node 22+, which crashes standalone scripts.
  *
- * Run with: npm run ingest
+ * This module only exports runIngestion() and has no process-level side
+ * effects (no requireEnv() gate, no process.exit, no auto-run) — it's
+ * imported by two different callers with different needs:
+ *   - scripts/run-ingest-cli.ts, the `npm run ingest` CLI entry point
+ *   - app/api/prices/ingest/route.ts's GET handler (Vercel/GitHub Actions
+ *     cron target, Phase 6) — a process.exit() here would kill the whole
+ *     serverless function, not just fail one request
  */
-import { requireEnv, restFetch, fetchWithRetry, chunk, refreshLatestPrices } from './supabase-rest';
+import { restFetch, fetchWithRetry, chunk, refreshLatestPrices } from './supabase-rest';
 import { fetchShufersalFileLinks, fetchAndParseShufersalFile } from './shufersal-feed';
-
-requireEnv();
 
 // How many per-branch Shufersal files to download and parse in one run.
 // The public listing has one PriceFull file per branch (hundreds of them);
@@ -233,21 +238,11 @@ async function ingestRamiLevy(): Promise<IngestResult> {
 
 // ─── Entry point ────────────────────────────────────────────────────────────
 
-async function main() {
+// Shared by scripts/run-ingest-cli.ts (`npm run ingest`) and by the GET
+// /api/prices/ingest cron route (app/api/prices/ingest/route.ts).
+export async function runIngestion(): Promise<IngestResult[]> {
   const results: IngestResult[] = [];
   results.push(await ingestShufersal());
   results.push(await ingestRamiLevy());
-
-  console.log('\n─── Summary ───────────────────────────────────────');
-  for (const r of results) {
-    console.log(
-      `${r.chainId.padEnd(12)} fetched=${r.fetched}  matched=${r.matched}  inserted=${r.inserted}` +
-        (r.errorText ? `  ERROR: ${r.errorText}` : '')
-    );
-  }
-
-  const anyFailed = results.some((r) => r.errorText);
-  process.exit(anyFailed ? 1 : 0);
+  return results;
 }
-
-main();

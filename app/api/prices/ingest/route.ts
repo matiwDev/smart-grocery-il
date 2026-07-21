@@ -1,5 +1,46 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { runIngestion } from '@/scripts/ingest-prices';
+
+// Cron-triggered real ingestion (Phase 6). Runs the same Shufersal/Rami-Levy
+// pipeline as `npm run ingest` (scripts/ingest-prices.ts) in-process.
+//
+// Auth accepts either header, since the two schedulers that hit this route
+// send different ones:
+//   - x-cron-secret: <CRON_SECRET>        (GitHub Actions / manual calls)
+//   - Authorization: Bearer <CRON_SECRET> (Vercel Cron's own auto-injected
+//     header for requests it triggers — see vercel.json's `crons` entry;
+//     Vercel does not support sending a custom x-cron-secret header, so
+//     checking only the first form would 401 Vercel's own cron invocation)
+function isAuthorizedCronRequest(req: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  const provided = req.headers.get('x-cron-secret');
+  const authHeader = req.headers.get('authorization');
+  return provided === secret || authHeader === `Bearer ${secret}`;
+}
+
+export async function GET(req: NextRequest) {
+  if (!isAuthorizedCronRequest(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const results = await runIngestion();
+    return NextResponse.json({
+      results: results.map((r) => ({
+        chain: r.chainId,
+        fetched: r.fetched,
+        matched: r.matched,
+        inserted: r.inserted,
+        error: r.errorText,
+      })),
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
