@@ -1638,7 +1638,7 @@ export default function SmartGroceryDashboard() {
                 <button onClick={() => setIsSupportOpen(false)} className="text-slate-400 hover:text-white p-3 -m-3"><X className="w-5 h-5" /></button>
               </div>
               <div className="p-6 space-y-4">
-                <a href={`https://wa.me/972500000000?text=${encodeURIComponent(lang === 'he' ? 'שלום, אני זקוק לעזרה.' : 'Hello, I need help.')}`}
+                <a href={`https://wa.me/972502887700?text=${encodeURIComponent(lang === 'he' ? 'שלום, אני זקוק לעזרה.' : 'Hello, I need help.')}`}
                   target="_blank" rel="noopener noreferrer"
                   className="w-full flex items-center justify-between p-4 bg-[#25D366]/10 border border-[#25D366]/30 hover:bg-[#25D366]/20 transition-colors rounded-2xl group">
                   <div className="flex items-center gap-3">
