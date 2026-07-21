@@ -6,7 +6,7 @@ import {
   LogIn, LogOut, Globe, User, X, Menu, Home, List, Users, Search,
   MapPin, Trash2, Navigation, ChevronDown,
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
-  ArrowDown, Loader2, Bell, Copy, UserPlus,
+  ArrowDown, Loader2, Bell, Copy, UserPlus, Sun, Moon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BranchMapContainer } from '@/components/BranchMapContainer';
@@ -15,14 +15,9 @@ import { supabase } from '@/utils/supabase';
 
 type Lang = 'he' | 'en';
 type View = 'HOME' | 'PROFILE' | 'SAVED_LISTS' | 'PRICE_UPDATES' | 'COMMUNITY' | 'LOCATION' | 'CHAT';
-type Skin = 'warm-rose' | 'earth-slate' | 'neon-acid' | 'ocean-steel';
+type Theme = 'light' | 'dark';
 
-const PALETTES = {
-  'warm-rose':   { background: '#F7EFE0', panel: '#F7CAC9', primary: '#EDB490', textHighlight: '#391C10' },
-  'earth-slate': { background: '#ebebe5', panel: '#c9beb1', primary: '#b99a87', textHighlight: '#65463e' },
-  'neon-acid':   { background: '#2F2408', panel: '#5C840B', primary: '#BEDF1D', textHighlight: '#EBF094' },
-  'ocean-steel': { background: '#323244', panel: '#91A1BA', primary: '#0D659D', textHighlight: '#CCDAEB' },
-};
+const THEME_STORAGE_KEY = 'sg_theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -151,9 +146,6 @@ const DICTIONARY = {
     viewDetails: 'צפה בפרטים',
     backToHome: 'חזרה לראשי',
     placeholderDesc: 'העמוד הזה נמצא כעת בפיתוח.',
-    themeSettings: 'ערכת נושא',
-    skinWarmRose: 'ורד חם', skinEarthSlate: 'אדמה',
-    skinNeonAcid: 'חומצה ניאון', skinOceanSteel: 'אוקיינוס פלדה',
     devOptionsLocked: 'בקרת מפתחים (Locked)',
     profileDataTitle: 'פרטים אישיים',
     avatarPickerTitle: 'בחר דמות',
@@ -235,9 +227,6 @@ const DICTIONARY = {
     viewDetails: 'View Details',
     backToHome: 'Back to Home',
     placeholderDesc: 'This page is currently in development.',
-    themeSettings: 'Profile Skin',
-    skinWarmRose: 'Warm Rose', skinEarthSlate: 'Earth Slate',
-    skinNeonAcid: 'Neon Acid', skinOceanSteel: 'Ocean Steel',
     devOptionsLocked: 'Developer Options (Locked)',
     profileDataTitle: 'Personal Information',
     avatarPickerTitle: 'Choose Avatar',
@@ -314,8 +303,8 @@ function DrawerItem({ view, currentView, setCurrentView, icon: Icon, label, clos
       onClick={() => { setCurrentView(view); close(); }}
       className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors text-sm font-medium ${
         currentView === view
-          ? 'bg-indigo-500/10 text-indigo-400'
-          : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100'
+          ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+          : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'
       }`}
     >
       <Icon className="w-5 h-5" />
@@ -357,8 +346,8 @@ function ChainBar({ chain, total, maxTotal, isMin, lang }: {
   const name = lang === 'he' ? chain.name_he : chain.name_en;
   return (
     <div className="flex items-center gap-3">
-      <span className="w-20 text-xs text-slate-400 text-end shrink-0">{name}</span>
-      <div className="flex-1 h-7 bg-slate-800/60 rounded-lg overflow-hidden relative">
+      <span className="w-20 text-xs text-[var(--color-text-muted)] text-end shrink-0">{name}</span>
+      <div className="flex-1 h-7 bg-[var(--color-bg-subtle)] rounded-lg overflow-hidden relative">
         <div
           className="h-full rounded-lg transition-all duration-500 flex items-center px-3"
           style={{
@@ -366,12 +355,16 @@ function ChainBar({ chain, total, maxTotal, isMin, lang }: {
             backgroundColor: chain.color_hex + 'cc',
           }}
         />
-        <span className="absolute inset-0 flex items-center px-3 text-xs font-mono font-medium text-white">
-          ₪{total.toFixed(2)}
+        <span className="absolute inset-0 flex items-center px-3">
+          {/* Own semi-opaque backing (independent of the bar/track color underneath)
+              guarantees the label stays readable regardless of fill width or theme. */}
+          <span className="bg-black/40 text-[var(--color-accent-text)] text-xs font-mono font-medium px-1.5 py-0.5 rounded">
+            ₪{total.toFixed(2)}
+          </span>
         </span>
       </div>
       {isMin && (
-        <span className="text-[10px] font-bold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2 py-0.5 rounded-full shrink-0">
+        <span className="text-[10px] font-bold text-[var(--color-success)] bg-[var(--color-success)]/10 border border-[var(--color-success)]/20 px-2 py-0.5 rounded-full shrink-0">
           {lang === 'he' ? 'זול' : 'Best'}
         </span>
       )}
@@ -387,7 +380,7 @@ export default function SmartGroceryDashboard() {
   const [authMode, setAuthMode] = useState<AuthMode>('NONE');
   const [currentView, setCurrentView] = useState<View>('HOME');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [skin, setSkin] = useState<Skin>('warm-rose');
+  const [theme, setTheme] = useState<Theme>('light');
   const [isEditingCredentials, setIsEditingCredentials] = useState(false);
   const [verificationFlash, setVerificationFlash] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
@@ -445,7 +438,24 @@ export default function SmartGroceryDashboard() {
   const [chatInput, setChatInput] = useState('');
 
   const t = DICTIONARY[lang];
-  const currentPalette = PALETTES[skin];
+
+  // ── Theme: load preference on mount, persist + apply on change ──────────────
+
+  useEffect(() => {
+    let saved: Theme = 'light';
+    try {
+      const raw = localStorage.getItem(THEME_STORAGE_KEY);
+      if (raw === 'dark' || raw === 'light') saved = raw;
+    } catch {}
+    setTheme(saved);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem(THEME_STORAGE_KEY, theme); } catch {}
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
 
   // ── Chain metadata (needed for display names before any search happens) ──────
 
@@ -470,7 +480,6 @@ export default function SmartGroceryDashboard() {
           phone: profile?.phone_number || '',
           avatar: profile?.avatar_url || '',
         });
-        if (profile?.selected_skin) setSkin(profile.selected_skin as Skin);
       });
     });
   }, []);
@@ -874,7 +883,6 @@ export default function SmartGroceryDashboard() {
         nickname: currentUser.nickname,
         phone_number: currentUser.phone,
         avatar_url: currentUser.avatar,
-        selected_skin: skin,
       });
     }
     setVerificationFlash(true);
@@ -931,56 +939,56 @@ export default function SmartGroceryDashboard() {
 
   return (
     <div
-      className="w-full min-h-screen flex flex-col font-sans p-4 md:p-6 lg:p-8 overflow-x-hidden relative transition-colors duration-500"
+      className="w-full min-h-screen flex flex-col font-sans p-4 md:p-6 lg:p-8 overflow-x-hidden relative transition-colors duration-300 bg-[var(--color-bg-base)] text-[var(--color-text-primary)]"
       dir={lang === 'he' ? 'rtl' : 'ltr'}
-      style={{
-        '--background': currentPalette.background,
-        '--panel': currentPalette.panel,
-        '--primary': currentPalette.primary,
-        '--text-highlight': currentPalette.textHighlight,
-        background: currentPalette.background,
-        color: currentPalette.textHighlight,
-      } as React.CSSProperties}
     >
       {/* ── Header ── */}
       <header className="flex flex-col md:flex-row items-start md:items-center justify-between mb-6 gap-4">
         <div className="flex items-center gap-4">
-          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/20 shrink-0">
+          <div className="w-10 h-10 bg-[var(--color-accent)] rounded-xl flex items-center justify-center text-[var(--color-accent-text)] font-bold shadow-lg shadow-[var(--color-accent)]/20 shrink-0">
             <ShoppingCart className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-slate-100">{t.appTitle}</h1>
-            <p className="text-xs text-slate-400 font-medium">{t.envLabel}</p>
+            <h1 className="text-lg font-bold text-[var(--color-text-primary)]">{t.appTitle}</h1>
+            <p className="text-xs text-[var(--color-text-muted)] font-medium">{t.envLabel}</p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
           <button
             onClick={() => setLang((l) => l === 'he' ? 'en' : 'he')}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 transition-colors px-3 rounded-full border border-slate-700 text-xs font-semibold text-slate-200 min-h-[44px]"
+            className="flex items-center gap-2 bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] transition-colors px-3 rounded-full border border-[var(--color-border)] text-xs font-semibold text-[var(--color-text-primary)] min-h-[44px]"
           >
-            <Globe className="w-4 h-4 text-indigo-400" />
+            <Globe className="w-4 h-4 text-[var(--color-accent)]" />
             {lang === 'he' ? 'EN' : 'עברית'}
           </button>
 
-          <div className="flex items-center gap-3 border-s border-slate-800 ps-4">
+          <button
+            onClick={toggleTheme}
+            aria-label={theme === 'dark' ? (lang === 'he' ? 'עבור למצב בהיר' : 'Switch to light mode') : (lang === 'he' ? 'עבור למצב כהה' : 'Switch to dark mode')}
+            className="flex items-center justify-center w-11 h-11 bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] transition-colors rounded-full border border-[var(--color-border)] text-[var(--color-accent)]"
+          >
+            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
+
+          <div className="flex items-center gap-3 border-s border-[var(--color-border)] ps-4">
             <div className="text-start hidden sm:block">
-              <p className="text-sm font-bold text-slate-100">{currentUser ? currentUser.nickname : t.guest}</p>
-              <p className="text-[10px] text-slate-400 uppercase tracking-wider">{currentUser ? t.roleBuyer : t.roleGuest}</p>
+              <p className="text-sm font-bold text-[var(--color-text-primary)]">{currentUser ? currentUser.nickname : t.guest}</p>
+              <p className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider">{currentUser ? t.roleBuyer : t.roleGuest}</p>
             </div>
-            <div className="w-10 h-10 rounded-full bg-slate-800 border-2 border-slate-700 overflow-hidden flex items-center justify-center">
+            <div className="w-10 h-10 rounded-full bg-[var(--color-bg-subtle)] border-2 border-[var(--color-border)] overflow-hidden flex items-center justify-center">
               {currentUser?.avatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={currentUser.avatar} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
-                <User className="w-5 h-5 text-slate-400" />
+                <User className="w-5 h-5 text-[var(--color-text-muted)]" />
               )}
             </div>
           </div>
 
           <button
             onClick={() => setIsDrawerOpen(true)}
-            className="w-11 h-11 bg-indigo-600 hover:bg-indigo-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-500/20 transition-colors"
+            className="w-11 h-11 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] rounded-xl flex items-center justify-center text-[var(--color-accent-text)] shadow-lg shadow-[var(--color-accent)]/20 transition-colors"
           >
             <Menu className="w-5 h-5" />
           </button>
@@ -1000,8 +1008,8 @@ export default function SmartGroceryDashboard() {
                 <div className="relative">
                   <div className="absolute inset-y-0 start-0 flex items-center ps-4 pointer-events-none">
                     {isSearching
-                      ? <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
-                      : <Search className="w-5 h-5 text-slate-400" />
+                      ? <Loader2 className="w-5 h-5 text-[var(--color-accent)] animate-spin" />
+                      : <Search className="w-5 h-5 text-[var(--color-text-muted)]" />
                     }
                   </div>
                   <input
@@ -1010,7 +1018,7 @@ export default function SmartGroceryDashboard() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onFocus={() => searchQuery && setShowPredictions(true)}
                     placeholder={t.searchPlaceholder}
-                    className="w-full bg-slate-900/80 border border-slate-700/50 text-slate-100 rounded-2xl h-14 ps-12 pe-4 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                    className="w-full bg-[var(--color-bg-panel)]/80 border border-[var(--color-border)]/50 text-[var(--color-text-primary)] rounded-2xl h-14 ps-12 pe-4 focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent outline-none transition-all"
                     dir="auto"
                   />
                 </div>
@@ -1020,42 +1028,42 @@ export default function SmartGroceryDashboard() {
                   {showPredictions && (
                     <motion.div
                       initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }}
-                      className="absolute top-full start-0 end-0 mt-2 bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-30"
+                      className="absolute top-full start-0 end-0 mt-2 bg-[var(--color-bg-subtle)] border border-[var(--color-border)] rounded-2xl shadow-2xl overflow-hidden z-30"
                     >
                       {isSearching && (
                         <div className="animate-pulse">
                           {[0, 1, 2].map((i) => (
-                            <div key={i} className="flex items-center justify-between p-4 border-b border-slate-700/50 last:border-0">
+                            <div key={i} className="flex items-center justify-between p-4 border-b border-[var(--color-border)]/50 last:border-0">
                               <div className="space-y-2">
-                                <div className="h-3.5 w-32 bg-slate-700/60 rounded-full" />
-                                <div className="h-2.5 w-20 bg-slate-700/40 rounded-full" />
+                                <div className="h-3.5 w-32 bg-[var(--color-bg-hover)]/60 rounded-full" />
+                                <div className="h-2.5 w-20 bg-[var(--color-bg-hover)]/40 rounded-full" />
                               </div>
-                              <div className="h-3.5 w-14 bg-slate-700/60 rounded-full" />
+                              <div className="h-3.5 w-14 bg-[var(--color-bg-hover)]/60 rounded-full" />
                             </div>
                           ))}
                         </div>
                       )}
                       {!isSearching && searchResults.length === 0 && searchQuery && (
-                        <div className="p-4 text-slate-400 text-sm">{t.noResults}</div>
+                        <div className="p-4 text-[var(--color-text-muted)] text-sm">{t.noResults}</div>
                       )}
                       {!isSearching && searchResults.map((p) => (
                         <button
                           key={p.id}
                           onClick={() => handleAddProduct(p)}
-                          className="w-full flex items-center justify-between p-4 hover:bg-slate-700/50 transition-colors border-b border-slate-700/50 last:border-0 text-start"
+                          className="w-full flex items-center justify-between p-4 hover:bg-[var(--color-bg-hover)]/50 transition-colors border-b border-[var(--color-border)]/50 last:border-0 text-start"
                         >
                           <div>
-                            <span className="font-medium text-slate-200 block">{p.name_he}</span>
-                            {p.name_en && <span className="text-xs text-slate-400">{p.name_en}</span>}
+                            <span className="font-medium text-[var(--color-text-primary)] block">{p.name_he}</span>
+                            {p.name_en && <span className="text-xs text-[var(--color-text-muted)]">{p.name_en}</span>}
                           </div>
                           <div className="text-end shrink-0 ms-4">
                             {p.min_price !== null && (
-                              <span className="font-mono text-emerald-400 text-sm">
+                              <span className="font-mono text-[var(--color-success)] text-sm">
                                 {lang === 'he' ? 'מ-' : 'from '}₪{p.min_price.toFixed(2)}
                               </span>
                             )}
                             {p.best_chain && chains.length > 0 && (
-                              <span className="block text-[10px] text-slate-400">
+                              <span className="block text-[10px] text-[var(--color-text-muted)]">
                                 {chains.find((c) => c.id === p.best_chain)?.[lang === 'he' ? 'name_he' : 'name_en']}
                               </span>
                             )}
@@ -1069,13 +1077,13 @@ export default function SmartGroceryDashboard() {
 
               <button
                 onClick={() => setCurrentView('LOCATION')}
-                className="md:w-1/4 bg-slate-900/80 border border-slate-700/50 text-slate-100 rounded-2xl h-14 px-5 flex items-center justify-between hover:bg-slate-800 hover:border-indigo-500/50 transition-colors group"
+                className="md:w-1/4 bg-[var(--color-bg-panel)]/80 border border-[var(--color-border)]/50 text-[var(--color-text-primary)] rounded-2xl h-14 px-5 flex items-center justify-between hover:bg-[var(--color-bg-hover)] hover:border-[var(--color-accent)]/50 transition-colors group"
               >
                 <div className="flex items-center gap-3">
-                  <MapPin className="w-5 h-5 text-indigo-400 group-hover:scale-110 transition-transform" />
+                  <MapPin className="w-5 h-5 text-[var(--color-accent)] group-hover:scale-110 transition-transform" />
                   <span className="font-semibold">{t.location}</span>
                 </div>
-                <ChevronDown className="w-5 h-5 text-slate-400 -rotate-90 rtl:rotate-90" />
+                <ChevronDown className="w-5 h-5 text-[var(--color-text-muted)] -rotate-90 rtl:rotate-90" />
               </button>
             </div>
 
@@ -1083,33 +1091,33 @@ export default function SmartGroceryDashboard() {
             <div className="flex-1 flex flex-col lg:flex-row gap-6">
 
               {/* Basket list */}
-              <div className="flex-1 bg-slate-900/40 backdrop-blur-sm border border-slate-800/80 rounded-3xl p-6 overflow-y-auto min-h-[300px]">
+              <div className="flex-1 bg-[var(--color-bg-panel)]/40 backdrop-blur-sm border border-[var(--color-border)]/80 rounded-3xl p-6 overflow-y-auto min-h-[300px]">
                 {basket.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-500 min-h-[200px]">
+                  <div className="h-full flex flex-col items-center justify-center text-[var(--color-text-muted)] min-h-[200px]">
                     <ShoppingCart className="w-12 h-12 mb-4 opacity-40" />
                     <p className="text-sm">{t.emptyList}</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
                     {basket.map((item) => (
-                      <div key={item.id} className="flex flex-col sm:flex-row items-center justify-between bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50 gap-4 group hover:bg-slate-800 transition-colors">
+                      <div key={item.id} className="flex flex-col sm:flex-row items-center justify-between bg-[var(--color-bg-subtle)]/50 p-4 rounded-2xl border border-[var(--color-border)]/50 gap-4 group hover:bg-[var(--color-bg-hover)] transition-colors">
                         <div className="flex-1 text-start w-full">
-                          <h3 className="font-semibold text-slate-200">{item.name_he}</h3>
-                          {item.name_en && <p className="text-xs text-slate-500 mt-0.5">{item.name_en}</p>}
+                          <h3 className="font-semibold text-[var(--color-text-primary)]">{item.name_he}</h3>
+                          {item.name_en && <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{item.name_en}</p>}
                           {item.min_price !== null && (
-                            <p className="text-sm text-slate-400 mt-1">
-                              {t.basePrice}: <span className="font-mono text-emerald-400">₪{item.min_price.toFixed(2)}</span>
+                            <p className="text-sm text-[var(--color-text-muted)] mt-1">
+                              {t.basePrice}: <span className="font-mono text-[var(--color-success)]">₪{item.min_price.toFixed(2)}</span>
                             </p>
                           )}
                         </div>
                         <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
-                          <div className="flex items-center bg-slate-900 rounded-xl border border-slate-700 p-1">
-                            <button onClick={() => updateQuantity(item.id, -1)} className="w-11 h-11 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors text-lg">−</button>
-                            <span className="w-10 text-center font-mono font-medium text-slate-200">{item.quantity}</span>
-                            <button onClick={() => updateQuantity(item.id, 1)} className="w-11 h-11 flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors text-lg">+</button>
+                          <div className="flex items-center bg-[var(--color-bg-panel)] rounded-xl border border-[var(--color-border)] p-1">
+                            <button onClick={() => updateQuantity(item.id, -1)} className="w-11 h-11 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors text-lg">−</button>
+                            <span className="w-10 text-center font-mono font-medium text-[var(--color-text-primary)]">{item.quantity}</span>
+                            <button onClick={() => updateQuantity(item.id, 1)} className="w-11 h-11 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors text-lg">+</button>
                           </div>
                           <div className="w-24 text-end">
-                            <span className="font-mono font-bold text-emerald-400 text-lg">
+                            <span className="font-mono font-bold text-[var(--color-success)] text-lg">
                               ₪{((item.min_price ?? 0) * item.quantity).toFixed(2)}
                             </span>
                           </div>
@@ -1118,13 +1126,13 @@ export default function SmartGroceryDashboard() {
                             title={t.priceAlerts}
                             className={`w-11 h-11 flex items-center justify-center rounded-xl transition-colors ${
                               priceAlerts[item.id]
-                                ? 'text-amber-400 bg-amber-500/10 hover:bg-amber-500/20'
-                                : 'text-slate-500 hover:text-amber-400 hover:bg-amber-500/10'
+                                ? 'text-[var(--color-warning)] bg-[var(--color-warning)]/10 hover:bg-[var(--color-warning)]/20'
+                                : 'text-[var(--color-text-muted)] hover:text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10'
                             }`}
                           >
                             <Bell className="w-5 h-5" fill={priceAlerts[item.id] ? 'currentColor' : 'none'} />
                           </button>
-                          <button onClick={() => removeProduct(item.id)} className="w-11 h-11 flex items-center justify-center text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors">
+                          <button onClick={() => removeProduct(item.id)} className="w-11 h-11 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded-xl transition-colors">
                             <Trash2 className="w-5 h-5" />
                           </button>
                         </div>
@@ -1132,22 +1140,22 @@ export default function SmartGroceryDashboard() {
                     ))}
 
                     {/* Total */}
-                    <div className="mt-6 pt-5 border-t border-slate-800 flex justify-between items-end">
-                      <span className="text-slate-400">{t.listTotal}</span>
-                      <span className="text-3xl font-bold font-mono text-white">₪{basketTotal().toFixed(2)}</span>
+                    <div className="mt-6 pt-5 border-t border-[var(--color-border)] flex justify-between items-end">
+                      <span className="text-[var(--color-text-muted)]">{t.listTotal}</span>
+                      <span className="text-3xl font-bold font-mono text-[var(--color-text-primary)]">₪{basketTotal().toFixed(2)}</span>
                     </div>
 
                     {/* Save List / Clear List */}
                     <div className="flex gap-3">
                       <button
                         onClick={handleSaveList}
-                        className="flex-1 min-h-[44px] bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-indigo-500/20"
+                        className="flex-1 min-h-[44px] bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-[var(--color-accent)]/20"
                       >
                         {t.saveList}
                       </button>
                       <button
                         onClick={handleClearList}
-                        className="flex-1 min-h-[44px] bg-slate-800 hover:bg-rose-500/10 text-slate-300 hover:text-rose-400 border border-slate-700 hover:border-rose-500/30 rounded-xl text-sm font-semibold transition-colors"
+                        className="flex-1 min-h-[44px] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-danger)]/10 text-[var(--color-text-secondary)] hover:text-[var(--color-danger)] border border-[var(--color-border)] hover:border-[var(--color-danger)]/30 rounded-xl text-sm font-semibold transition-colors"
                       >
                         {t.clearList}
                       </button>
@@ -1158,27 +1166,27 @@ export default function SmartGroceryDashboard() {
 
               {/* Price comparison panel */}
               {basket.length > 0 && (
-                <div className="lg:w-80 bg-slate-900/40 backdrop-blur-sm border border-slate-800/80 rounded-3xl p-6 flex flex-col gap-4">
+                <div className="lg:w-80 bg-[var(--color-bg-panel)]/40 backdrop-blur-sm border border-[var(--color-border)]/80 rounded-3xl p-6 flex flex-col gap-4">
                   <div className="flex items-center justify-between">
-                    <h2 className="font-bold text-slate-100 text-sm">{t.priceComparison}</h2>
-                    {isComparing && <Loader2 className="w-4 h-4 text-indigo-400 animate-spin" />}
+                    <h2 className="font-bold text-[var(--color-text-primary)] text-sm">{t.priceComparison}</h2>
+                    {isComparing && <Loader2 className="w-4 h-4 text-[var(--color-accent)] animate-spin" />}
                   </div>
 
                   {comparison.length === 0 && !isComparing && (
-                    <p className="text-slate-500 text-xs">{t.searching}</p>
+                    <p className="text-[var(--color-text-muted)] text-xs">{t.searching}</p>
                   )}
 
                   {comparison.length > 0 && (
                     <>
                       {/* Savings callout */}
                       {maxSavings > 0 && (
-                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-3 flex items-start gap-2">
-                          <ArrowDown className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+                        <div className="bg-[var(--color-success)]/10 border border-[var(--color-success)]/20 rounded-2xl p-3 flex items-start gap-2">
+                          <ArrowDown className="w-4 h-4 text-[var(--color-success)] mt-0.5 shrink-0" />
                           <div>
-                            <p className="text-emerald-400 font-bold text-sm">
+                            <p className="text-[var(--color-success)] font-bold text-sm">
                               {t.youSave} ₪{maxSavings.toFixed(2)}
                             </p>
-                            <p className="text-emerald-400/70 text-xs">{t.vsExpensive}</p>
+                            <p className="text-[var(--color-success)]/70 text-xs">{t.vsExpensive}</p>
                           </div>
                         </div>
                       )}
@@ -1205,8 +1213,8 @@ export default function SmartGroceryDashboard() {
                       </div>
 
                       {/* Per-item cheapest chain (tap to expand full breakdown) */}
-                      <div className="mt-2 pt-4 border-t border-slate-800 flex flex-col gap-2">
-                        <p className="text-xs text-slate-400 font-medium">{lang === 'he' ? 'מחיר לפריט' : 'Price per item'}</p>
+                      <div className="mt-2 pt-4 border-t border-[var(--color-border)] flex flex-col gap-2">
+                        <p className="text-xs text-[var(--color-text-muted)] font-medium">{lang === 'he' ? 'מחיר לפריט' : 'Price per item'}</p>
                         {basket.map((item) => {
                           const priceEntries = Object.entries(item.prices);
                           const cheapestEntry = priceEntries.reduce<[string, ChainPrice] | null>(
@@ -1223,13 +1231,13 @@ export default function SmartGroceryDashboard() {
                             <div key={item.id}>
                               <button
                                 onClick={() => setExpandedPriceItemId(isExpanded ? null : item.id)}
-                                className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-slate-200 transition-colors py-1"
+                                className="w-full flex items-center justify-between text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors py-1"
                               >
                                 <span className="truncate me-2" style={{ maxWidth: '55%' }}>{item.name_he}</span>
                                 <span className="flex items-center gap-1 shrink-0">
-                                  <span className="text-emerald-400 font-mono">
+                                  <span className="text-[var(--color-success)] font-mono">
                                     ₪{(cheapestEntry?.[1].price ?? 0).toFixed(2)}
-                                    <span className="text-slate-500 ms-1">{chainName}</span>
+                                    <span className="text-[var(--color-text-muted)] ms-1">{chainName}</span>
                                   </span>
                                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                                 </span>
@@ -1243,7 +1251,7 @@ export default function SmartGroceryDashboard() {
                                     transition={{ duration: 0.15 }}
                                     className="overflow-hidden"
                                   >
-                                    <div className="flex flex-col gap-1.5 py-2 ps-2 border-s-2 border-slate-800 mt-1 mb-1">
+                                    <div className="flex flex-col gap-1.5 py-2 ps-2 border-s-2 border-[var(--color-border)] mt-1 mb-1">
                                       {priceEntries
                                         .slice()
                                         .sort((a, b) => a[1].price - b[1].price)
@@ -1255,9 +1263,9 @@ export default function SmartGroceryDashboard() {
                                             <div
                                               key={cid}
                                               className={`flex items-center justify-between text-xs px-2 py-1.5 rounded-lg ${
-                                                isCheapest ? 'bg-emerald-500/10 text-emerald-400' :
-                                                isExpensive ? 'bg-rose-500/10 text-rose-400' :
-                                                'text-slate-400'
+                                                isCheapest ? 'bg-[var(--color-success)]/10 text-[var(--color-success)]' :
+                                                isExpensive ? 'bg-[var(--color-danger)]/10 text-[var(--color-danger)]' :
+                                                'text-[var(--color-text-muted)]'
                                               }`}
                                             >
                                               <span>{cName}</span>
@@ -1284,7 +1292,7 @@ export default function SmartGroceryDashboard() {
                         setPreferredChainId(cheapest?.chain_id ?? null);
                         setCurrentView('LOCATION');
                       }}
-                      className="mt-auto w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors shadow-lg shadow-indigo-500/20"
+                      className="mt-auto w-full bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-2xl py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors shadow-lg shadow-[var(--color-accent)]/20"
                     >
                       <Navigation className="w-4 h-4" />
                       {lang === 'he' ? 'נווט לסניף הזול ביותר' : 'Navigate to cheapest branch'}
@@ -1303,8 +1311,8 @@ export default function SmartGroceryDashboard() {
             {/* Location filter bar */}
             <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
               {userPosition ? (
-                <div className="flex items-center gap-3 bg-slate-900/60 border border-slate-800 rounded-2xl px-4 py-3">
-                  <span className="text-xs font-semibold text-slate-300 whitespace-nowrap">{t.distanceFilter}</span>
+                <div className="flex items-center gap-3 bg-[var(--color-bg-panel)]/60 border border-[var(--color-border)] rounded-2xl px-4 py-3">
+                  <span className="text-xs font-semibold text-[var(--color-text-secondary)] whitespace-nowrap">{t.distanceFilter}</span>
                   <input
                     type="range"
                     min={0}
@@ -1312,26 +1320,26 @@ export default function SmartGroceryDashboard() {
                     step={1}
                     value={DISTANCE_OPTIONS.indexOf(distanceKm as typeof DISTANCE_OPTIONS[number])}
                     onChange={(e) => setDistanceKm(DISTANCE_OPTIONS[Number(e.target.value)])}
-                    className="w-40 accent-indigo-500"
+                    className="w-40 accent-[var(--color-accent)]"
                   />
-                  <span className="font-mono text-sm text-indigo-400 shrink-0 w-14 text-end">
+                  <span className="font-mono text-sm text-[var(--color-accent)] shrink-0 w-14 text-end">
                     {distanceKm} {lang === 'he' ? 'ק"מ' : 'km'}
                   </span>
                 </div>
               ) : locationStatus === 'denied' ? (
-                <div className="flex items-center gap-2 bg-slate-900/60 border border-slate-800 rounded-2xl px-4 h-12 flex-1 sm:flex-none sm:w-72">
-                  <Search className="w-4 h-4 text-slate-400 shrink-0" />
+                <div className="flex items-center gap-2 bg-[var(--color-bg-panel)]/60 border border-[var(--color-border)] rounded-2xl px-4 h-12 flex-1 sm:flex-none sm:w-72">
+                  <Search className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
                   <input
                     type="text"
                     value={cityQuery}
                     onChange={(e) => setCityQuery(e.target.value)}
                     placeholder={t.searchByCity}
-                    className="bg-transparent outline-none text-sm text-slate-100 w-full"
+                    className="bg-transparent outline-none text-sm text-[var(--color-text-primary)] w-full"
                     dir="auto"
                   />
                 </div>
               ) : (
-                <div className="flex items-center gap-2 text-xs text-slate-500 h-12">
+                <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] h-12">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t.currentGpsLocation}...
                 </div>
               )}
@@ -1340,7 +1348,7 @@ export default function SmartGroceryDashboard() {
             <BranchMapContainer
               city={t.telAviv}
               lang={lang}
-              skin={skin}
+              theme={theme}
               liveBranches={filteredBranches}
               activeMapPin={activeMapPin}
               setActiveMapPin={setActiveMapPin}
@@ -1356,31 +1364,31 @@ export default function SmartGroceryDashboard() {
         {/* ═══ SAVED LISTS ═══ */}
         {currentView === 'SAVED_LISTS' && (
           <motion.div key="SAVED_LISTS" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1 max-w-4xl mx-auto w-full flex flex-col gap-6 text-start mt-6">
-            <h2 className="text-3xl font-bold text-slate-100">{t.savedBasketsTitle}</h2>
+            <h2 className="text-3xl font-bold text-[var(--color-text-primary)]">{t.savedBasketsTitle}</h2>
             {isLoadingSaved ? (
-              <div className="flex justify-center py-10"><Loader2 className="w-8 h-8 text-indigo-400 animate-spin" /></div>
+              <div className="flex justify-center py-10"><Loader2 className="w-8 h-8 text-[var(--color-accent)] animate-spin" /></div>
             ) : savedBaskets.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {savedBaskets.map((sb) => (
-                  <div key={sb.id} className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl hover:bg-slate-900 transition-colors cursor-pointer group">
+                  <div key={sb.id} className="bg-[var(--color-bg-panel)]/60 backdrop-blur-xl border border-[var(--color-border)] rounded-3xl p-6 shadow-xl hover:bg-[var(--color-bg-panel)] transition-colors cursor-pointer group">
                     <div className="flex items-center gap-4 mb-4">
-                      <div className="w-12 h-12 bg-slate-800 rounded-2xl flex items-center justify-center text-indigo-400"><List className="w-6 h-6" /></div>
+                      <div className="w-12 h-12 bg-[var(--color-bg-subtle)] rounded-2xl flex items-center justify-center text-[var(--color-accent)]"><List className="w-6 h-6" /></div>
                       <div>
-                        <h3 className="font-bold text-slate-200">{sb.name}</h3>
-                        <p className="text-xs text-slate-400">{new Date(sb.updated_at).toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US')}</p>
+                        <h3 className="font-bold text-[var(--color-text-primary)]">{sb.name}</h3>
+                        <p className="text-xs text-[var(--color-text-muted)]">{new Date(sb.updated_at).toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US')}</p>
                       </div>
                     </div>
-                    <p className="text-xs text-slate-500">{sb.basket_items?.length ?? 0} {lang === 'he' ? 'פריטים' : 'items'}</p>
+                    <p className="text-xs text-[var(--color-text-muted)]">{sb.basket_items?.length ?? 0} {lang === 'he' ? 'פריטים' : 'items'}</p>
                     <button onClick={() => { setActiveBasketId(sb.id); setCurrentView('HOME'); }}
-                      className="w-full mt-4 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 py-2 rounded-xl text-sm font-semibold transition-colors border border-indigo-500/20">
+                      className="w-full mt-4 bg-[var(--color-accent)]/10 hover:bg-[var(--color-accent)]/20 text-[var(--color-accent)] py-2 rounded-xl text-sm font-semibold transition-colors border border-[var(--color-accent)]/20">
                       {t.viewDetails}
                     </button>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="bg-slate-900/60 rounded-3xl p-8 border border-slate-800 text-center">
-                <p className="text-slate-400">{t.emptyList}</p>
+              <div className="bg-[var(--color-bg-panel)]/60 rounded-3xl p-8 border border-[var(--color-border)] text-center">
+                <p className="text-[var(--color-text-muted)]">{t.emptyList}</p>
               </div>
             )}
           </motion.div>
@@ -1389,31 +1397,12 @@ export default function SmartGroceryDashboard() {
         {/* ═══ PROFILE ═══ */}
         {currentView === 'PROFILE' && (
           <motion.div key="PROFILE" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1 max-w-4xl mx-auto w-full flex flex-col gap-8 text-start mt-6">
-            <h2 className="text-3xl font-bold text-slate-100">{t.navProfile}</h2>
-
-            {/* Skin picker */}
-            <div className="bg-slate-900/60 backdrop-blur-xl rounded-3xl p-8 border border-slate-800">
-              <h3 className="text-lg font-semibold text-slate-200 mb-6">{t.themeSettings}</h3>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                {([
-                  { id: 'warm-rose', name: t.skinWarmRose, color: '#EDB490' },
-                  { id: 'earth-slate', name: t.skinEarthSlate, color: '#c9beb1' },
-                  { id: 'neon-acid', name: t.skinNeonAcid, color: '#BEDF1D' },
-                  { id: 'ocean-steel', name: t.skinOceanSteel, color: '#0D659D' },
-                ] as const).map((s) => (
-                  <button key={s.id} onClick={() => setSkin(s.id as Skin)}
-                    className={`flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all ${skin === s.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-800 hover:border-slate-600'}`}>
-                    <div className="w-12 h-12 rounded-full border border-white/10" style={{ backgroundColor: s.color }} />
-                    <span className="text-sm font-medium text-slate-300 text-center">{s.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
+            <h2 className="text-3xl font-bold text-[var(--color-text-primary)]">{t.navProfile}</h2>
 
             {/* Profile form (only when logged in) */}
             {currentUser && (
-              <div className="bg-slate-900/60 backdrop-blur-xl rounded-3xl p-8 border border-slate-800">
-                <h3 className="text-lg font-semibold text-slate-200 mb-6">{t.profileDataTitle}</h3>
+              <div className="bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl p-8 border border-[var(--color-border)]">
+                <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-6">{t.profileDataTitle}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {([
                     { label: t.nicknameLabel, key: 'nickname', type: 'text' },
@@ -1421,11 +1410,11 @@ export default function SmartGroceryDashboard() {
                     { label: t.phoneLabel,    key: 'phone',    type: 'tel' },
                   ] as const).map(({ label, key, type }) => (
                     <div key={key}>
-                      <label className="block text-sm font-medium text-slate-400 mb-2">{label}</label>
+                      <label className="block text-sm font-medium text-[var(--color-text-muted)] mb-2">{label}</label>
                       <input type={type} value={currentUser[key]}
                         onChange={(e) => setCurrentUser({ ...currentUser, [key]: e.target.value })}
                         disabled={!isEditingCredentials}
-                        className={`w-full bg-slate-950/50 border rounded-xl px-4 py-3 text-slate-100 focus:outline-none transition-colors ${isEditingCredentials ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-slate-700 opacity-75 cursor-not-allowed'}`}
+                        className={`w-full bg-[var(--color-bg-subtle)]/50 border rounded-xl px-4 py-3 text-[var(--color-text-primary)] focus:outline-none transition-colors ${isEditingCredentials ? 'border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]' : 'border-[var(--color-border)] opacity-75 cursor-not-allowed'}`}
                         dir="ltr"
                       />
                     </div>
@@ -1435,17 +1424,17 @@ export default function SmartGroceryDashboard() {
                   <AnimatePresence>
                     {verificationFlash && (
                       <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                        className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+                        className="text-sm font-bold text-[var(--color-success)] flex items-center gap-2">
                         <CheckCircle className="w-4 h-4" /> {t.verificationSent}
                       </motion.span>
                     )}
                   </AnimatePresence>
                   {isEditingCredentials ? (
-                    <button onClick={handleSaveCredentials} className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-semibold shadow-lg shadow-indigo-500/20 transition-colors">
+                    <button onClick={handleSaveCredentials} className="px-6 py-2.5 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-xl font-semibold shadow-lg shadow-[var(--color-accent)]/20 transition-colors">
                       {t.saveAndVerify}
                     </button>
                   ) : (
-                    <button onClick={() => setIsEditingCredentials(true)} className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-semibold transition-colors">
+                    <button onClick={() => setIsEditingCredentials(true)} className="px-6 py-2.5 bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] border border-[var(--color-border)] rounded-xl font-semibold transition-colors">
                       {t.editCredentials}
                     </button>
                   )}
@@ -1455,23 +1444,23 @@ export default function SmartGroceryDashboard() {
 
             {/* Household invite */}
             {currentUser && (
-              <div className="bg-slate-900/60 backdrop-blur-xl rounded-3xl p-8 border border-slate-800">
-                <h3 className="text-lg font-semibold text-slate-200 mb-6 flex items-center gap-2">
-                  <UserPlus className="w-5 h-5 text-indigo-400" /> {t.inviteToHousehold}
+              <div className="bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl p-8 border border-[var(--color-border)]">
+                <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-6 flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-[var(--color-accent)]" /> {t.inviteToHousehold}
                 </h3>
 
                 {household?.invite_code ? (
                   <div>
-                    <label className="block text-sm font-medium text-slate-400 mb-2">{t.yourInviteCode}</label>
+                    <label className="block text-sm font-medium text-[var(--color-text-muted)] mb-2">{t.yourInviteCode}</label>
                     <div className="flex items-center gap-3">
-                      <span className="font-mono text-2xl tracking-[0.3em] font-bold text-indigo-300 bg-slate-950/50 border border-slate-700 rounded-xl px-5 py-3">
+                      <span className="font-mono text-2xl tracking-[0.3em] font-bold text-[var(--color-accent-hover)] bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-xl px-5 py-3">
                         {household.invite_code}
                       </span>
                       <button
                         onClick={handleCopyInviteCode}
-                        className="min-h-[44px] px-4 flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-semibold transition-colors"
+                        className="min-h-[44px] px-4 flex items-center gap-2 bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] border border-[var(--color-border)] rounded-xl font-semibold transition-colors"
                       >
-                        {codeCopied ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                        {codeCopied ? <CheckCircle className="w-4 h-4 text-[var(--color-success)]" /> : <Copy className="w-4 h-4" />}
                         {codeCopied ? t.codeCopied : t.copyCode}
                       </button>
                     </div>
@@ -1480,14 +1469,14 @@ export default function SmartGroceryDashboard() {
                   <button
                     onClick={handleGenerateInviteCode}
                     disabled={isLoadingHousehold}
-                    className="min-h-[44px] px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-semibold shadow-lg shadow-indigo-500/20 transition-colors disabled:opacity-50"
+                    className="min-h-[44px] px-6 py-2.5 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-xl font-semibold shadow-lg shadow-[var(--color-accent)]/20 transition-colors disabled:opacity-50"
                   >
                     {isLoadingHousehold ? <Loader2 className="w-4 h-4 animate-spin" /> : t.generateCode}
                   </button>
                 )}
 
-                <div className="mt-8 pt-6 border-t border-slate-800">
-                  <h4 className="text-sm font-medium text-slate-400 mb-3">{t.joinHousehold}</h4>
+                <div className="mt-8 pt-6 border-t border-[var(--color-border)]">
+                  <h4 className="text-sm font-medium text-[var(--color-text-muted)] mb-3">{t.joinHousehold}</h4>
                   <form onSubmit={handleJoinHousehold} className="flex flex-col sm:flex-row gap-3">
                     <input
                       type="text"
@@ -1495,24 +1484,24 @@ export default function SmartGroceryDashboard() {
                       onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
                       placeholder={t.enterInviteCode}
                       maxLength={6}
-                      className="flex-1 bg-slate-950/50 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 font-mono tracking-widest focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
+                      className="flex-1 bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-xl px-4 py-3 text-[var(--color-text-primary)] font-mono tracking-widest focus:outline-none focus:border-[var(--color-accent)] transition-colors min-h-[44px]"
                       dir="ltr"
                     />
                     <button
                       type="submit"
                       disabled={joinStatus === 'loading' || !joinCodeInput.trim()}
-                      className="min-h-[44px] px-6 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-semibold transition-colors disabled:opacity-50"
+                      className="min-h-[44px] px-6 bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] border border-[var(--color-border)] rounded-xl font-semibold transition-colors disabled:opacity-50"
                     >
                       {t.joinButton}
                     </button>
                   </form>
                   {joinStatus === 'success' && (
-                    <p className="mt-3 text-sm font-bold text-emerald-400 flex items-center gap-2">
+                    <p className="mt-3 text-sm font-bold text-[var(--color-success)] flex items-center gap-2">
                       <CheckCircle className="w-4 h-4" /> {t.joinSuccess}
                     </p>
                   )}
                   {joinStatus === 'error' && (
-                    <p className="mt-3 text-sm font-bold text-rose-400 flex items-center gap-2">
+                    <p className="mt-3 text-sm font-bold text-[var(--color-danger)] flex items-center gap-2">
                       <AlertCircle className="w-4 h-4" /> {t.joinError}
                     </p>
                   )}
@@ -1525,15 +1514,15 @@ export default function SmartGroceryDashboard() {
         {/* ═══ CHAT ═══ */}
         {currentView === 'CHAT' && (
           <motion.div key="CHAT" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1 max-w-4xl mx-auto w-full flex flex-col gap-6 text-start mt-6">
-            <h2 className="text-3xl font-bold text-slate-100">{t.navChat}</h2>
-            <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col" style={{ height: '60vh' }}>
+            <h2 className="text-3xl font-bold text-[var(--color-text-primary)]">{t.navChat}</h2>
+            <div className="bg-[var(--color-bg-panel)]/60 backdrop-blur-xl border border-[var(--color-border)] rounded-3xl p-6 shadow-xl flex flex-col" style={{ height: '60vh' }}>
               <div className="flex-1 overflow-y-auto space-y-3 mb-4 pe-2">
                 {chatMessages.map((msg) => (
                   <div key={msg.id} className={`flex flex-col ${msg.user_id === currentUser?.id ? 'items-end' : 'items-start'}`}>
-                    <div className={`px-4 py-2 rounded-2xl max-w-[80%] text-sm ${msg.user_id === currentUser?.id ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-200'}`}>
+                    <div className={`px-4 py-2 rounded-2xl max-w-[80%] text-sm ${msg.user_id === currentUser?.id ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)]' : 'bg-[var(--color-bg-subtle)] text-[var(--color-text-primary)]'}`}>
                       {msg.content}
                     </div>
-                    <span className="text-[10px] text-slate-500 mt-1">
+                    <span className="text-[10px] text-[var(--color-text-muted)] mt-1">
                       {msg.nickname} · {formatMessageTimestamp(msg.created_at, lang)}
                     </span>
                   </div>
@@ -1542,10 +1531,10 @@ export default function SmartGroceryDashboard() {
               <form onSubmit={handleSendMessage} className="flex gap-3">
                 <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
                   placeholder={lang === 'he' ? 'הקלד הודעה...' : 'Type a message...'}
-                  className="flex-1 bg-slate-950/50 border border-slate-800 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px]"
+                  className="flex-1 bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-xl px-4 py-3 text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] transition-colors min-h-[44px]"
                   dir="auto"
                 />
-                <button type="submit" disabled={!chatInput.trim()} className="bg-indigo-600 hover:bg-indigo-500 text-white p-3 rounded-xl transition-colors disabled:opacity-50 min-h-[44px] min-w-[44px] flex items-center justify-center">
+                <button type="submit" disabled={!chatInput.trim()} className="bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] p-3 rounded-xl transition-colors disabled:opacity-50 min-h-[44px] min-w-[44px] flex items-center justify-center">
                   <MessageCircle className="w-5 h-5" />
                 </button>
               </form>
@@ -1556,13 +1545,13 @@ export default function SmartGroceryDashboard() {
         {/* ═══ PLACEHOLDER VIEWS ═══ */}
         {(currentView === 'PRICE_UPDATES' || currentView === 'COMMUNITY') && (
           <motion.div key={currentView} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}
-            className="flex-1 flex flex-col items-center justify-center min-h-[50vh] bg-slate-900/60 backdrop-blur-xl rounded-3xl border border-slate-800 shadow-xl p-8 text-center">
-            <div className="w-20 h-20 bg-slate-800/50 rounded-2xl flex items-center justify-center mb-6 border border-slate-700/50 text-indigo-400">
+            className="flex-1 flex flex-col items-center justify-center min-h-[50vh] bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-8 text-center">
+            <div className="w-20 h-20 bg-[var(--color-bg-subtle)]/50 rounded-2xl flex items-center justify-center mb-6 border border-[var(--color-border)]/50 text-[var(--color-accent)]">
               {currentView === 'PRICE_UPDATES' ? <TrendingDown className="w-10 h-10" /> : <Users className="w-10 h-10" />}
             </div>
-            <h2 className="text-2xl font-bold text-slate-100 mb-2">{currentView === 'PRICE_UPDATES' ? t.navPriceUpdates : t.navCommunity}</h2>
-            <p className="text-slate-400">{t.placeholderDesc}</p>
-            <button onClick={() => setCurrentView('HOME')} className="mt-8 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-indigo-500/20">
+            <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">{currentView === 'PRICE_UPDATES' ? t.navPriceUpdates : t.navCommunity}</h2>
+            <p className="text-[var(--color-text-muted)]">{t.placeholderDesc}</p>
+            <button onClick={() => setCurrentView('HOME')} className="mt-8 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] px-6 py-2 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-[var(--color-accent)]/20">
               {t.backToHome}
             </button>
           </motion.div>
@@ -1571,10 +1560,10 @@ export default function SmartGroceryDashboard() {
       </AnimatePresence>
 
       {/* ── Footer ── */}
-      <footer className="mt-8 pt-6 border-t border-slate-800/50 flex justify-center md:justify-end">
-        <div className="flex items-center gap-2 bg-slate-900/50 px-4 py-2 rounded-full border border-slate-800/50 opacity-60">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs font-mono text-slate-400">{t.devOptionsLocked}</span>
+      <footer className="mt-8 pt-6 border-t border-[var(--color-border)]/50 flex justify-center md:justify-end">
+        <div className="flex items-center gap-2 bg-[var(--color-bg-panel)]/50 px-4 py-2 rounded-full border border-[var(--color-border)]/50 opacity-60">
+          <div className="w-2 h-2 rounded-full bg-[var(--color-success)] animate-pulse" />
+          <span className="text-xs font-mono text-[var(--color-text-muted)]">{t.devOptionsLocked}</span>
         </div>
       </footer>
 
@@ -1583,15 +1572,15 @@ export default function SmartGroceryDashboard() {
         {isDrawerOpen && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setIsDrawerOpen(false)} className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-40" />
+              onClick={() => setIsDrawerOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" />
             <motion.div
               initial={{ x: lang === 'he' ? '-100%' : '100%' }} animate={{ x: 0 }} exit={{ x: lang === 'he' ? '-100%' : '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className={`fixed top-0 bottom-0 ${lang === 'he' ? 'left-0 border-r' : 'right-0 border-l'} w-72 bg-slate-900 border-slate-800 shadow-2xl z-50 flex flex-col`}
+              className={`fixed top-0 bottom-0 ${lang === 'he' ? 'left-0 border-r' : 'right-0 border-l'} w-72 bg-[var(--color-bg-panel)] border-[var(--color-border)] shadow-2xl z-50 flex flex-col`}
             >
-              <div className="p-6 flex items-center justify-between border-b border-slate-800">
-                <h2 className="text-lg font-bold text-slate-100">{t.appTitle}</h2>
-                <button onClick={() => setIsDrawerOpen(false)} className="text-slate-400 hover:text-white p-3 -m-3"><X className="w-5 h-5" /></button>
+              <div className="p-6 flex items-center justify-between border-b border-[var(--color-border)]">
+                <h2 className="text-lg font-bold text-[var(--color-text-primary)]">{t.appTitle}</h2>
+                <button onClick={() => setIsDrawerOpen(false)} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] p-3 -m-3"><X className="w-5 h-5" /></button>
               </div>
               <div className="flex-1 overflow-y-auto py-4 flex flex-col gap-1 px-3">
                 <DrawerItem view="HOME"          currentView={currentView} setCurrentView={setCurrentView} icon={Home}         label={t.navHome}         close={() => setIsDrawerOpen(false)} />
@@ -1601,21 +1590,21 @@ export default function SmartGroceryDashboard() {
                 <DrawerItem view="PRICE_UPDATES" currentView={currentView} setCurrentView={setCurrentView} icon={TrendingDown} label={t.navPriceUpdates} close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="COMMUNITY"     currentView={currentView} setCurrentView={setCurrentView} icon={Users}        label={t.navCommunity}    close={() => setIsDrawerOpen(false)} />
                 <button onClick={() => { setIsDrawerOpen(false); setIsSupportOpen(true); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-slate-100 transition-colors">
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] transition-colors">
                   <LifeBuoy className="w-5 h-5" /> {t.supportChannel}
                 </button>
               </div>
-              <div className="p-4 border-t border-slate-800">
+              <div className="p-4 border-t border-[var(--color-border)]">
                 {currentUser ? (
                   <button onClick={async () => {
                     if (supabase) await supabase.auth.signOut();
                     setCurrentUser(null); setIsDrawerOpen(false); setCurrentView('HOME');
-                  }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors">
+                  }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded-xl transition-colors">
                     <LogOut className="w-5 h-5" /> {t.signOut}
                   </button>
                 ) : (
                   <button onClick={() => { setAuthMode('SIGN_IN'); setIsDrawerOpen(false); }}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-indigo-400 hover:bg-indigo-500/10 rounded-xl transition-colors">
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-hover)]/10 rounded-xl transition-colors">
                     <LogIn className="w-5 h-5" /> {t.signIn} / {t.signUp}
                   </button>
                 )}
@@ -1630,12 +1619,12 @@ export default function SmartGroceryDashboard() {
         {isSupportOpen && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setIsSupportOpen(false)} className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" />
+              onClick={() => setIsSupportOpen(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="relative bg-slate-900 border border-slate-800 shadow-2xl rounded-3xl w-full max-w-md overflow-hidden">
-              <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-                <div className="flex items-center gap-3"><LifeBuoy className="w-6 h-6 text-indigo-400" /><h2 className="text-xl font-bold text-white">{t.supportChannel}</h2></div>
-                <button onClick={() => setIsSupportOpen(false)} className="text-slate-400 hover:text-white p-3 -m-3"><X className="w-5 h-5" /></button>
+              className="relative bg-[var(--color-bg-panel)] border border-[var(--color-border)] shadow-2xl rounded-3xl w-full max-w-md overflow-hidden">
+              <div className="p-6 border-b border-[var(--color-border)] flex justify-between items-center">
+                <div className="flex items-center gap-3"><LifeBuoy className="w-6 h-6 text-[var(--color-accent)]" /><h2 className="text-xl font-bold text-[var(--color-text-primary)]">{t.supportChannel}</h2></div>
+                <button onClick={() => setIsSupportOpen(false)} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] p-3 -m-3"><X className="w-5 h-5" /></button>
               </div>
               <div className="p-6 space-y-4">
                 <a href={`https://wa.me/972502887700?text=${encodeURIComponent(lang === 'he' ? 'שלום, אני זקוק לעזרה.' : 'Hello, I need help.')}`}
@@ -1643,9 +1632,9 @@ export default function SmartGroceryDashboard() {
                   className="w-full flex items-center justify-between p-4 bg-[#25D366]/10 border border-[#25D366]/30 hover:bg-[#25D366]/20 transition-colors rounded-2xl group">
                   <div className="flex items-center gap-3">
                     <MessageCircle className="w-6 h-6 text-[#25D366]" />
-                    <span className="font-semibold text-slate-100">{t.whatsappExpress}</span>
+                    <span className="font-semibold text-[var(--color-text-primary)]">{t.whatsappExpress}</span>
                   </div>
-                  <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-white" />
+                  <ExternalLink className="w-4 h-4 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-primary)]" />
                 </a>
               </div>
             </motion.div>
@@ -1669,7 +1658,6 @@ export default function SmartGroceryDashboard() {
               phone: profile?.phone_number || '',
               avatar: profile?.avatar_url || '',
             });
-            if (profile?.selected_skin) setSkin(profile.selected_skin as Skin);
           }
         }}
         t={t}
