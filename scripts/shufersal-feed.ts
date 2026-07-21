@@ -13,6 +13,14 @@ import { fetchWithRetry } from './supabase-rest';
 
 export const SHUFERSAL_LISTING_URL = 'https://prices.shufersal.co.il/FileObject/UpdateCategory?catID=2&storeId=0';
 
+// catID=5 is the "Stores" category — a single chain-wide file with store
+// metadata (StoreID/StoreName/Address/City), separate from the per-branch
+// PriceFull files above (verified against the live listing: catID=1/6/7/8 all
+// alias Price, catID=2 is PriceFull, catID=3 Promo, catID=4 PromoFull, catID=5
+// is the only one that returns a single Stores*.gz file). Used by
+// scripts/seed-branches.ts.
+const SHUFERSAL_STORES_LISTING_URL = 'https://prices.shufersal.co.il/FileObject/UpdateCategory?catID=5&storeId=0';
+
 // Raw shape of a single <Item> in a PriceFull XML file, keeping ItemName
 // alongside the price fields since product seeding needs the name too
 // (fields confirmed against the live feed — no ItemSection/SubSection exists,
@@ -41,6 +49,15 @@ export async function fetchShufersalFileLinks(): Promise<string[]> {
     links.add(match[1].replace(/&amp;/g, '&'));
   }
   return [...links];
+}
+
+export async function fetchShufersalStoresFileUrl(): Promise<string> {
+  const res = await fetchWithRetry(SHUFERSAL_STORES_LISTING_URL);
+  if (!res.ok) throw new Error(`Shufersal stores listing fetch failed: HTTP ${res.status}`);
+  const html = await res.text();
+  const match = /href="(https:\/\/pricesprodpublic\.blob\.core\.windows\.net\/stores\/[^"]+)"/.exec(html);
+  if (!match) throw new Error('No Stores file link found in Shufersal stores listing page');
+  return match[1].replace(/&amp;/g, '&');
 }
 
 export async function fetchAndParseShufersalFile(url: string): Promise<ShufersalItem[]> {
