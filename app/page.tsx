@@ -1002,11 +1002,11 @@ export default function SmartGroceryDashboard() {
 
   return (
     <div
-      className="w-full min-h-screen flex flex-col font-sans p-4 md:p-6 lg:p-8 overflow-x-hidden relative transition-colors duration-300 bg-[var(--color-bg-base)] text-[var(--color-text-primary)]"
+      className="w-full min-h-screen flex flex-col font-sans p-4 md:p-6 lg:p-8 overflow-x-clip relative transition-colors duration-300 bg-[var(--color-bg-base)] text-[var(--color-text-primary)]"
       dir={lang === 'he' ? 'rtl' : 'ltr'}
     >
       {/* ── Header ── */}
-      <header className="flex flex-col md:flex-row items-start md:items-center justify-between mb-6 gap-4">
+      <header className="sticky top-0 z-40 flex flex-col md:flex-row items-start md:items-center justify-between mb-6 gap-4 py-4 -mx-4 px-4 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8 bg-[var(--color-bg-base)]">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-[var(--color-accent)] rounded-xl flex items-center justify-center text-[var(--color-accent-text)] font-bold shadow-lg shadow-[var(--color-accent)]/20 shrink-0">
             <ShoppingCart className="w-5 h-5" />
