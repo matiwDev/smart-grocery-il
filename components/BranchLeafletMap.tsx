@@ -20,6 +20,7 @@ interface BranchLeafletMapProps {
   branches: LiveBranch[];
   activeMapPin: string;
   setActiveMapPin: (id: string) => void;
+  theme?: 'light' | 'dark';
   quickNavigateLabel: string;
   costColorByChain?: Record<string, string>;
   costTotalByChain?: Record<string, number>;
@@ -80,7 +81,7 @@ function userPositionIcon() {
   });
 }
 
-export function BranchLeafletMap({ branches, activeMapPin, setActiveMapPin, quickNavigateLabel, costColorByChain, costTotalByChain, basketAtBranchLabel, userPosition, youAreHereLabel }: BranchLeafletMapProps) {
+export function BranchLeafletMap({ branches, activeMapPin, setActiveMapPin, theme = 'light', quickNavigateLabel, costColorByChain, costTotalByChain, basketAtBranchLabel, userPosition, youAreHereLabel }: BranchLeafletMapProps) {
   const withCoords = branches.filter((b) => b.lat && b.lng);
   const center: [number, number] = userPosition
     ? [userPosition.lat, userPosition.lng]
@@ -90,10 +91,17 @@ export function BranchLeafletMap({ branches, activeMapPin, setActiveMapPin, quic
 
   return (
     <MapContainer center={center} zoom={12} scrollWheelZoom className="w-full h-full rounded-3xl" style={{ zIndex: 0 }}>
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-      />
+      {theme === 'dark' ? (
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          url="https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png"
+        />
+      ) : (
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+      )}
       <FlyToActive branches={withCoords} activeMapPin={activeMapPin} />
       <FlyToUser userPosition={userPosition} />
       {userPosition && (
