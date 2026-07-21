@@ -5,9 +5,11 @@
  * real feed items (see CLAUDE.md "Price ingestion pipeline").
  *
  * Reuses the Shufersal fetch/parse logic from ./shufersal-feed (same module
- * scripts/ingest-prices.ts uses), takes the first 200 unique barcodes seen,
- * upserts them into products, and inserts a matching price_history row for
- * each so the new products have real prices immediately.
+ * scripts/ingest-prices.ts uses), collects every unique barcode seen across
+ * the first SHUFERSAL_STORE_LIMIT branch files, inserts only the ones not
+ * already in products (existing rows are left untouched — re-running this
+ * script is safe and only adds new catalog items), and inserts a matching
+ * price_history row for each newly-added product.
  *
  * The real feed has no ItemSection/SubSection field (verified against the
  * live feed — only ItemName, ManufactureName, price/unit fields exist), so
@@ -20,11 +22,10 @@ import { fetchShufersalFileLinks, fetchAndParseShufersalFile, ShufersalItem } fr
 
 requireEnv();
 
-const PRODUCT_LIMIT = Number(process.env.SEED_PRODUCT_LIMIT || 200);
-// Read more branch files than ingest-prices.ts's default so 200 unique
-// barcodes can actually be assembled (a single branch file often repeats
-// the same catalog with only price differences).
-const SHUFERSAL_STORE_LIMIT = Number(process.env.SHUFERSAL_STORE_LIMIT || 5);
+// Read up to 20 branch files by default (Phase 7 — was 5) — a single branch
+// file often repeats the same catalog with only price differences, so more
+// files means more unique barcodes surfaced.
+const SHUFERSAL_STORE_LIMIT = Number(process.env.SHUFERSAL_STORE_LIMIT || 20);
 
 type Category = 'dairy' | 'bread' | 'produce' | 'meat' | 'beverage' | 'other';
 
@@ -49,7 +50,7 @@ function classifyCategory(name: string): Category {
   return 'other';
 }
 
-async function collectUniqueItems(limit: number): Promise<ShufersalItem[]> {
+async function collectUniqueItems(): Promise<ShufersalItem[]> {
   console.log('[seed] Fetching Shufersal branch file listing...');
   const links = await fetchShufersalFileLinks();
   if (links.length === 0) throw new Error('No PriceFull file links found in Shufersal listing page');
@@ -61,11 +62,9 @@ async function collectUniqueItems(limit: number): Promise<ShufersalItem[]> {
   const unique: ShufersalItem[] = [];
 
   for (const url of filesToProcess) {
-    if (unique.length >= limit) break;
     const items = await fetchAndParseShufersalFile(url);
     console.log(`[seed]   ${items.length} items from ${url.split('/').pop()?.split('?')[0]}`);
     for (const item of items) {
-      if (unique.length >= limit) break;
       if (seenBarcodes.has(item.barcode)) continue;
       seenBarcodes.add(item.barcode);
       unique.push(item);
@@ -75,7 +74,21 @@ async function collectUniqueItems(limit: number): Promise<ShufersalItem[]> {
   return unique;
 }
 
-async function upsertProducts(items: ShufersalItem[]): Promise<Map<string, string>> {
+async function getProductCount(): Promise<number> {
+  const res = await restFetch('products?select=id', { method: 'HEAD', headers: { Prefer: 'count=exact' } });
+  if (!res.ok) throw new Error(`Failed to count products: HTTP ${res.status}`);
+  const range = res.headers.get('content-range');
+  const total = range ? Number(range.split('/')[1]) : NaN;
+  if (!Number.isFinite(total)) throw new Error(`Could not parse product count from content-range: ${range}`);
+  return total;
+}
+
+// Inserts only barcodes not already present in products — existing rows are
+// left untouched (resolution=ignore-duplicates), so this is safe to re-run.
+// Returns just the newly-inserted rows (PostgREST omits ignored conflicts
+// from the response), which is exactly what's needed to seed price_history
+// for new products only.
+async function insertNewProducts(items: ShufersalItem[]): Promise<Map<string, string>> {
   const rows = items.map((item) => ({
     barcode: item.barcode,
     name_he: item.name,
@@ -88,14 +101,14 @@ async function upsertProducts(items: ShufersalItem[]): Promise<Map<string, strin
   for (const batch of chunk(rows, 100)) {
     const res = await restFetch('products?on_conflict=barcode', {
       method: 'POST',
-      headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+      headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
       body: JSON.stringify(batch),
     });
     if (!res.ok) {
-      throw new Error(`Failed to upsert products: HTTP ${res.status} ${await res.text()}`);
+      throw new Error(`Failed to insert products: HTTP ${res.status} ${await res.text()}`);
     }
-    const upserted = (await res.json()) as Array<{ id: string; barcode: string }>;
-    for (const row of upserted) barcodeToId.set(row.barcode, row.id);
+    const inserted = (await res.json()) as Array<{ id: string; barcode: string }>;
+    for (const row of inserted) barcodeToId.set(row.barcode, row.id);
   }
 
   return barcodeToId;
@@ -133,19 +146,27 @@ async function insertPrices(items: ShufersalItem[], barcodeToId: Map<string, str
 }
 
 async function main() {
-  const items = await collectUniqueItems(PRODUCT_LIMIT);
-  console.log(`[seed] Collected ${items.length} unique products (target ${PRODUCT_LIMIT})`);
+  const countBefore = await getProductCount();
+  console.log(`[seed] Products before: ${countBefore}`);
 
-  console.log('[seed] Upserting into products...');
-  const barcodeToId = await upsertProducts(items);
-  console.log(`[seed] Upserted ${barcodeToId.size} products`);
+  const items = await collectUniqueItems();
+  console.log(`[seed] Collected ${items.length} unique barcodes across ${SHUFERSAL_STORE_LIMIT} branch files`);
 
-  console.log('[seed] Inserting price_history rows...');
-  const inserted = await insertPrices(items, barcodeToId);
+  console.log('[seed] Inserting new products (existing barcodes skipped)...');
+  const barcodeToId = await insertNewProducts(items);
+  console.log(`[seed] Inserted ${barcodeToId.size} new products`);
+
+  const newItems = items.filter((item) => barcodeToId.has(item.barcode));
+  console.log('[seed] Inserting price_history rows for new products...');
+  const inserted = await insertPrices(newItems, barcodeToId);
   console.log('[seed] Refreshing latest_prices...');
   await refreshLatestPrices();
 
-  console.log(`\n${barcodeToId.size} products upserted, ${inserted} prices inserted`);
+  const countAfter = await getProductCount();
+  console.log(`\n[seed] Products before: ${countBefore}`);
+  console.log(`[seed] Products after:  ${countAfter}`);
+  console.log(`[seed] New products added: ${barcodeToId.size}`);
+  console.log(`[seed] New price_history rows inserted: ${inserted}`);
 }
 
 main().catch((err) => {
