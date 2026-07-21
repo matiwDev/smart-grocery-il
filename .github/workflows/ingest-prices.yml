@@ -1,0 +1,42 @@
+name: Ingest prices
+
+# Daily automated run of scripts/ingest-prices.ts (see CLAUDE.md "Price
+# ingestion pipeline"). GitHub already emails the repo owner/watchers on a
+# failed scheduled run by default (Settings > Notifications > Actions) — no
+# extra notification step needed as long as that setting is left on.
+on:
+  schedule:
+    # 03:00 UTC = ~05:00/06:00 Israel time (IDT is UTC+3 in summer), safely
+    # off-peak for both the site and the upstream chain feeds.
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ingestion
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run ingest
+
+      - name: Print ingest_log summary
+        if: always()
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          curl -s "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/ingest_log?select=chain_id,started_at,finished_at,products_fetched,products_matched,products_inserted,error_text&order=started_at.desc&limit=5" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            | python3 -m json.tool
