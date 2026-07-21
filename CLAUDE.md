@@ -9,7 +9,7 @@ Users build a shopping basket, the app compares total cost across 4 supermarket 
 - **Frontend:** Next.js 15, React 19, TypeScript, Tailwind CSS 4
 - **Backend:** Supabase (PostgreSQL + Realtime + Auth)
 - **Auth:** Supabase OTP (email + phone), profiles auto-created via DB trigger
-- **Styling:** 4 switchable color palettes via CSS variables, RTL/LTR Hebrew/English toggle
+- **Styling:** Light/dark theme via CSS variables (see "Theme system" below), RTL/LTR Hebrew/English toggle
 - **Animation:** motion (framer-motion v12)
 - **Map:** react-leaflet + leaflet (client-only, dynamically imported — see gotchas)
 
@@ -17,7 +17,8 @@ Users build a shopping basket, the app compares total cost across 4 supermarket 
 ```
 app/
   page.tsx                        # Main UI — all views (HOME, LOCATION, PROFILE, CHAT, SAVED_LISTS)
-  layout.tsx                      # Root layout, RTL support, CSS skin variables
+  layout.tsx                      # Root layout, RTL support, pre-hydration theme-init script (see
+                                   # "Theme system" below)
   api/
     products/search/route.ts      # GET ?q=<query> — returns products + latest prices per chain
     prices/compare/route.ts       # POST {items:[{product_id,quantity}]} — returns cost per chain
@@ -60,7 +61,9 @@ components/
   BranchLeafletMap.tsx            # Actual react-leaflet map — pins colored by chain color_hex,
                                    # popups with Waze deep link, flyTo on active-pin change,
                                    # optional userPosition prop renders a blue "you are here" pin
-                                   # and flies the map to it on first fix
+                                   # and flies the map to it on first fix. `theme` prop switches
+                                   # the TileLayer between OSM (light) and CartoDB dark_all (dark)
+                                   # — see "Theme system" below
 lib/
   supabaseServer.ts               # Service-role Supabase client (API routes only)
 utils/
@@ -110,6 +113,9 @@ branches       — id, chain_id, name_he, name_en, city_he, city_en, lat, lng, i
 price_history  — id, product_id, chain_id, branch_id, price, captured_at, source
 latest_prices  — MATERIALIZED VIEW: latest price per (product_id, chain_id)
 profiles       — id (= auth.users.id), nickname, phone_number, avatar_url, selected_skin
+                 (selected_skin is a leftover DB column from the old 4-skin system — see
+                 "Theme system" below. Harmless if left in place; the app no longer reads
+                 or writes it. Drop it in a future migration if you want to clean it up.)
 households     — id, name, invite_code (unique, nullable — migration 003, CONFIRMED APPLIED)
 household_members — household_id, user_id, role
 baskets        — id, user_id, household_id, name, is_archived
@@ -275,6 +281,69 @@ client to call `signInWithPassword` with. No email is ever sent by this path, an
 route 404s outside development — use this instead of real signups when testing basket/
 profile/UI flows locally.
 
+## Theme system (light/dark)
+**Phase 7 (2026-07-21) replaced the old 4-skin system** (`warm-rose`/`earth-slate`/
+`neon-acid`/`ocean-steel`, picked from a swatch grid in the Profile view) with a
+plain light/dark theme. The old `Skin` type, `PALETTES` object, and the Profile
+skin-picker section are gone; `profiles.selected_skin` is no longer read or
+written by the app (see the DB schema note above).
+
+**Tokens:** `app/globals.css` defines `--color-bg-base/panel/subtle/hover`,
+`--color-text-primary/secondary/muted`, `--color-accent/-hover/-text`,
+`--color-success/warning/danger(-bg)` under `:root` (light default) and
+`[data-theme="dark"]` (dark overrides). Every component uses these via
+Tailwind arbitrary-value classes, e.g. `bg-[var(--color-bg-panel)]`,
+`text-[var(--color-text-muted)]` — there are no hardcoded `slate-*`/`indigo-*`/
+etc. Tailwind color classes left in `page.tsx`, `AuthModal.tsx`, or
+`BranchMapContainer.tsx`. Chain brand colors (`chains.color_hex`, `#E11D48`
+Shufersal / `#2563EB` Rami Levy / `#16A34A` Victory / `#D97706` Yohananof) are
+intentionally NOT tokens — they identify the brand and stay fixed regardless
+of theme, used only for dots/bars/map pins, never as plain text on a
+background.
+
+**Four token values were deliberately darkened from an earlier design brief**
+because the literal values fail WCAG AA (4.5:1) when used as text color,
+verified by computing relative luminance by hand:
+- light `--color-text-muted`: would be `#868E96` (~3.3:1 on white) → `#6B7280` (~4.8:1)
+- light `--color-success`: would be `#2F9E44` (~3.4:1 on white) → `#15803D` (~5.0:1)
+- light `--color-warning`: would be `#F08C00` (~2.5:1 on white) → `#B45309` (~5.0:1)
+- dark `--color-accent-hover`: would be `#60A5FA` (white button text on hover
+  only ~2.5:1) → `#2563EB` (~5.2:1) — the brief's dark-mode hover value was
+  *lighter* than the base accent (brighten-on-hover), which is backwards from
+  what keeps white button text readable; darkening on hover (matching light
+  mode's behavior) fixes it.
+
+If a future palette tweak reintroduces one of the original values, re-check
+contrast against white/`--color-bg-panel` (light) or `--color-bg-panel` dark
+(#1A1D23) before shipping it — don't assume a "brand" hex is safe as text.
+
+**Toggle:** a Sun/Moon button in the header (next to the language toggle,
+`app/page.tsx`) flips `theme` state between `'light'`/`'dark'`, sets
+`document.documentElement.dataset.theme`, and persists to `localStorage` under
+`sg_theme`. `app/layout.tsx` has a `dangerouslySetInnerHTML` inline script in
+`<head>` that reads that key and sets `data-theme="dark"` on `<html>` before
+React hydrates (avoids a light-mode flash on reload) — `<html>` needs
+`suppressHydrationWarning` for this (same reason `<body>` already had it: the
+attribute is intentionally client-only and won't match the server-rendered
+markup).
+
+**ChainBar contrast fix:** the price-comparison bar's price label
+(`app/page.tsx`, `ChainBar` component) used to be a plain white `text-white`
+span absolutely positioned over the whole bar width, which could land on the
+plain track background (not the colored fill) depending on the fill
+percentage — unreadable in light mode where the track is a light gray. It now
+has its own `bg-black/40` backing so it's readable regardless of theme or fill
+width.
+
+**Leaflet dark tiles:** `BranchLeafletMap` takes a `theme` prop (threaded from
+`page.tsx` → `BranchMapContainer` → `BranchLeafletMap`) and swaps the
+`TileLayer` `url` between the default OpenStreetMap tiles (light) and CartoDB's
+`dark_all` tiles (dark, `https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png`).
+The Leaflet popup content itself (branch name/city inside `<Popup>`) is
+untouched — Leaflet's own `leaflet.css` always renders popups with a fixed
+white background, so the existing dark-ish popup text stays readable in both
+app themes without needing tokens there.
+
 ## Current roadmap phase
 **Phase 0 complete** — schema, seed data, API routes in place.
 
@@ -385,6 +454,27 @@ profile/UI flows locally.
       already applied on the live project — see "Applying migrations" below
 - [x] Documented cron scheduling options for `npm run ingest` — see "Scheduling
       the ingestion pipeline" below (documentation only, nothing wired up)
+
+**Phase 7 complete — light/dark theme (2026-07-21):**
+- [x] Replaced the 4-skin palette system with light/dark CSS tokens — see
+      "Theme system" above for the full writeup, including the 4 token values
+      that were deliberately darkened to pass WCAG AA
+- [x] Sun/Moon toggle in the header, persisted to `localStorage` (`sg_theme`),
+      applied via `data-theme` on `<html>` with a pre-hydration script to avoid
+      a light-mode flash on load
+- [x] Removed the skin-picker section from the Profile view and all
+      `selected_skin` reads/writes from the app (DB column left in place,
+      unused — see DB schema note above)
+- [x] Every hardcoded `slate-*`/`indigo-*`/`emerald-*`/`amber-*`/`rose-*`
+      Tailwind class in `page.tsx`, `AuthModal.tsx`, and `BranchMapContainer.tsx`
+      replaced with a CSS-variable-backed arbitrary-value class
+- [x] Leaflet map tiles switch between OSM (light) and CartoDB `dark_all`
+      (dark) based on theme
+- [x] `npx tsc --noEmit`, `npm run lint`, `npm run build` all clean;
+      manually verified both themes across Home/AuthModal/drawer/Profile/
+      Location in a real browser, including toggle persistence across reload
+- [ ] Not deployed — `vercel --prod` was not run this session (commits pushed
+      to `origin/main` only, by request)
 
 ## Coding conventions
 - All components: functional, TypeScript strict
@@ -507,7 +597,11 @@ lowest setup cost, no new infrastructure, and the repo is already on GitHub.
   it still visibly sliding at 6s in one session); always take a fresh screenshot
   right before clicking to confirm it's fully settled, don't just wait-and-click
   blind, and prefer clicking by ref from a read_page taken after that screenshot
-  rather than a coordinate computed earlier
+  rather than a coordinate computed earlier. Note this isn't a bug to chase:
+  every `DrawerItem` calls `close()` (sets `isDrawerOpen` false) in the same
+  onClick that navigates, so the drawer disappearing immediately after you
+  click a nav item is the intended UX, not evidence the click failed — check
+  `currentView` (or what rendered) before concluding a click didn't register
 - `npm run lint` and `npx tsc --noEmit` are both clean as of the lint cleanup
   pass — if either starts failing, it's a real regression, not a known
   pre-existing tooling issue. Note: the root `tsconfig.json` (and therefore
@@ -627,8 +721,6 @@ Checked and found clean — no code changes needed:
   OpenStreetMap tile server, a Cloudinary default-avatar image) or a public
   government price-feed URL (`RAMI_LEVY_URL`, `SHUFERSAL_LISTING_URL`) that's
   the same across all environments by definition — making these env vars
-  would add indirection without benefit. **Minor unrelated observation:** the
-  WhatsApp support link in `app/page.tsx` (~line 1641) hardcodes
-  `972500000000`, which looks like an unreplaced placeholder number
-  (all-zeros pattern) rather than a real support contact — not fixed here
-  since the real number isn't known, but worth a follow-up.
+  would add indirection without benefit. The WhatsApp support link's phone
+  number (previously a `972500000000` all-zeros placeholder, flagged here as
+  a follow-up) was updated to a real number in a later session.
