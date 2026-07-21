@@ -1,12 +1,25 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from "@/utils/supabase";
 import type { Dictionary } from '@/app/page';
 
 export type AuthMode = 'SIGN_IN' | 'SIGN_UP' | 'NONE';
 
+// For 5xx-class responses, supabase-js's AuthRetryableFetchError is built from
+// JSON.stringify()-ing the raw (unparsed) fetch Response object rather than
+// its body — which serializes to the literal string "{}", not a real message.
+// That was surfacing verbatim in the error box (reported as a mysterious
+// "red brackets" panel after sign-up) whenever the auth server hit a
+// transient/infra failure (e.g. the confirmation email failing to send).
 function getErrorMessage(err: unknown): string | undefined {
-  return err instanceof Error ? err.message : undefined;
+  if (isAuthRetryableFetchError(err)) {
+    return 'A temporary server error occurred. Please try again in a moment. / אירעה שגיאת שרת זמנית. אנא נסה שוב בעוד רגע.';
+  }
+  if (err instanceof Error && err.message.trim() && err.message.trim() !== '{}') {
+    return err.message;
+  }
+  return undefined;
 }
 
 function getErrorCode(err: unknown): string | undefined {
