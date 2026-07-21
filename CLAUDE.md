@@ -26,14 +26,19 @@ app/
     dev/login/route.ts            # Dev-only: get-or-creates a fixed pre-confirmed test user via
                                    # the admin API and returns its credentials. 404s unless
                                    # NODE_ENV=development. Never sends real email.
-    prices/ingest/route.ts        # Old webhook-style endpoint writing to the STALE
-                                   # `price_snapshots` table (see schema.sql note below). Not
-                                   # part of the real ingestion pipeline — see
-                                   # scripts/ingest-prices.ts instead. Unused/dead, predates
-                                   # Phase 4, left as-is.
+    prices/ingest/route.ts        # POST: old webhook-style endpoint writing to the STALE
+                                   # `price_snapshots` table (see schema.sql note below), unused/
+                                   # dead, predates Phase 4, left as-is. GET (added Phase 6): real
+                                   # cron target — runs runIngestion() from scripts/ingest-prices.ts
+                                   # in-process, guarded by CRON_SECRET. See "Phase 6 — Deployment"
+                                   # below.
 scripts/
-  ingest-prices.ts                # Standalone Phase 4 ingestion script — see "Price ingestion
-                                   # pipeline" below. Run with `npm run ingest`.
+  ingest-prices.ts                # Real ingestion logic (Shufersal/Rami-Levy fetch + match +
+                                   # insert) — see "Price ingestion pipeline" below. Exports
+                                   # runIngestion(), no process-level side effects; imported by
+                                   # both run-ingest-cli.ts and the GET route above.
+  run-ingest-cli.ts               # `npm run ingest` CLI entry point (Phase 6) — env check +
+                                   # console output + process.exit wrapper around runIngestion().
   seed-products-from-feed.ts      # Phase 5 — pulls the first 200 unique real products (barcode/
                                    # name/price) from the live Shufersal feed and upserts them into
                                    # products + price_history. Run with `npm run seed:products`.
@@ -92,6 +97,10 @@ RESEND_API_KEY=
 `RESEND_API_KEY` is only used as the custom SMTP credential configured in the
 Supabase dashboard (Auth → Emails → SMTP Settings) — the app code never reads
 it directly. See "Custom SMTP (Resend)" below for the dashboard values.
+
+`CRON_SECRET` (added Phase 6) is only required in production — it guards the
+`GET /api/prices/ingest` cron route (see "Phase 6 — Deployment" below). Not
+needed for local dev unless you're manually testing that route.
 
 ## Database schema (key tables)
 ```sql
@@ -185,6 +194,28 @@ a direct `curl`. The script parses a `{data: [{id, name, price}]}` shape
 plausible shapes, but this is still unverified against a real payload since no
 endpoint has actually returned data yet. Treat it as a starting point, not a
 tested integration, until a working URL is found.
+
+**Rami Levy — Phase 6 dead end (2026-07-21).** Tried three more variants
+against the live site, all still HTTP 404:
+- `/api/delivery/prices` with a `User-Agent: Mozilla/5.0 (compatible;
+  SmartGroceryIL/1.0)` header added
+- `/api/marketplace/v2/prices`
+- `/api/delivery/prices?storeId=331`
+
+All three returned the *identical* Nuxt.js SPA "404" HTML page (title `רמי
+לוי אונליין- 404`), not a JSON error and not even distinguishable 404 bodies
+from each other — i.e. these are wrong routes at the framework level, not a
+User-Agent block or a missing query param. This means guessing plausible REST
+paths isn't converging; finding the real endpoint needs either inspecting the
+site's actual network requests in a browser (devtools, while browsing
+rami-levy.co.il's own product pages) or Rami Levy publishing the Food-Act
+transparency feed at a documented URL (the other three chains' feeds — e.g.
+Shufersal's — are typically linked from a "מחירי שקיפות"/price-transparency
+page rather than an app-internal API). `ingestRamiLevy()` in
+`scripts/ingest-prices.ts` is left as-is: it still attempts
+`www.rami-levy.co.il/api/delivery/prices`, fails gracefully, logs the error to
+`ingest_log`, and does not block Shufersal ingestion. Skipped for Phase 6 —
+revisit with real network-traffic inspection before trying more URL guesses.
 
 ## Phase 5 — real products seeded, real prices flowing
 `scripts/seed-products-from-feed.ts` (`npm run seed:products`) fixed the
@@ -402,19 +433,37 @@ work end-to-end now. If a future session sees PGRST205/PGRST202 again, treat
 it as a regression (e.g. a project reset), not the original unapplied state.
 
 ## Scheduling the ingestion pipeline
-`npm run ingest` (`scripts/ingest-prices.ts`) is not currently run on any
-schedule — it's a manual `npm run` command. Three ways to automate it,
-documentation only, nothing below is wired up yet:
+**Option A is now wired up (Phase 6, 2026-07-21)** —
+[.github/workflows/ingest-prices.yml](.github/workflows/ingest-prices.yml)
+runs `npm run ingest` daily. Options B/C remain documentation-only, listed
+below for context on alternatives that were considered.
 
-**Option A — GitHub Actions scheduled workflow (free, recommended).** A
-`.github/workflows/ingest.yml` with a `schedule: cron:` trigger, checking out
-the repo, running `npm ci`, and `npm run ingest` with
-`SUPABASE_SERVICE_ROLE_KEY` / `NEXT_PUBLIC_SUPABASE_URL` supplied via GitHub
-Actions secrets (Settings → Secrets and variables → Actions). No new
-infrastructure, generous free minutes for a repo this size, and the run log
-is visible directly in the Actions tab. Cron is UTC — pick a time that's late
-night in Israel (UTC+2/+3) to avoid overlapping site traffic, e.g.
-`cron: '0 1 * * *'` for ~03:00/04:00 Israel time.
+**Option A — GitHub Actions scheduled workflow (free, recommended). ACTIVE.**
+[.github/workflows/ingest-prices.yml](.github/workflows/ingest-prices.yml)
+triggers on `schedule: cron: '0 3 * * *'` (03:00 UTC ≈ 05:00–06:00 Israel
+time depending on DST) and on manual `workflow_dispatch`. Runs on
+`ubuntu-latest` with Node 22, `npm ci`, then `npm run ingest` with
+`NEXT_PUBLIC_SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` read from **GitHub
+Actions secrets** — these must be added manually under repo Settings →
+Secrets and variables → Actions before the workflow can succeed (see
+"GitHub Actions secrets" below). A final step queries `ingest_log` (latest 5
+rows) and pretty-prints it to the Actions log regardless of whether the
+ingest step succeeded (`if: always()`), so a run's outcome is visible without
+opening the Supabase dashboard. Failure notification relies on GitHub's
+default behavior of emailing the repo owner/watchers on a failed scheduled
+workflow run (Settings → Notifications → Actions) — no separate notification
+step was added; if that account-level setting is off, failures won't email
+anyone.
+
+### GitHub Actions secrets
+Add these under **Settings → Secrets and variables → Actions → New repository
+secret** (values are the same as `.env.local`):
+```
+NEXT_PUBLIC_SUPABASE_URL       # e.g. https://<project-ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY      # service-role key — do not confuse with the anon key
+```
+Not yet added as of this writing — the workflow will fail on its first
+scheduled/manual run until both are set.
 
 **Option B — Supabase Edge Function with `pg_cron`.** Port the ingestion logic
 (or at minimum the `refresh_latest_prices()` call) into a Supabase Edge
@@ -491,3 +540,95 @@ lowest setup cost, no new infrastructure, and the repo is already on GitHub.
   set from the anon key + that token. A `PGRST202`/`PGRST205` response confirms the call
   reached PostgREST with the right function/table name and params — it's just missing the
   migration — as opposed to a bug in the client code
+
+## Phase 6 — Deployment (in progress, 2026-07-21)
+
+### Production URL
+`https://your-app.vercel.app` — placeholder until the first `vercel --prod`
+deploy. Update this line once real.
+
+### Vercel deployment steps (manual — not run this session)
+1. `npm i -g vercel` (if not already installed)
+2. `vercel --prod` from the repo root, follow the prompts to link/create the
+   project
+3. In the Vercel project dashboard (Settings → Environment Variables), add
+   every variable from `.env.local`, plus `CRON_SECRET` (see below):
+   ```
+   NEXT_PUBLIC_SUPABASE_URL
+   NEXT_PUBLIC_SUPABASE_ANON_KEY
+   SUPABASE_SERVICE_ROLE_KEY
+   RESEND_API_KEY
+   CRON_SECRET
+   ```
+   (`RESEND_API_KEY` isn't read by app code — see "Custom SMTP" above — but
+   keep it there for parity/reference with `.env.local`. `CRON_SECRET` can be
+   any random string, e.g. `openssl rand -hex 32`.)
+4. Settings → General → Node.js Version → set to **22.x** (the ingestion
+   script and its Node-20-WebSocket workarounds are irrelevant to the Next.js
+   app itself, but Vercel's default may lag; pin it explicitly)
+5. [vercel.json](vercel.json) is already in the repo root with
+   `framework`/`buildCommand`/`devCommand`/`installCommand` plus a `crons`
+   entry pointing at `/api/prices/ingest` — see below for what that route
+   actually does now.
+
+### `/api/prices/ingest` — real GET cron handler (Phase 6, 2026-07-21)
+`app/api/prices/ingest/route.ts` originally only had the pre-Phase-4 `POST`
+webhook stub (writes single-product payloads to the stale `price_snapshots`
+table — kept working, unchanged, still dead/unused by the frontend). Added a
+`GET` handler alongside it that runs the real ingestion pipeline in-process:
+
+- Calls `runIngestion()`, newly exported from `scripts/ingest-prices.ts`
+  (the Shufersal/Rami-Levy fetch + match + insert logic, shared with the CLI
+  — see below). Returns `{ results: [{ chain, fetched, matched, inserted,
+  error }, ...] }`.
+- Auth: requires a `CRON_SECRET` env var to be set, and accepts either
+  `x-cron-secret: <CRON_SECRET>` **or** `Authorization: Bearer
+  <CRON_SECRET>` — checked in `isAuthorizedCronRequest()` in the route file.
+  Two schedulers hit this route with two different header conventions:
+  Vercel Cron auto-injects `Authorization: Bearer <CRON_SECRET>` on requests
+  it triggers itself (no way to configure a custom header name for that), while
+  a manual/GitHub-Actions-style caller would use `x-cron-secret`. Accepting
+  both means the literal `x-cron-secret` contract holds *and* Vercel's own
+  cron mechanism actually works, rather than 401-ing itself. Missing
+  `CRON_SECRET` env var → always 401 (fails closed).
+
+**`scripts/ingest-prices.ts` refactor:** the module no longer auto-runs or
+calls `process.exit`/`requireEnv()` at import time — those were moved to a
+new `scripts/run-ingest-cli.ts`, now the actual `npm run ingest` target
+(`package.json` updated). Reason: `ingest-prices.ts` is now imported by the
+Next.js route above, and a `process.exit()` reached via that import path
+would kill the whole serverless function, not just fail one request; the
+original `if (require.main === module)` guard was also dropped as unreliable
+once Next.js bundles the module (its output format isn't guaranteed to be
+CommonJS, so `require`/`module` aren't guaranteed to exist at runtime).
+`ingest-prices.ts` now exports only `runIngestion()` (pure, side-effect-free
+at import time) plus the existing chain-specific functions.
+
+Verified: `npx tsc --noEmit`, `npx tsc --project scripts/tsconfig.json
+--noEmit`, `npm run lint`, and `npm run build` are all clean after this
+refactor; `/api/prices/ingest` appears as a normal dynamic route in the
+build output.
+
+### Production readiness audit (Phase 6 step 4, 2026-07-21)
+Checked and found clean — no code changes needed:
+- **Sensitive data in `console.log`/`console.error`:** none found. All error
+  logging across `app/api/*` and `components/AuthModal.tsx` logs generic
+  `Error` objects/messages, never raw keys, tokens, or user PII by name.
+- **`/api/dev/login` production guard:** already correctly implemented —
+  `if (process.env.NODE_ENV !== 'development') return 404` is the first line
+  of the handler (`app/api/dev/login/route.ts:11`). No fix needed.
+- **Stack traces exposed to the client:** none found. Every API route catch
+  block returns only `error.message` (a short description), never
+  `error.stack`, in its JSON error response.
+- **Hardcoded URLs that should be env vars:** none found needing a fix. The
+  only genuinely environment-specific URLs (`NEXT_PUBLIC_SUPABASE_URL`, etc.)
+  are already env vars. Everything else hardcoded is either a fixed
+  third-party integration URL (Waze deep link, WhatsApp `wa.me` link,
+  OpenStreetMap tile server, a Cloudinary default-avatar image) or a public
+  government price-feed URL (`RAMI_LEVY_URL`, `SHUFERSAL_LISTING_URL`) that's
+  the same across all environments by definition — making these env vars
+  would add indirection without benefit. **Minor unrelated observation:** the
+  WhatsApp support link in `app/page.tsx` (~line 1641) hardcodes
+  `972500000000`, which looks like an unreplaced placeholder number
+  (all-zeros pattern) rather than a real support contact — not fixed here
+  since the real number isn't known, but worth a follow-up.
