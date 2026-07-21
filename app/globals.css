@@ -1,60 +1,61 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens for the light/dark theme system.
+ * Toggled via a `data-theme="dark"` attribute on <html> (see app/layout.tsx +
+ * the theme toggle in app/page.tsx), persisted to localStorage under `sg_theme`.
+ *
+ * Deviations from the original spec hex values (kept as close to the intent as
+ * possible, changed only where the literal value failed WCAG AA as text):
+ *   - light --color-text-muted: #868E96 -> #6B7280 (as text on white/panel it was ~3.3:1)
+ *   - light --color-success:    #2F9E44 -> #15803D (as text on white it was ~3.4:1)
+ *   - light --color-warning:    #F08C00 -> #B45309 (as text on white it was ~2.5:1)
+ *   - dark  --color-accent-hover: #60A5FA -> #2563EB (white button text on hover was ~2.5:1)
+ */
+
 @layer base {
-  [data-skin="light"] {
-    --color-slate-950: var(--color-slate-50);
-    --color-slate-900: var(--color-slate-100);
-    --color-slate-800: var(--color-slate-200);
-    --color-slate-700: var(--color-slate-300);
-    --color-slate-500: var(--color-slate-500);
-    --color-slate-400: var(--color-slate-600);
-    --color-slate-300: var(--color-slate-700);
-    --color-slate-200: var(--color-slate-800);
-    --color-slate-100: var(--color-slate-900);
-    --color-slate-50: var(--color-slate-950);
-    
-    --color-indigo-600: var(--color-blue-600);
-    --color-indigo-500: var(--color-blue-500);
-    --color-indigo-400: var(--color-blue-600);
-    
-    --color-white: var(--color-slate-900);
+  :root {
+    --color-bg-base: #F8F9FA;
+    --color-bg-panel: #FFFFFF;
+    --color-bg-subtle: #F1F3F5;
+    --color-bg-hover: #E9ECEF;
+    --color-border: #DEE2E6;
+    --color-border-strong: #ADB5BD;
+    --color-text-primary: #212529;
+    --color-text-secondary: #495057;
+    --color-text-muted: #6B7280;
+    --color-accent: #2563EB;
+    --color-accent-hover: #1D4ED8;
+    --color-accent-text: #FFFFFF;
+    --color-success: #15803D;
+    --color-warning: #B45309;
+    --color-danger: #C92A2A;
+    --color-danger-bg: #FFF5F5;
+    --color-success-bg: #EBFBEE;
   }
 
-  [data-skin="cyberpunk"] {
-    --color-slate-950: #050505;
-    --color-slate-900: #0a0a0a;
-    --color-slate-800: #1a1a1a;
-    --color-slate-700: #2a2a2a;
-    
-    --color-slate-300: #e0e0e0;
-    --color-slate-200: #f0f0f0;
-    --color-slate-100: #ffffff;
-    --color-slate-50: #ffffff;
-    
-    --color-indigo-600: var(--color-fuchsia-600);
-    --color-indigo-500: var(--color-fuchsia-500);
-    --color-indigo-400: var(--color-fuchsia-400);
-    
-    --color-emerald-500: var(--color-cyan-400);
-    --color-emerald-400: var(--color-cyan-300);
+  [data-theme="dark"] {
+    --color-bg-base: #0F1117;
+    --color-bg-panel: #1A1D23;
+    --color-bg-subtle: #22262D;
+    --color-bg-hover: #2A2F38;
+    --color-border: #2E3440;
+    --color-border-strong: #4C566A;
+    --color-text-primary: #F8F9FA;
+    --color-text-secondary: #CED4DA;
+    --color-text-muted: #868E96;
+    --color-accent: #3B82F6;
+    --color-accent-hover: #2563EB;
+    --color-accent-text: #FFFFFF;
+    --color-success: #51CF66;
+    --color-warning: #FFD43B;
+    --color-danger: #FF6B6B;
+    --color-danger-bg: #2D1B1B;
+    --color-success-bg: #1A2E1A;
   }
 
-  [data-skin="nordic-light"] {
-    --color-slate-950: #f8fafc;
-    --color-slate-900: #f1f5f9;
-    --color-slate-800: #e2e8f0;
-    --color-slate-700: #cbd5e1;
-    --color-slate-500: #64748b;
-    --color-slate-400: #475569;
-    --color-slate-300: #334155;
-    --color-slate-200: #1e293b;
-    --color-slate-100: #0f172a;
-    --color-slate-50: #020617;
-    
-    --color-indigo-600: var(--color-sky-600);
-    --color-indigo-500: var(--color-sky-500);
-    --color-indigo-400: var(--color-sky-400);
-    
-    --color-white: #0f172a;
+  body {
+    background: var(--color-bg-base);
+    color: var(--color-text-primary);
   }
 }
