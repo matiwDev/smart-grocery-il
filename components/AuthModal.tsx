@@ -20,9 +20,10 @@ function getErrorCode(err: unknown): string | undefined {
     setAuthMode: (mode: AuthMode) => void;
     onAuthSuccess: (nickname: string) => void;
     t: Dictionary;
+    dismissible?: boolean;
   }
 
-export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModalProps) {
+export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t, dismissible = true }: AuthModalProps) {
   const [usernameInput, setUsernameInput] = useState('');
   const [emailInput, setEmailInput] = useState('');
   const [phoneInput, setPhoneInput] = useState('');
@@ -245,13 +246,15 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-[var(--color-bg-panel)] border border-[var(--color-border)] shadow-2xl rounded-3xl w-full max-w-md overflow-hidden relative">
-        <button 
-          onClick={() => setAuthMode('NONE')}
-          className="absolute top-4 end-4 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors p-3 -m-3"
-        >
-          <X className="w-5 h-5" />
-        </button>
-        
+        {dismissible && (
+          <button
+            onClick={() => setAuthMode('NONE')}
+            className="absolute top-4 end-4 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors p-3 -m-3"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+
         <div className="p-8">
           <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-6 text-center">
             {authMode === 'SIGN_IN' ? t.authModalTitleIn : t.authModalTitleUp}

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ShoppingCart, ExternalLink, TrendingDown,
-  LogIn, LogOut, Globe, User, X, Menu, Home, List, Users, Search,
+  LogOut, Globe, User, X, Menu, Home, List, Users, Search,
   MapPin, Trash2, Navigation, ChevronDown,
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   ArrowDown, Loader2, Bell, Copy, UserPlus, Sun, Moon,
@@ -376,6 +376,7 @@ function ChainBar({ chain, total, maxTotal, isMin, lang }: {
 export default function SmartGroceryDashboard() {
   const [lang, setLang] = useState<Lang>('he');
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [isAuthChecked, setIsAuthChecked] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>('NONE');
   const [currentView, setCurrentView] = useState<View>('HOME');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -468,9 +469,9 @@ export default function SmartGroceryDashboard() {
   // ── Auth & profile load ──────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase) { setIsAuthChecked(true); return; }
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return;
+      if (!user) { setIsAuthChecked(true); return; }
       supabase.from('profiles').select('*').eq('id', user.id).single().then(({ data: profile }) => {
         setCurrentUser({
           id: user.id,
@@ -479,6 +480,7 @@ export default function SmartGroceryDashboard() {
           phone: profile?.phone_number || '',
           avatar: profile?.avatar_url || '',
         });
+        setIsAuthChecked(true);
       });
     });
   }, []);
@@ -932,9 +934,71 @@ export default function SmartGroceryDashboard() {
     setChatInput('');
   };
 
+  const handleAuthSuccess = async (nickname: string) => {
+    if (!supabase) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      setCurrentUser({
+        id: user.id,
+        nickname: nickname || profile?.nickname || 'User',
+        email: user.email || '',
+        phone: profile?.phone_number || '',
+        avatar: profile?.avatar_url || '',
+      });
+    }
+  };
+
   // ─────────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────────
+
+  // Auth gate: nothing renders (not even a flash of the app) until the session
+  // check completes, and only the AuthModal (+ language toggle) renders if
+  // there's no session — guest browsing is not supported.
+  if (!isAuthChecked) {
+    return (
+      <div className="w-full min-h-screen flex items-center justify-center bg-[var(--color-bg-base)]">
+        <Loader2 className="w-8 h-8 text-[var(--color-accent)] animate-spin" />
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <div
+        className="w-full min-h-screen flex flex-col font-sans p-4 md:p-6 lg:p-8 bg-[var(--color-bg-base)] text-[var(--color-text-primary)]"
+        dir={lang === 'he' ? 'rtl' : 'ltr'}
+      >
+        <header className="relative z-[60] flex items-center justify-between mb-6 gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-[var(--color-accent)] rounded-xl flex items-center justify-center text-[var(--color-accent-text)] font-bold shadow-lg shadow-[var(--color-accent)]/20 shrink-0">
+              <ShoppingCart className="w-5 h-5" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-[var(--color-text-primary)]">{t.appTitle}</h1>
+              <p className="text-xs text-[var(--color-text-muted)] font-medium">{t.envLabel}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setLang((l) => l === 'he' ? 'en' : 'he')}
+            className="flex items-center gap-2 bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] transition-colors px-3 rounded-full border border-[var(--color-border)] text-xs font-semibold text-[var(--color-text-primary)] min-h-[44px]"
+          >
+            <Globe className="w-4 h-4 text-[var(--color-accent)]" />
+            {lang === 'he' ? 'EN' : 'עברית'}
+          </button>
+        </header>
+
+        <AuthModal
+          authMode={authMode === 'NONE' ? 'SIGN_IN' : authMode}
+          setAuthMode={setAuthMode}
+          dismissible={false}
+          onAuthSuccess={handleAuthSuccess}
+          t={t}
+        />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -1594,19 +1658,12 @@ export default function SmartGroceryDashboard() {
                 </button>
               </div>
               <div className="p-4 border-t border-[var(--color-border)]">
-                {currentUser ? (
-                  <button onClick={async () => {
-                    if (supabase) await supabase.auth.signOut();
-                    setCurrentUser(null); setIsDrawerOpen(false); setCurrentView('HOME');
-                  }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded-xl transition-colors">
-                    <LogOut className="w-5 h-5" /> {t.signOut}
-                  </button>
-                ) : (
-                  <button onClick={() => { setAuthMode('SIGN_IN'); setIsDrawerOpen(false); }}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-hover)]/10 rounded-xl transition-colors">
-                    <LogIn className="w-5 h-5" /> {t.signIn} / {t.signUp}
-                  </button>
-                )}
+                <button onClick={async () => {
+                  if (supabase) await supabase.auth.signOut();
+                  setCurrentUser(null); setIsDrawerOpen(false); setCurrentView('HOME');
+                }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded-xl transition-colors">
+                  <LogOut className="w-5 h-5" /> {t.signOut}
+                </button>
               </div>
             </motion.div>
           </>
@@ -1640,27 +1697,6 @@ export default function SmartGroceryDashboard() {
           </div>
         )}
       </AnimatePresence>
-
-      {/* ── Auth modal ── */}
-      <AuthModal
-        authMode={authMode}
-        setAuthMode={setAuthMode}
-        onAuthSuccess={async (nickname) => {
-          if (!supabase) return;
-          const { data: { user } } = await supabase.auth.getUser();
-          if (user) {
-            const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-            setCurrentUser({
-              id: user.id,
-              nickname: nickname || profile?.nickname || 'User',
-              email: user.email || '',
-              phone: profile?.phone_number || '',
-              avatar: profile?.avatar_url || '',
-            });
-          }
-        }}
-        t={t}
-      />
     </div>
   );
 }
