@@ -8,7 +8,9 @@ Users build a shopping basket, the app compares total cost across 4 supermarket 
 ## Stack
 - **Frontend:** Next.js 15, React 19, TypeScript, Tailwind CSS 4
 - **Backend:** Supabase (PostgreSQL + Realtime + Auth)
-- **Auth:** Supabase OTP (email + phone), profiles auto-created via DB trigger
+- **Auth:** Supabase OTP (email + phone), profiles auto-created via DB trigger. **Mandatory as of
+  Phase 8** — there is no guest mode; the app shows only the sign-in/sign-up modal until a
+  session exists (see "Phase 8" below)
 - **Styling:** Light/dark theme via CSS variables (see "Theme system" below), RTL/LTR Hebrew/English toggle
 - **Animation:** motion (framer-motion v12)
 - **Map:** react-leaflet + leaflet (client-only, dynamically imported — see gotchas)
@@ -40,15 +42,28 @@ scripts/
                                    # both run-ingest-cli.ts and the GET route above.
   run-ingest-cli.ts               # `npm run ingest` CLI entry point (Phase 6) — env check +
                                    # console output + process.exit wrapper around runIngestion().
-  seed-products-from-feed.ts      # Phase 5 — pulls the first 200 unique real products (barcode/
-                                   # name/price) from the live Shufersal feed and upserts them into
-                                   # products + price_history. Run with `npm run seed:products`.
+  seed-products-from-feed.ts      # Phase 5, widened Phase 8 — pulls unique real products (barcode/
+                                   # name/price) from the first 20 Shufersal branch files (was 3-5)
+                                   # and inserts new ones into products + price_history, skipping
+                                   # barcodes already present (safe to re-run — see Phase 8 below).
+                                   # Run with `npm run seed:products`.
+  seed-branches.ts                # Phase 8 — pulls real store metadata (StoreID/StoreName/Address/
+                                   # City) from the Shufersal "Stores" feed category (catID=5, a
+                                   # single chain-wide file, distinct from the per-branch PriceFull
+                                   # files) and inserts new branches, deduping client-side on
+                                   # (name_he, address) since branches has no unique constraint to
+                                   # on_conflict against. See "Phase 8" below for the City-field
+                                   # caveat. Run with `npm run seed:branches`.
   enrich-product-names.ts         # Phase 5 — batches products missing name_en 50 at a time and
                                    # asks claude-haiku-4-5 to translate name_he to English. Run
                                    # with `npm run enrich:names`. Needs ANTHROPIC_API_KEY in
                                    # .env.local (not currently configured in this repo).
-  shufersal-feed.ts               # Shared Shufersal fetch/gunzip/XML-parse logic, used by both
-                                   # ingest-prices.ts and seed-products-from-feed.ts.
+  shufersal-feed.ts               # Shared Shufersal fetch/gunzip/XML-parse logic. Exports
+                                   # fetchShufersalFileLinks()/fetchAndParseShufersalFile() for the
+                                   # PriceFull (catID=2) feed, used by ingest-prices.ts and
+                                   # seed-products-from-feed.ts, plus fetchShufersalStoresFileUrl()
+                                   # (Phase 8) for the Stores (catID=5) feed, used by
+                                   # seed-branches.ts.
   supabase-rest.ts                # Shared env-loading + PostgREST client helpers (restFetch,
                                    # fetchWithRetry, chunk, refreshLatestPrices), used by all three
                                    # scripts above.
@@ -141,14 +156,20 @@ join_household_by_code(code text)  — inserts a household_members row for the c
 - 18 original placeholder products with Hebrew + English names — barcodes are
   plausible-looking fake EAN-13s, **not** real chain SKUs (see "Price ingestion
   pipeline" below), so they never match anything in a real feed
-- 200 real products added in Phase 5 via `npm run seed:products` — real
-  barcodes, names, and prices pulled directly from the live Shufersal feed
-  (218 products total as of this writing). `name_en` is null for all 200 until
+- **9,648 products total as of Phase 8** (2026-07-21) — grew from 218 (Phase 5)
+  to 9,648 (9,430 new) after widening `seed-products-from-feed.ts` from 3 to 20
+  branch files. `name_en` is null for all real-feed products until
   `npm run enrich:names` is run
 - 4 chains: shufersal, rami_levy, victory, yohananof
-- 8 branches across Gush Dan area with real coordinates
+- **428 branches total as of Phase 8** — grew from the original 8 (Gush Dan
+  area, real coordinates) to 428 (420 new) via `scripts/seed-branches.ts`. The
+  420 new rows have real `name_he`/`address` but **no `lat`/`lng`** (not in the
+  Stores feed) and a numeric government settlement code in `city_he` instead of
+  a name (see "Phase 8" below) — they show up in the Location view's
+  unfiltered branch list but not on the map or in GPS-distance results, which
+  both require `lat`/`lng`
 - 72 price rows (18 original products × 4 chains) with realistic ILS prices,
-  plus one real `shufersal` price_history row per Phase-5 product
+  plus one real `shufersal` price_history row per Phase-5/8 product
 - latest_prices materialized view populated
 
 ## Custom SMTP (Resend)
@@ -168,6 +189,25 @@ Minimum interval between emails: lower from default if still testing OTP a lot
 ```
 `RESEND_API_KEY` only needs to live in `.env.local` as a reference for whoever
 is pasting it into the dashboard — the running app does not call Resend directly.
+
+**BROKEN as of Phase 8 (2026-07-21) — every sign-up currently fails.**
+`supabase.auth.signUp()` returns HTTP 500 `"Error sending confirmation email"`
+for every email address tried, including the Resend account's own verified
+address (`matiasepxress@gmail.com`) — confirmed via `curl` directly against
+`/auth/v1/signup`. Ruled out: the Resend API key itself, which works fine when
+called directly (`curl https://api.resend.com/emails ...` with that same key
+succeeds and returns a real message id) — so the failure is specifically in
+Supabase's SMTP relay/config, not Resend or the key. Likely causes to check by
+hand in the Dashboard (no CLI/DB access to verify programmatically — see
+"Applying migrations" below): the configured Sender email may not match a
+domain Resend has verified for this account (the direct-API test above used
+`onboarding@resend.dev` explicitly; if the Dashboard's Sender email field is
+set to something else, Resend's SMTP relay would reject it even though the API
+call above succeeds), the SMTP password may be stale, or "Minimum interval
+between emails" may be throttling harder than expected. **Until this is fixed,
+sign-up cannot be tested end-to-end** — `AuthModal.tsx` now shows a clear error
+instead of a broken one when this happens (see "Phase 8" below), but the OTP
+email itself will not arrive.
 
 ## Price ingestion pipeline
 Israel's Food Act (2014) requires the major chains to publish real-time prices
@@ -275,11 +315,16 @@ and writes a row to `ingest_log`.
 ## Dev-mode auth bypass
 `AuthModal.tsx` shows a "Dev Login" button when `NODE_ENV=development`. It calls
 `POST /api/dev/login`, which get-or-creates a fixed test account
-(`dev@smartgrocery.local`) via `supabase.auth.admin.createUser` with
+(`dev@smartgrocery.local` / `DevLogin123!`) via `supabase.auth.admin.createUser` with
 `email_confirm: true`, upserts its `profiles` row, and returns credentials for the
 client to call `signInWithPassword` with. No email is ever sent by this path, and the
 route 404s outside development — use this instead of real signups when testing basket/
-profile/UI flows locally.
+profile/UI flows locally. Since this account lives on the same live Supabase project
+`.env.local` points at (not a separate local DB), its credentials also work via the
+regular sign-in form in production (where the Dev Login button itself is correctly
+hidden, per the 404 guard) — useful for testing the signed-in app end-to-end on
+`smart-grocery-il.vercel.app` without needing a working OTP email (see the SMTP
+gotcha above).
 
 ## Theme system (light/dark)
 **Phase 7 (2026-07-21) replaced the old 4-skin system** (`warm-rose`/`earth-slate`/
@@ -473,8 +518,21 @@ app themes without needing tokens there.
 - [x] `npx tsc --noEmit`, `npm run lint`, `npm run build` all clean;
       manually verified both themes across Home/AuthModal/drawer/Profile/
       Location in a real browser, including toggle persistence across reload
-- [ ] Not deployed — `vercel --prod` was not run this session (commits pushed
-      to `origin/main` only, by request)
+- [x] Deployed in Phase 8 — `vercel --prod` run 2026-07-21, live at
+      `https://smart-grocery-il.vercel.app` (see "Phase 8" below)
+
+**Phase 8 complete — production smoke-test fixes (2026-07-21):**
+- [x] Product catalog widened 218 → 9,648 (20 branch files instead of 3-5)
+- [x] Per-product price breakdown — verified already working
+- [x] Distance slider widened to a continuous 0.5-50km range
+- [x] Real branches seeded 8 → 428 via the Shufersal Stores feed (catID=5)
+- [x] Auth gate added — sign-in required, guest mode removed entirely
+- [x] Sign-up "red brackets" bug fixed (raw `"{}"` → real error message);
+      underlying SMTP delivery still broken, unresolved (see "Custom SMTP"
+      above)
+- [x] First production deploy — `vercel --prod`, live at
+      `https://smart-grocery-il.vercel.app`, all 5 fixes re-verified there
+- See "Phase 8" section below for full details on each
 
 ## Coding conventions
 - All components: functional, TypeScript strict
@@ -491,7 +549,8 @@ npm run build          # Production build
 npm run lint           # ESLint check
 npm run env:link       # Restore .env.local from ~/.config/smartgrocery/.env.local
 npm run ingest         # Run the price ingestion pipeline (see "Price ingestion pipeline")
-npm run seed:products  # Seed real products + prices from the Shufersal feed (Phase 5)
+npm run seed:products  # Seed real products + prices from the Shufersal feed (Phase 5/8)
+npm run seed:branches  # Seed real branches from the Shufersal Stores feed (Phase 8)
 npm run enrich:names   # Translate name_he -> name_en via claude-haiku-4-5 (needs ANTHROPIC_API_KEY)
 ```
 
@@ -638,10 +697,16 @@ lowest setup cost, no new infrastructure, and the repo is already on GitHub.
 ## Phase 6 — Deployment (in progress, 2026-07-21)
 
 ### Production URL
-`https://your-app.vercel.app` — placeholder until the first `vercel --prod`
-deploy. Update this line once real.
+**`https://smart-grocery-il.vercel.app`** — live as of Phase 8 (2026-07-21,
+first `vercel --prod` run). The project was already linked (`.vercel/` present,
+`vercel whoami` already authenticated) so deployment was a single command; no
+manual Vercel dashboard setup was needed this session beyond what's described
+below (already done previously).
 
-### Vercel deployment steps (manual — not run this session)
+### Vercel deployment steps
+`vercel --prod` was actually run for the first time in Phase 8 (2026-07-21,
+see below) — the steps below were done manually in an earlier session and are
+kept here for reference:
 1. `npm i -g vercel` (if not already installed)
 2. `vercel --prod` from the repo root, follow the prompts to link/create the
    project
@@ -724,3 +789,89 @@ Checked and found clean — no code changes needed:
   would add indirection without benefit. The WhatsApp support link's phone
   number (previously a `972500000000` all-zeros placeholder, flagged here as
   a follow-up) was updated to a real number in a later session.
+
+## Phase 8 — production smoke-test fixes (2026-07-21)
+Five issues found during a production smoke test, fixed and deployed in one
+session. Each landed as a separate commit; all verified in-browser on both
+localhost and production (`https://smart-grocery-il.vercel.app`).
+
+**1. Product catalog widened.** `scripts/seed-products-from-feed.ts` read only
+3-5 Shufersal branch files by default; bumped to 20 and switched from
+upsert-everything to insert-only-new-barcodes (skip existing, dedupe within
+the batch) so re-running it is additive and safe. 218 → 9,648 products (9,430
+new). Also stopped writing `price_history` for already-existing products on
+re-run — only new products get a price row now. See "Repo structure" and
+"Seeded data" above.
+
+**2. Per-product price breakdown — verified working, not touched.** The
+Phase-3 tap-to-expand breakdown in the comparison panel (`expandedPriceItemId`
+state in `page.tsx`) was fully intact; nothing to fix.
+
+**3. Distance slider widened.** Was a discrete 1/3/5/10 km stepper
+(`DISTANCE_OPTIONS` array + index-mapped `<input type="range">`); replaced
+with a plain continuous range: `min={0.5} max={50} step={0.5}`, default still
+5, displayed as `X.X ק"מ`/`X.X km` (`.toFixed(1)`). The `DISTANCE_OPTIONS`
+constant was removed as dead code. Filtering logic (`_distKm <= distanceKm`)
+didn't need to change.
+
+**4. Real branches seeded — see `scripts/seed-branches.ts` in "Repo
+structure" above.** Key discovery: the task's assumption that branch
+metadata lived in the PriceFull XML headers was wrong — those only contain
+`ChainID`/`SubChainID`/`StoreID`/`BikoretNo`, no name/address/city (confirmed
+by dumping a raw file). The real metadata lives in a separate feed category:
+Shufersal's `FileObject/UpdateCategory` listing endpoint takes a `catID` query
+param, and probing `catID=1` through `8` found `catID=5` returns exactly one
+`Stores*.gz` file per chain (`catID=1/6/7/8` all alias `Price`, `2` is
+`PriceFull`, `3` is `Promo`, `4` is `PromoFull`) shaped as
+`Chain > SubChains > SubChain > Stores > Store`, each with `StoreID`,
+`StoreName`, `Address`, `City`, `ZIPCode` — no `lat`/`lng`. 8 → 428 branches
+(420 new). **`City` is not a city name** — it's Israel's numeric government
+settlement code (סמל יישוב, e.g. `5000`), and there's no code→name lookup
+table in this repo, so it's stored as-is in `city_he` rather than guessed at
+(see "Seeded data" above for the UI impact — no map pin or GPS-distance match
+for these rows, since both need `lat`/`lng`).
+
+**5. Auth gate added, guest mode removed.** The app previously let anyone
+browse/search/basket without signing in. Now: a new `isAuthChecked` state
+gates the initial render (spinner) until `supabase.auth.getUser()` resolves;
+if there's no `currentUser`, the component early-returns a minimal screen with
+just the language toggle + a non-dismissable `<AuthModal dismissible={false}>`
+(new prop, hides the X button) instead of the full app. Signing in/up (or Dev
+Login) populates `currentUser` and the full app renders; signing out clears it
+and the gate reappears. Removed as dead code: the drawer's guest
+sign-in-button/ternary (currentUser is now always truthy inside the full-app
+render branch) and a second, now-unreachable `<AuthModal>` instance that used
+to sit at the bottom of the main return.
+  - **Bug caught during verification, not anticipated going in:** the gate's
+    full-screen `<AuthModal>` backdrop (`fixed inset-0 z-50`) sat in a higher
+    stacking context than the gate's own `<header>` (plain `position: static`,
+    so `z-index` was a no-op on it) — clicks on the visually-still-showing
+    language toggle behind the dimmed backdrop were silently swallowed by the
+    backdrop `div`, not reaching the button underneath. Fixed by adding
+    `relative z-[60]` to the gate's `<header>`. General lesson: a `fixed`
+    overlay always wins stacking over a `static` sibling regardless of DOM
+    order or visual dimming — anything meant to stay clickable "through" or
+    "above" a full-screen modal needs its own explicit position + z-index.
+
+**6. Sign-up "red brackets" bug — root cause found, one layer fixed.**
+Reported as a mystery red-bordered panel appearing after submitting sign-up.
+Reproduced directly: `AuthModal`'s error box was displaying the literal string
+`"{}"`. Root cause, traced into `@supabase/auth-js`'s `handleError()`
+(`node_modules/@supabase/auth-js/dist/module/lib/fetch.js`): for any 5xx
+response it throws `AuthRetryableFetchError(_getErrorMessage(error), ...)`
+where `error` is the **raw, unparsed** `fetch` `Response` object — never
+`await error.json()`'d in that branch — and `_getErrorMessage` falls through
+to `JSON.stringify(err)`, which for a `Response` object (no enumerable own
+properties) is exactly `"{}"`. `getErrorMessage()` in `AuthModal.tsx` now
+special-cases this via `isAuthRetryableFetchError()` (re-exported by
+`@supabase/supabase-js` from `auth-js`) and shows a real bilingual message
+instead. **The underlying trigger is the broken SMTP delivery described in
+"Custom SMTP (Resend)" above** — a Supabase/Resend Dashboard configuration
+issue, not fixable from application code, and still unresolved: every sign-up
+attempt this session got the same 500, so the fix here addresses the
+error-display bug, not the ability to actually complete a sign-up yet.
+
+**Verification:** `npx tsc --noEmit`, `npm run lint`, `npm run build` all
+clean. `vercel --prod` deployed successfully (first production deploy) and
+aliased to `https://smart-grocery-il.vercel.app`; all fixes re-verified live
+in production, not just localhost.
