@@ -336,7 +336,6 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
 }
 
 const LOCATION_PREF_KEY = 'sg_location_pref';
-const DISTANCE_OPTIONS = [1, 3, 5, 10] as const;
 
 // Price comparison bar for a single chain
 function ChainBar({ chain, total, maxTotal, isMin, lang }: {
@@ -1315,15 +1314,15 @@ export default function SmartGroceryDashboard() {
                   <span className="text-xs font-semibold text-[var(--color-text-secondary)] whitespace-nowrap">{t.distanceFilter}</span>
                   <input
                     type="range"
-                    min={0}
-                    max={DISTANCE_OPTIONS.length - 1}
-                    step={1}
-                    value={DISTANCE_OPTIONS.indexOf(distanceKm as typeof DISTANCE_OPTIONS[number])}
-                    onChange={(e) => setDistanceKm(DISTANCE_OPTIONS[Number(e.target.value)])}
+                    min={0.5}
+                    max={50}
+                    step={0.5}
+                    value={distanceKm}
+                    onChange={(e) => setDistanceKm(Number(e.target.value))}
                     className="w-40 accent-[var(--color-accent)]"
                   />
-                  <span className="font-mono text-sm text-[var(--color-accent)] shrink-0 w-14 text-end">
-                    {distanceKm} {lang === 'he' ? 'ק"מ' : 'km'}
+                  <span className="font-mono text-sm text-[var(--color-accent)] shrink-0 w-16 text-end">
+                    {distanceKm.toFixed(1)} {lang === 'he' ? 'ק"מ' : 'km'}
                   </span>
                 </div>
               ) : locationStatus === 'denied' ? (
