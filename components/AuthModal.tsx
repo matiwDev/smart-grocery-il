@@ -91,7 +91,6 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
             nickname: usernameInput.trim(),
             phone_number: phoneInput.trim(),
             avatar_url: 'https://res.cloudinary.com/djcksi74n/image/upload/v1782869112/Avatars_01_u3edkv.png',
-            selected_skin: 'warm-rose',
           });
           if (profileError) throw profileError;
 
@@ -182,7 +181,6 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
               nickname: usernameInput.trim(),
               phone_number: phoneInput.trim(),
               avatar_url: userProfile.avatar,
-              selected_skin: 'warm-rose'
             });
 
             if (profileError) throw profileError;
@@ -245,22 +243,22 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 border border-slate-800 shadow-2xl rounded-3xl w-full max-w-md overflow-hidden relative">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--color-bg-panel)] border border-[var(--color-border)] shadow-2xl rounded-3xl w-full max-w-md overflow-hidden relative">
         <button 
           onClick={() => setAuthMode('NONE')}
-          className="absolute top-4 end-4 text-slate-400 hover:text-white transition-colors p-3 -m-3"
+          className="absolute top-4 end-4 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors p-3 -m-3"
         >
           <X className="w-5 h-5" />
         </button>
         
         <div className="p-8">
-          <h2 className="text-2xl font-bold text-white mb-6 text-center">
+          <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-6 text-center">
             {authMode === 'SIGN_IN' ? t.authModalTitleIn : t.authModalTitleUp}
           </h2>
           
           {errorMsg && (
-            <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-3 rounded-xl mb-4 text-sm text-center">
+            <div className="bg-[var(--color-danger)]/10 border border-[var(--color-danger)]/20 text-[var(--color-danger)] p-3 rounded-xl mb-4 text-sm text-center">
               {errorMsg}
             </div>
           )}
@@ -270,7 +268,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
               type="button"
               onClick={handleDevLogin}
               disabled={isLoading}
-              className="w-full mb-4 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 border-dashed rounded-xl py-2.5 text-sm font-semibold transition-colors disabled:opacity-50"
+              className="w-full mb-4 bg-[var(--color-warning)]/10 hover:bg-[var(--color-warning)]/20 text-[var(--color-warning)] border border-[var(--color-warning)]/30 border-dashed rounded-xl py-2.5 text-sm font-semibold transition-colors disabled:opacity-50"
             >
               {isLoading ? '...' : '⚡ Dev Login (skips email, local only)'}
             </button>
@@ -278,12 +276,12 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
 
           {isVerifying ? (
             <form onSubmit={handleVerify} className="space-y-4 mt-6">
-              <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-3 rounded-xl mb-6 text-sm text-center font-medium">
+              <div className="bg-[var(--color-success)]/10 border border-[var(--color-success)]/20 text-[var(--color-success)] p-3 rounded-xl mb-6 text-sm text-center font-medium">
                 {verificationNotice}
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-slate-400 mb-1 text-center">
+                <label className="block text-sm font-medium text-[var(--color-text-muted)] mb-1 text-center">
                   {t.enterVerificationCode || "Enter 6-digit code"}
                 </label>
                 <input 
@@ -292,7 +290,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
                   maxLength={6}
                   value={verificationCode}
                   onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
-                  className="w-full text-center tracking-widest text-2xl font-mono min-h-[56px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                  className="w-full text-center tracking-widest text-2xl font-mono min-h-[56px] bg-[var(--color-bg-subtle)] border border-[var(--color-border)] rounded-xl px-4 py-3 text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] transition-all"
                   dir="ltr"
                 />
               </div>
@@ -300,7 +298,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
               <button 
                 type="submit"
                 disabled={isLoading || verificationCode.length !== 6}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors mt-6 shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+                className="w-full bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] font-bold py-3 rounded-xl transition-colors mt-6 shadow-lg shadow-[var(--color-accent)]/20 disabled:opacity-50"
               >
                 {isLoading ? '...' : (t.verify || 'Verify')}
               </button>
@@ -309,7 +307,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
             <form onSubmit={handleSubmit} className="space-y-4">
               {authMode === 'SIGN_UP' && (
                  <div>
-                   <label className="block text-sm font-medium text-slate-400 mb-1">
+                   <label className="block text-sm font-medium text-[var(--color-text-muted)] mb-1">
                      {t.nicknameLabel}
                    </label>
                    <input 
@@ -317,47 +315,47 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
                      required
                      value={usernameInput}
                      onChange={(e) => setUsernameInput(e.target.value)}
-                     className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                     className="w-full min-h-[44px] bg-[var(--color-bg-subtle)] border border-[var(--color-border)] rounded-xl px-4 py-3 text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] transition-all"
                      dir="auto"
                    />
                  </div>
               )}
               
               <div>
-                <label className="block text-sm font-medium text-slate-400 mb-1">{t.emailLabel}</label>
+                <label className="block text-sm font-medium text-[var(--color-text-muted)] mb-1">{t.emailLabel}</label>
                 <input 
                   type="email" 
                   required
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
-                  className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                  className="w-full min-h-[44px] bg-[var(--color-bg-subtle)] border border-[var(--color-border)] rounded-xl px-4 py-3 text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] transition-all"
                   dir="ltr"
                 />
               </div>
               
               {authMode === 'SIGN_UP' && (
                  <div>
-                   <label className="block text-sm font-medium text-slate-400 mb-1">{t.phoneLabel}</label>
+                   <label className="block text-sm font-medium text-[var(--color-text-muted)] mb-1">{t.phoneLabel}</label>
                    <input 
                      type="tel" 
                      required
                      placeholder={t.phonePlaceholder}
                      value={phoneInput}
                      onChange={(e) => setPhoneInput(e.target.value)}
-                     className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                     className="w-full min-h-[44px] bg-[var(--color-bg-subtle)] border border-[var(--color-border)] rounded-xl px-4 py-3 text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] transition-all"
                      dir="ltr"
                    />
                  </div>
               )}
               
               <div>
-                <label className="block text-sm font-medium text-slate-400 mb-1">{t.passwordLabel}</label>
+                <label className="block text-sm font-medium text-[var(--color-text-muted)] mb-1">{t.passwordLabel}</label>
                 <input 
                   type="password" 
                   required
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
-                  className="w-full min-h-[44px] bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+                  className="w-full min-h-[44px] bg-[var(--color-bg-subtle)] border border-[var(--color-border)] rounded-xl px-4 py-3 text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] transition-all"
                   dir="ltr"
                 />
               </div>
@@ -365,7 +363,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
               <button 
                 type="submit"
                 disabled={isLoading}
-                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors mt-6 shadow-lg shadow-indigo-500/20 disabled:opacity-50"
+                className="w-full bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] font-bold py-3 rounded-xl transition-colors mt-6 shadow-lg shadow-[var(--color-accent)]/20 disabled:opacity-50"
               >
                 {isLoading ? '...' : t.submit}
               </button>
@@ -378,7 +376,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t }: AuthModal
                 setAuthMode(authMode === 'SIGN_IN' ? 'SIGN_UP' : 'SIGN_IN');
                 setErrorMsg('');
               }}
-              className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors font-medium"
+              className="text-sm text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition-colors font-medium"
             >
               {authMode === 'SIGN_IN' ? t.switchToSignUp : t.switchToSignIn}
             </button>

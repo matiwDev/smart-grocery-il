@@ -33,7 +33,7 @@ interface ComparisonResult {
 interface BranchMapContainerProps {
   city: string;
   lang: string;
-  skin: string;
+  theme: 'light' | 'dark';
   liveBranches: LiveBranch[];
   activeMapPin: string;
   setActiveMapPin: (id: string) => void;
@@ -44,7 +44,11 @@ interface BranchMapContainerProps {
   t: Dictionary;
 }
 
-const COST_COLORS = { cheap: '#10b981', mid: '#f59e0b', expensive: '#ef4444' } as const;
+const COST_COLORS = {
+  cheap: 'var(--color-success)',
+  mid: 'var(--color-warning)',
+  expensive: 'var(--color-danger)',
+} as const;
 
 // Rank each chain present in `comparison` by basket total: cheapest -> green,
 // most expensive -> red, everything in between -> amber.
@@ -63,7 +67,7 @@ function buildCostRanking(comparison: ComparisonResult[] | undefined) {
   return { colorByChain, totalByChain };
 }
 
-export function BranchMapContainer({ city, lang, liveBranches, activeMapPin, setActiveMapPin, preferredChainId, comparison, userPosition, youAreHereLabel, t }: BranchMapContainerProps) {
+export function BranchMapContainer({ city, lang, theme, liveBranches, activeMapPin, setActiveMapPin, preferredChainId, comparison, userPosition, youAreHereLabel, t }: BranchMapContainerProps) {
   const sortedBranches = preferredChainId
     ? liveBranches.slice().sort((a, b) => (a.chain_id === preferredChainId ? -1 : 0) - (b.chain_id === preferredChainId ? -1 : 0))
     : liveBranches;
@@ -72,9 +76,9 @@ export function BranchMapContainer({ city, lang, liveBranches, activeMapPin, set
 
   return (
     <div className="flex-1 w-full flex flex-col lg:flex-row gap-6 text-start h-full mt-6">
-      <div className="w-full lg:w-2/3 bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-3xl p-2 h-[70vh] lg:h-auto lg:min-h-[500px] relative overflow-hidden flex flex-col shadow-xl">
+      <div className="w-full lg:w-2/3 bg-[var(--color-bg-panel)]/60 backdrop-blur-xl border border-[var(--color-border)] rounded-3xl p-2 h-[70vh] lg:h-auto lg:min-h-[500px] relative overflow-hidden flex flex-col shadow-xl">
         <div className="absolute top-6 start-6 end-6 flex justify-between items-start pointer-events-none z-[400]">
-          <div className="bg-slate-950/80 backdrop-blur-md px-4 py-2 rounded-xl border border-slate-700/50 text-sm font-bold text-slate-200 pointer-events-auto shadow-xl">
+          <div className="bg-[var(--color-bg-subtle)]/80 backdrop-blur-md px-4 py-2 rounded-xl border border-[var(--color-border)]/50 text-sm font-bold text-[var(--color-text-primary)] pointer-events-auto shadow-xl">
             {t.currentGpsLocation} - {city}
           </div>
         </div>
@@ -83,6 +87,7 @@ export function BranchMapContainer({ city, lang, liveBranches, activeMapPin, set
           branches={liveBranches}
           activeMapPin={activeMapPin}
           setActiveMapPin={setActiveMapPin}
+          theme={theme}
           quickNavigateLabel={t.quickNavigate}
           costColorByChain={colorByChain}
           costTotalByChain={totalByChain}
@@ -97,27 +102,27 @@ export function BranchMapContainer({ city, lang, liveBranches, activeMapPin, set
            <div
              key={b.id}
              onClick={() => setActiveMapPin(b.id)}
-             className={`bg-slate-900/60 backdrop-blur-xl border ${activeMapPin === b.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-800'} rounded-3xl p-5 flex flex-col gap-4 shadow-xl hover:bg-slate-900 transition-colors shrink-0 cursor-pointer`}
+             className={`bg-[var(--color-bg-panel)]/60 backdrop-blur-xl border ${activeMapPin === b.id ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10' : 'border-[var(--color-border)]'} rounded-3xl p-5 flex flex-col gap-4 shadow-xl hover:bg-[var(--color-bg-panel)] transition-colors shrink-0 cursor-pointer`}
            >
              <div className="flex items-center gap-4">
                <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: colorByChain[b.chain_id] ?? b.color_hex }} />
                <div className="flex-1">
-                 <h4 className="font-bold text-slate-200">{b.name}</h4>
-                 <p className="text-xs text-slate-400 mt-0.5">{b.desc}</p>
+                 <h4 className="font-bold text-[var(--color-text-primary)]">{b.name}</h4>
+                 <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{b.desc}</p>
                </div>
                {totalByChain[b.chain_id] !== undefined && (
-                 <span className="text-xs font-mono text-slate-300 shrink-0">₪{totalByChain[b.chain_id].toFixed(2)}</span>
+                 <span className="text-xs font-mono text-[var(--color-text-secondary)] shrink-0">₪{totalByChain[b.chain_id].toFixed(2)}</span>
                )}
                {preferredChainId && b.chain_id === preferredChainId && (
-                 <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2 py-1 rounded-full shrink-0">
+                 <span className="flex items-center gap-1 text-[10px] font-bold text-[var(--color-success)] bg-[var(--color-success)]/10 border border-[var(--color-success)]/20 px-2 py-1 rounded-full shrink-0">
                    <Tag className="w-3 h-3" /> {lang === 'he' ? 'הכי זול' : 'Cheapest'}
                  </span>
                )}
              </div>
 
-             <div className="flex items-center justify-between border-t border-slate-800/80 pt-4">
-               <div className="flex items-center gap-1.5 text-slate-300">
-                 <Navigation className="w-4 h-4 text-emerald-400" />
+             <div className="flex items-center justify-between border-t border-[var(--color-border)]/80 pt-4">
+               <div className="flex items-center gap-1.5 text-[var(--color-text-secondary)]">
+                 <Navigation className="w-4 h-4 text-[var(--color-success)]" />
                  <span className="font-mono text-sm">{b.dist}</span>
                </div>
 
@@ -125,7 +130,7 @@ export function BranchMapContainer({ city, lang, liveBranches, activeMapPin, set
                 href={b.mapsLink}
                 target="_blank"
                 rel="noreferrer"
-                className="bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 px-4 py-2 rounded-xl text-sm font-semibold transition-colors border border-indigo-500/20 text-center min-h-[44px] flex items-center"
+                className="bg-[var(--color-accent)]/10 hover:bg-[var(--color-accent)]/20 text-[var(--color-accent)] px-4 py-2 rounded-xl text-sm font-semibold transition-colors border border-[var(--color-accent)]/20 text-center min-h-[44px] flex items-center"
                >
                  {t.quickNavigate}
                </a>
