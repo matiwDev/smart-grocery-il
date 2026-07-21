@@ -6,10 +6,20 @@ export const metadata: Metadata = {
   description: 'My Google AI Studio App',
 };
 
+const THEME_INIT_SCRIPT = `
+  try {
+    var theme = localStorage.getItem('sg_theme');
+    if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  } catch (e) {}
+`;
+
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
-    <html lang="he" dir="rtl">
-      <body className="bg-slate-950 text-slate-50 antialiased" suppressHydrationWarning>{children}</body>
+    <html lang="he" dir="rtl" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
+      <body className="antialiased" suppressHydrationWarning>{children}</body>
     </html>
   );
 }
