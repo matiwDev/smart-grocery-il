@@ -230,6 +230,7 @@ const DICTIONARY = {
     pricePerUnit: 'ליח׳',
     scanTitle: 'סריקת ברקוד',
     scanSubtitle: 'סרקו מוצר להשוואת מחירים מיידית',
+    scanStartCamera: 'הפעל מצלמה',
     scanManualLabel: 'הזינו ברקוד ידנית',
     scanManualPlaceholder: 'מספר ברקוד...',
     scanAddToBasket: 'הוסף לסל',
@@ -345,6 +346,7 @@ const DICTIONARY = {
     pricePerUnit: '/ unit',
     scanTitle: 'Barcode Scanner',
     scanSubtitle: 'Scan a product for instant price comparison',
+    scanStartCamera: 'Start Camera',
     scanManualLabel: 'Enter barcode manually',
     scanManualPlaceholder: 'Barcode number...',
     scanAddToBasket: 'Add to basket',
@@ -802,9 +804,12 @@ export default function SmartGroceryDashboard() {
 
   // Scan view: live camera barcode scanner
   const [cameraStatus, setCameraStatus] = useState<'idle' | 'granted' | 'denied' | 'unavailable'>('idle');
-  const [scanStage, setScanStage] = useState<'scanning' | 'looking-up' | 'found' | 'not-found'>('scanning');
+  // 'idle' = not started yet (Start Camera button shown) — the camera is only
+  // ever requested from a direct tap on that button, never on mount.
+  const [scanStage, setScanStage] = useState<'idle' | 'scanning' | 'looking-up' | 'found' | 'not-found'>('idle');
   const [scannedProduct, setScannedProduct] = useState<ProductResult | null>(null);
   const [lastScannedBarcode, setLastScannedBarcode] = useState<string | null>(null);
+  const [hasCameraSupport, setHasCameraSupport] = useState(true);
   const scanVideoRef = useRef<HTMLVideoElement>(null);
   const scanControlsRef = useRef<IScannerControls | null>(null);
   const hasHandledScanRef = useRef(false);
@@ -1258,22 +1263,42 @@ export default function SmartGroceryDashboard() {
     }
   }, []);
 
-  // Resets scan state and re-mounts the viewfinder, which re-triggers the
-  // camera-start effect below (keyed on scanStage).
+  // Resets scan state back to the pre-camera 'idle' stage (Start Camera
+  // button) rather than immediately restarting the stream — mirrors the
+  // "explicit tap only" rule below, so a re-scan never auto-starts either.
   const handleScanAgain = () => {
     setScannedProduct(null);
     setLastScannedBarcode(null);
+    setScanStage('idle');
+  };
+
+  // Detects camera-API support once on mount, so the idle-stage UI can show
+  // a plain "camera not available" note instead of a Start Camera button
+  // that would just fail (e.g. desktop with no getUserMedia/no device).
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setHasCameraSupport(false);
+    }
+  }, []);
+
+  // The ONLY way scanStage becomes 'scanning' — always a direct result of the
+  // user tapping "Start Camera" (or "Try again" from the denied state). Never
+  // triggered by mounting the Scan tab or by any effect on its own.
+  const handleStartScan = () => {
+    hasHandledScanRef.current = false;
+    setCameraStatus('idle');
     setScanStage('scanning');
   };
 
-  // Starts (or restarts) the live decode loop whenever the Scan tab is active
-  // and we're in the 'scanning' stage; tears the camera down otherwise (tab
-  // change, or a result was found and the viewfinder is hidden).
+  // Starts the live decode loop once the Scan tab is active AND we're in the
+  // 'scanning' stage (only reachable via handleStartScan, a real tap — see
+  // above); tears the camera down otherwise (tab change, scan-again, or a
+  // result was found and the viewfinder is hidden).
   useEffect(() => {
     if (currentView !== 'SCAN') {
       scanControlsRef.current?.stop();
       scanControlsRef.current = null;
-      setScanStage('scanning');
+      setScanStage('idle');
       setScannedProduct(null);
       setLastScannedBarcode(null);
       hasHandledScanRef.current = false;
@@ -1281,7 +1306,7 @@ export default function SmartGroceryDashboard() {
     }
 
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-      setCameraStatus('unavailable');
+      if (scanStage === 'scanning') setCameraStatus('unavailable');
       return;
     }
 
@@ -2135,6 +2160,28 @@ export default function SmartGroceryDashboard() {
               <p className="text-[var(--color-text-muted)] text-sm">{t.scanSubtitle}</p>
             </div>
 
+            {/* Idle: camera not started yet — requires an explicit tap. Never
+                auto-starts on mount, since getUserMedia calls with no
+                preceding user gesture are what iOS Safari/Android Chrome
+                silently block. */}
+            {scanStage === 'idle' && (
+              <div className="relative w-full aspect-[3/4] max-h-[420px] bg-black rounded-3xl overflow-hidden border border-[var(--color-border)] shadow-xl">
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6 text-center bg-[var(--color-bg-panel)]">
+                  <Camera className="w-10 h-10 text-[var(--color-text-muted)]" />
+                  {hasCameraSupport ? (
+                    <button
+                      onClick={handleStartScan}
+                      className="min-h-[44px] px-6 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-xl font-semibold transition-colors shadow-lg shadow-[var(--color-accent)]/20"
+                    >
+                      {t.scanStartCamera}
+                    </button>
+                  ) : (
+                    <p className="text-sm text-[var(--color-text-secondary)]">{t.scanNoCameraMsg}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Live camera viewfinder — shown only while actively scanning */}
             {scanStage === 'scanning' && (
               <div className="relative w-full aspect-[3/4] max-h-[420px] bg-black rounded-3xl overflow-hidden border border-[var(--color-border)] shadow-xl">
@@ -2143,7 +2190,7 @@ export default function SmartGroceryDashboard() {
                     <VideoOff className="w-10 h-10 text-[var(--color-text-muted)]" />
                     <p className="text-sm text-[var(--color-text-secondary)]">{t.scanCameraDeniedMsg}</p>
                     <button
-                      onClick={handleScanAgain}
+                      onClick={handleStartScan}
                       className="min-h-[44px] px-5 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-xl font-semibold transition-colors"
                     >
                       {t.scanEnableCamera}
