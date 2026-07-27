@@ -1007,7 +1007,7 @@ export default function SmartGroceryDashboard() {
       dir={lang === 'he' ? 'rtl' : 'ltr'}
     >
       {/* ── Header ── */}
-      <header className="sticky top-0 z-40 flex flex-col md:flex-row items-start md:items-center justify-between mb-6 gap-4 py-4 -mx-4 px-4 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8 bg-[var(--color-bg-base)]">
+      <header className="sticky top-0 z-40 flex flex-col md:flex-row items-start md:items-center justify-between mb-6 gap-4 py-4 -mx-4 px-4 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8 bg-[var(--color-bg-base)] border-b border-[var(--color-border)]">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 bg-[var(--color-accent)] rounded-xl flex items-center justify-center text-[var(--color-accent-text)] font-bold shadow-lg shadow-[var(--color-accent)]/20 shrink-0">
             <ShoppingCart className="w-5 h-5" />
