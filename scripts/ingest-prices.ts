@@ -17,6 +17,12 @@
  */
 import { restFetch, fetchWithRetry, chunk, refreshLatestPrices } from './supabase-rest';
 import { fetchShufersalFileLinks, fetchAndParseShufersalFile } from './shufersal-feed';
+import { ParsedProduct } from './parsers/types';
+import { fetchAndParse as fetchAndParseVictory } from './parsers/victory';
+import { fetchAndParse as fetchAndParseMahsaneiHashuk } from './parsers/mahsanei-hashuk';
+import { fetchAndParse as fetchAndParseYohananof } from './parsers/yohananof';
+import { fetchAndParse as fetchAndParseOsherAd } from './parsers/osher-ad';
+import { fetchAndParse as fetchAndParseKeshetTeamim } from './parsers/keshet-teamim';
 
 // How many per-branch Shufersal files to download and parse in one run.
 // The public listing has one PriceFull file per branch (hundreds of them);
@@ -236,6 +242,57 @@ async function ingestRamiLevy(): Promise<IngestResult> {
   return result;
 }
 
+// ─── Phase 11 chains (Victory, Mahsanei Hashuk, Yohananof, Osher Ad, Keshet
+// Teamim) ────────────────────────────────────────────────────────────────
+// All five publish the same Food Act XML schema as Shufersal (confirmed by
+// probing each live feed — see CLAUDE.md "Phase 11"), so their parsers
+// (scripts/parsers/*.ts) all reduce to one fetchAndParse(): ParsedProduct[]
+// shape and share this single ingest wrapper instead of five near-duplicates
+// of ingestShufersal(). Note: Yohananof, Osher Ad, and Keshet Teamim fetch
+// over real FTP (not HTTPS) — this works from the GitHub Actions daily
+// workflow and from local runs, but outbound FTP is not reliably available
+// from Vercel's serverless functions, so these three will likely fail (and
+// log to ingest_log, without blocking the other chains) if ever triggered
+// through the GET /api/prices/ingest cron route instead of `npm run ingest`.
+
+async function ingestFromParser(chainId: string, fetchAndParse: () => Promise<ParsedProduct[]>): Promise<IngestResult> {
+  const startedAt = new Date().toISOString();
+  let fetched = 0;
+  let matched = 0;
+  let inserted = 0;
+  let errorText: string | null = null;
+
+  try {
+    console.log(`\n[${chainId}] Fetching feed...`);
+    const products = await fetchAndParse();
+    fetched = products.length;
+    console.log(`[${chainId}] Fetched ${fetched} items`);
+
+    const items: FeedItem[] = products.map((p) => ({
+      barcode: p.barcode,
+      price: p.price,
+      unitQty: p.unit_qty ?? 1,
+      unitType: p.unit_type ?? 'unit',
+      isSale: false,
+    }));
+
+    console.log(`[${chainId}] Matching ${fetched} fetched items against products.barcode...`);
+    const result = await matchAndInsert(chainId, items);
+    matched = result.matched;
+    inserted = result.inserted;
+
+    console.log(`[${chainId}] Refreshing latest_prices...`);
+    await refreshLatestPrices();
+  } catch (err) {
+    errorText = err instanceof Error ? err.message : String(err);
+    console.error(`[${chainId}] ERROR: ${errorText}`);
+  }
+
+  const result: IngestResult = { chainId, fetched, matched, inserted, errorText };
+  await writeIngestLog(result, startedAt);
+  return result;
+}
+
 // ─── Entry point ────────────────────────────────────────────────────────────
 
 // Shared by scripts/run-ingest-cli.ts (`npm run ingest`) and by the GET
@@ -244,5 +301,10 @@ export async function runIngestion(): Promise<IngestResult[]> {
   const results: IngestResult[] = [];
   results.push(await ingestShufersal());
   results.push(await ingestRamiLevy());
+  results.push(await ingestFromParser('victory', fetchAndParseVictory));
+  results.push(await ingestFromParser('mahsanei_hashuk', fetchAndParseMahsaneiHashuk));
+  results.push(await ingestFromParser('yohananof', fetchAndParseYohananof));
+  results.push(await ingestFromParser('osher_ad', fetchAndParseOsherAd));
+  results.push(await ingestFromParser('keshet_teamim', fetchAndParseKeshetTeamim));
   return results;
 }
