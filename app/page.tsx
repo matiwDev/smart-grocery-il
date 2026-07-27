@@ -3,10 +3,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ShoppingCart, ExternalLink, TrendingDown,
-  LogOut, Globe, User, X, Menu, Home, List, Users, Search,
+  LogOut, Globe, User, X, Home, List, Users, Search,
   MapPin, Trash2, Navigation, ChevronDown,
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   ArrowDown, Loader2, Bell, Copy, UserPlus, Sun, Moon,
+  ScanBarcode, Camera, Ticket, Check, Mail,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BranchMapContainer } from '@/components/BranchMapContainer';
@@ -205,6 +206,33 @@ const DICTIONARY = {
     locationDenied: 'הגישה למיקום נדחתה',
     distanceFilter: 'טווח מרחק',
     searchByCity: 'חפש לפי עיר',
+    // Phase 8 UX overhaul
+    aboutTitle: 'Smart Grocery IL',
+    aboutTagline: 'חסכו יותר בכל קנייה',
+    aboutVersion: 'גרסה',
+    close: 'סגירה',
+    notifications: 'התראות',
+    navScan: 'סריקה', navCoupons: 'קופונים',
+    chainsLabel: 'רשתות להשוואה',
+    maxChainsToast: 'ניתן לבחור עד 4 רשתות',
+    pricePerUnit: 'ליח׳',
+    scanTitle: 'סריקת ברקוד',
+    scanSubtitle: 'סרקו מוצר להשוואת מחירים מיידית',
+    comingSoon: 'בקרוב',
+    scanManualLabel: 'הזינו ברקוד ידנית',
+    scanManualPlaceholder: 'מספר ברקוד...',
+    search: 'חיפוש',
+    couponsTitle: 'קופונים והנחות',
+    couponsSubtitle: 'בקרוב...',
+    couponsNotifyMe: 'קבלו התראה כשקופונים יושקו',
+    couponsEmailPlaceholder: 'כתובת אימייל',
+    couponsJoinButton: 'הצטרפו לרשימת ההמתנה',
+    couponsJoined: 'תודה! נעדכן אתכם.',
+    couponsError: 'שגיאה, נסו שוב',
+    profileSheetTitle: 'פרופיל',
+    theme: 'ערכת נושא', language: 'שפה',
+    lightMode: 'בהיר', darkMode: 'כהה',
+    more: 'עוד',
   },
   en: {
     appTitle: 'Smart Grocery IL',
@@ -285,6 +313,33 @@ const DICTIONARY = {
     locationDenied: 'Location access denied',
     distanceFilter: 'Distance',
     searchByCity: 'Search by city',
+    // Phase 8 UX overhaul
+    aboutTitle: 'Smart Grocery IL',
+    aboutTagline: 'Save more on every shop',
+    aboutVersion: 'Version',
+    close: 'Close',
+    notifications: 'Notifications',
+    navScan: 'Scan', navCoupons: 'Coupons',
+    chainsLabel: 'Chains to compare',
+    maxChainsToast: 'Maximum 4 chains selected',
+    pricePerUnit: '/ unit',
+    scanTitle: 'Barcode Scanner',
+    scanSubtitle: 'Scan a product for instant price comparison',
+    comingSoon: 'Coming Soon',
+    scanManualLabel: 'Enter barcode manually',
+    scanManualPlaceholder: 'Barcode number...',
+    search: 'Search',
+    couponsTitle: 'Coupons & Discounts',
+    couponsSubtitle: 'Coming soon...',
+    couponsNotifyMe: 'Get notified when coupons launch',
+    couponsEmailPlaceholder: 'Email address',
+    couponsJoinButton: 'Join the waitlist',
+    couponsJoined: 'Thanks! We\'ll keep you posted.',
+    couponsError: 'Something went wrong, try again',
+    profileSheetTitle: 'Profile',
+    theme: 'Theme', language: 'Language',
+    lightMode: 'Light', darkMode: 'Dark',
+    more: 'More',
   },
 };
 
@@ -384,6 +439,7 @@ export default function SmartGroceryDashboard() {
   const [isEditingCredentials, setIsEditingCredentials] = useState(false);
   const [verificationFlash, setVerificationFlash] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
 
   // Household invite state
   const [household, setHousehold] = useState<{ id: string; name: string; invite_code: string | null } | null>(null);
@@ -1006,55 +1062,56 @@ export default function SmartGroceryDashboard() {
       className="w-full min-h-screen flex flex-col font-sans p-4 md:p-6 lg:p-8 overflow-x-clip relative transition-colors duration-300 bg-[var(--color-bg-base)] text-[var(--color-text-primary)]"
       dir={lang === 'he' ? 'rtl' : 'ltr'}
     >
-      {/* ── Header ── */}
-      <header className="sticky top-0 z-40 flex flex-col md:flex-row items-start md:items-center justify-between mb-6 gap-4 py-4 -mx-4 px-4 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8 bg-[var(--color-bg-base)] border-b border-[var(--color-border)]">
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 bg-[var(--color-accent)] rounded-xl flex items-center justify-center text-[var(--color-accent-text)] font-bold shadow-lg shadow-[var(--color-accent)]/20 shrink-0">
-            <ShoppingCart className="w-5 h-5" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold text-[var(--color-text-primary)]">{t.appTitle}</h1>
-            <p className="text-xs text-[var(--color-text-muted)] font-medium">{t.envLabel}</p>
-          </div>
-        </div>
+      {/* ── Header: compact icon row ── */}
+      <header className="sticky top-0 z-40 flex items-center justify-between gap-2 py-3 -mx-4 px-4 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8 bg-[var(--color-bg-base)] border-b border-[var(--color-border)]">
+        <button
+          onClick={() => setIsAboutOpen(true)}
+          aria-label={t.aboutTitle}
+          className="w-11 h-11 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] rounded-xl flex items-center justify-center text-[var(--color-accent-text)] shadow-lg shadow-[var(--color-accent)]/20 transition-colors shrink-0"
+        >
+          <ShoppingCart className="w-7 h-7" />
+        </button>
 
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex-1" />
+
+        <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => setLang((l) => l === 'he' ? 'en' : 'he')}
-            className="flex items-center gap-2 bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] transition-colors px-3 rounded-full border border-[var(--color-border)] text-xs font-semibold text-[var(--color-text-primary)] min-h-[44px]"
+            aria-label="EN/HE"
+            className="w-11 h-11 flex items-center justify-center bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] transition-colors rounded-full border border-[var(--color-border)] text-[var(--color-accent)]"
           >
-            <Globe className="w-4 h-4 text-[var(--color-accent)]" />
-            {lang === 'he' ? 'EN' : 'עברית'}
+            <Globe className="w-5 h-5" />
           </button>
 
           <button
             onClick={toggleTheme}
             aria-label={theme === 'dark' ? (lang === 'he' ? 'עבור למצב בהיר' : 'Switch to light mode') : (lang === 'he' ? 'עבור למצב כהה' : 'Switch to dark mode')}
-            className="flex items-center justify-center w-11 h-11 bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] transition-colors rounded-full border border-[var(--color-border)] text-[var(--color-accent)]"
+            className="w-11 h-11 flex items-center justify-center bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] transition-colors rounded-full border border-[var(--color-border)] text-[var(--color-accent)]"
           >
             {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
           </button>
 
-          <div className="flex items-center gap-3 border-s border-[var(--color-border)] ps-4">
-            <div className="text-start hidden sm:block">
-              <p className="text-sm font-bold text-[var(--color-text-primary)]">{currentUser ? currentUser.nickname : t.guest}</p>
-              <p className="text-[10px] text-[var(--color-text-muted)] uppercase tracking-wider">{currentUser ? t.roleBuyer : t.roleGuest}</p>
-            </div>
-            <div className="w-10 h-10 rounded-full bg-[var(--color-bg-subtle)] border-2 border-[var(--color-border)] overflow-hidden flex items-center justify-center">
-              {currentUser?.avatar ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={currentUser.avatar} alt="Avatar" className="w-full h-full object-cover" />
-              ) : (
-                <User className="w-5 h-5 text-[var(--color-text-muted)]" />
-              )}
-            </div>
-          </div>
+          <button
+            aria-label={t.notifications}
+            className="relative w-11 h-11 flex items-center justify-center bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] transition-colors rounded-full border border-[var(--color-border)] text-[var(--color-accent)]"
+          >
+            <Bell className="w-5 h-5" />
+            {Object.keys(priceAlerts).length > 0 && (
+              <span className="absolute top-2 end-2 w-2 h-2 rounded-full bg-[var(--color-danger)]" />
+            )}
+          </button>
 
           <button
             onClick={() => setIsDrawerOpen(true)}
-            className="w-11 h-11 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] rounded-xl flex items-center justify-center text-[var(--color-accent-text)] shadow-lg shadow-[var(--color-accent)]/20 transition-colors"
+            aria-label={t.navProfile}
+            className="w-11 h-11 rounded-full bg-[var(--color-bg-subtle)] border-2 border-[var(--color-border)] overflow-hidden flex items-center justify-center shrink-0"
           >
-            <Menu className="w-5 h-5" />
+            {currentUser?.avatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={currentUser.avatar} alt="Avatar" className="w-full h-full object-cover" />
+            ) : (
+              <User className="w-5 h-5 text-[var(--color-text-muted)]" />
+            )}
           </button>
         </div>
       </header>
@@ -1693,6 +1750,33 @@ export default function SmartGroceryDashboard() {
                   </div>
                   <ExternalLink className="w-4 h-4 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-primary)]" />
                 </a>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── About sheet ── */}
+      <AnimatePresence>
+        {isAboutOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setIsAboutOpen(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative bg-[var(--color-bg-panel)] border border-[var(--color-border)] shadow-2xl rounded-3xl w-full max-w-sm overflow-hidden text-center">
+              <div className="p-8 flex flex-col items-center gap-3">
+                <div className="w-14 h-14 bg-[var(--color-accent)] rounded-2xl flex items-center justify-center text-[var(--color-accent-text)] shadow-lg shadow-[var(--color-accent)]/20">
+                  <ShoppingCart className="w-7 h-7" />
+                </div>
+                <h2 className="text-xl font-bold text-[var(--color-text-primary)]">{t.aboutTitle}</h2>
+                <p className="text-sm text-[var(--color-text-muted)]">{t.aboutTagline}</p>
+                <p className="text-xs text-[var(--color-text-muted)] font-mono mt-2">{t.aboutVersion} 1.0.0</p>
+                <button
+                  onClick={() => setIsAboutOpen(false)}
+                  className="mt-4 w-full min-h-[44px] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] border border-[var(--color-border)] rounded-xl font-semibold transition-colors"
+                >
+                  {t.close}
+                </button>
               </div>
             </motion.div>
           </div>
