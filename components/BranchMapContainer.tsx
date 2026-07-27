@@ -72,7 +72,10 @@ export function BranchMapContainer({ city, theme, liveBranches, activeMapPin, se
   const { colorByChain, totalByChain } = buildCostRanking(comparison);
 
   return (
-    <div className="relative w-full h-full">
+    // No h-full here: the parent (app/page.tsx's LOCATION map slot) is a flex
+    // container specifically so this stretches to fill it — a percentage height
+    // wouldn't resolve against a block-display flex-grown parent. See page.tsx.
+    <div className="relative w-full flex-1 min-h-0">
       {/* Only shown once we actually have a GPS fix — avoids colliding with the
           city-search overlay (top-end), which only renders when GPS was denied. */}
       {userPosition && (

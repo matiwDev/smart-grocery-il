@@ -1914,8 +1914,13 @@ export default function SmartGroceryDashboard() {
               />
             </div>
 
-            {/* Map fills all remaining space down to the bottom nav */}
-            <div className="flex-1 min-h-0 relative -mx-4 md:-mx-6 lg:-mx-8">
+            {/* Map fills all remaining space down to the bottom nav. `flex` (not a
+                percentage height) is deliberate: BranchMapContainer's child chain
+                relies on flex stretch to get a definite height — a `h-full` child of
+                a `display:block` flex-grown parent never resolves (Leaflet's panes are
+                all `position:absolute`, so the box has no in-flow content to give it an
+                auto height, and the percentage falls back to 0). See BranchMapContainer.tsx. */}
+            <div className="flex-1 min-h-0 relative -mx-4 md:-mx-6 lg:-mx-8 flex">
               <BranchMapContainer
                 city={t.telAviv}
                 lang={lang}
