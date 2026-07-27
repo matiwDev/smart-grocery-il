@@ -38,10 +38,7 @@ function toArray<T>(value: T | T[] | undefined): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
-export async function fetchShufersalFileLinks(): Promise<string[]> {
-  const res = await fetchWithRetry(SHUFERSAL_LISTING_URL);
-  if (!res.ok) throw new Error(`Shufersal listing fetch failed: HTTP ${res.status}`);
-  const html = await res.text();
+function extractFileLinks(html: string): string[] {
   const linkPattern = /href="(https:\/\/pricesprodpublic\.blob\.core\.windows\.net\/pricefull\/[^"]+)"/g;
   const links = new Set<string>();
   let match: RegExpExecArray | null;
@@ -49,6 +46,33 @@ export async function fetchShufersalFileLinks(): Promise<string[]> {
     links.add(match[1].replace(/&amp;/g, '&'));
   }
   return [...links];
+}
+
+export async function fetchShufersalFileLinks(): Promise<string[]> {
+  const res = await fetchWithRetry(SHUFERSAL_LISTING_URL);
+  if (!res.ok) throw new Error(`Shufersal listing fetch failed: HTTP ${res.status}`);
+  return extractFileLinks(await res.text());
+}
+
+// The listing page is paginated (~20 branch files/page) — confirmed live: page 1's
+// pager links go up to a ">>" jump straight to the last page number, which this
+// parses out. Used by seed-products-from-feed.ts to walk every branch file
+// instead of just the first page.
+export async function fetchShufersalTotalPages(): Promise<number> {
+  const res = await fetchWithRetry(`${SHUFERSAL_LISTING_URL}&page=1`);
+  if (!res.ok) throw new Error(`Shufersal listing fetch failed: HTTP ${res.status}`);
+  const html = await res.text();
+  // Note: the page's own href values are HTML-entity-encoded (`&amp;page=`),
+  // so this intentionally doesn't anchor on a preceding `&`/`?` — just matches
+  // the `page=N` substring directly, confirmed against the live listing page.
+  const pageNumbers = [...html.matchAll(/page=(\d+)/g)].map((m) => Number(m[1]));
+  return pageNumbers.length > 0 ? Math.max(...pageNumbers) : 1;
+}
+
+export async function fetchShufersalFileLinksPage(page: number): Promise<string[]> {
+  const res = await fetchWithRetry(`${SHUFERSAL_LISTING_URL}&page=${page}`);
+  if (!res.ok) throw new Error(`Shufersal listing page ${page} fetch failed: HTTP ${res.status}`);
+  return extractFileLinks(await res.text());
 }
 
 export async function fetchShufersalStoresFileUrl(): Promise<string> {

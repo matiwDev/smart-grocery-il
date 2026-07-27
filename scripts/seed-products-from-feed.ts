@@ -17,15 +17,16 @@
  *
  * Run with: npm run seed:products
  */
-import { requireEnv, restFetch, chunk, refreshLatestPrices } from './supabase-rest';
-import { fetchShufersalFileLinks, fetchAndParseShufersalFile, ShufersalItem } from './shufersal-feed';
+import { requireEnv, restFetch, chunk, refreshLatestPrices, sleep } from './supabase-rest';
+import { fetchShufersalTotalPages, fetchShufersalFileLinksPage, fetchAndParseShufersalFile, ShufersalItem } from './shufersal-feed';
 
 requireEnv();
 
-// Read up to 20 branch files by default (Phase 7 — was 5) — a single branch
-// file often repeats the same catalog with only price differences, so more
-// files means more unique barcodes surfaced.
-const SHUFERSAL_STORE_LIMIT = Number(process.env.SHUFERSAL_STORE_LIMIT || 20);
+// Phase 11: walk every paginated listing page (~20 branch files/page, ~22
+// pages / ~424 files total as of writing) instead of a fixed file-count limit
+// — the listing page itself IS the natural 20-file batch unit. Delay between
+// pages/batches to avoid hammering the feed.
+const BATCH_DELAY_MS = 2000;
 
 type Category = 'dairy' | 'bread' | 'produce' | 'meat' | 'beverage' | 'other';
 
@@ -48,30 +49,6 @@ function classifyCategory(name: string): Category {
     if (tokens.some((token) => keywords.some((kw) => token.startsWith(kw)))) return category;
   }
   return 'other';
-}
-
-async function collectUniqueItems(): Promise<ShufersalItem[]> {
-  console.log('[seed] Fetching Shufersal branch file listing...');
-  const links = await fetchShufersalFileLinks();
-  if (links.length === 0) throw new Error('No PriceFull file links found in Shufersal listing page');
-
-  const filesToProcess = links.slice(0, SHUFERSAL_STORE_LIMIT);
-  console.log(`[seed] Found ${links.length} branch files, processing ${filesToProcess.length}`);
-
-  const seenBarcodes = new Set<string>();
-  const unique: ShufersalItem[] = [];
-
-  for (const url of filesToProcess) {
-    const items = await fetchAndParseShufersalFile(url);
-    console.log(`[seed]   ${items.length} items from ${url.split('/').pop()?.split('?')[0]}`);
-    for (const item of items) {
-      if (seenBarcodes.has(item.barcode)) continue;
-      seenBarcodes.add(item.barcode);
-      unique.push(item);
-    }
-  }
-
-  return unique;
 }
 
 async function getProductCount(): Promise<number> {
@@ -149,24 +126,57 @@ async function main() {
   const countBefore = await getProductCount();
   console.log(`[seed] Products before: ${countBefore}`);
 
-  const items = await collectUniqueItems();
-  console.log(`[seed] Collected ${items.length} unique barcodes across ${SHUFERSAL_STORE_LIMIT} branch files`);
+  const totalPages = await fetchShufersalTotalPages();
+  console.log(`[seed] Shufersal listing has ${totalPages} pages (~20 branch files each)`);
 
-  console.log('[seed] Inserting new products (existing barcodes skipped)...');
-  const barcodeToId = await insertNewProducts(items);
-  console.log(`[seed] Inserted ${barcodeToId.size} new products`);
+  // Cross-batch dedup: only the FIRST time a barcode is seen anywhere in the
+  // run gets a products insert attempt + a price_history row — later batches
+  // skip it entirely (on_conflict=ignore-duplicates would no-op it anyway,
+  // but this also avoids inserting a second price_history row for the same
+  // barcode from a later branch file, matching the original single-pass
+  // behavior).
+  const seenBarcodes = new Set<string>();
+  let totalNewProducts = 0;
+  let totalNewPrices = 0;
 
-  const newItems = items.filter((item) => barcodeToId.has(item.barcode));
-  console.log('[seed] Inserting price_history rows for new products...');
-  const inserted = await insertPrices(newItems, barcodeToId);
+  for (let page = 1; page <= totalPages; page++) {
+    const links = await fetchShufersalFileLinksPage(page);
+    if (links.length === 0) {
+      console.log(`[seed] Batch ${page}/${totalPages}: 0 files returned, skipping`);
+      continue;
+    }
+
+    const batchItems: ShufersalItem[] = [];
+    for (const url of links) {
+      const items = await fetchAndParseShufersalFile(url);
+      for (const item of items) {
+        if (seenBarcodes.has(item.barcode)) continue;
+        seenBarcodes.add(item.barcode);
+        batchItems.push(item);
+      }
+    }
+
+    const barcodeToId = await insertNewProducts(batchItems);
+    const newItems = batchItems.filter((item) => barcodeToId.has(item.barcode));
+    const pricesInserted = await insertPrices(newItems, barcodeToId);
+
+    totalNewProducts += barcodeToId.size;
+    totalNewPrices += pricesInserted;
+    console.log(
+      `[seed] Batch ${page}/${totalPages}: ${links.length} files, ${barcodeToId.size} new products, ${pricesInserted} prices inserted`
+    );
+
+    if (page < totalPages) await sleep(BATCH_DELAY_MS);
+  }
+
   console.log('[seed] Refreshing latest_prices...');
   await refreshLatestPrices();
 
   const countAfter = await getProductCount();
   console.log(`\n[seed] Products before: ${countBefore}`);
   console.log(`[seed] Products after:  ${countAfter}`);
-  console.log(`[seed] New products added: ${barcodeToId.size}`);
-  console.log(`[seed] New price_history rows inserted: ${inserted}`);
+  console.log(`[seed] New products added: ${totalNewProducts}`);
+  console.log(`[seed] New price_history rows inserted: ${totalNewPrices}`);
 }
 
 main().catch((err) => {
