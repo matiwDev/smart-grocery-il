@@ -209,6 +209,17 @@ sign-up cannot be tested end-to-end** — `AuthModal.tsx` now shows a clear erro
 instead of a broken one when this happens (see "Phase 8" below), but the OTP
 email itself will not arrive.
 
+**Re-confirmed broken as of Phase 9 (2026-07-27)**, same exact symptom
+(`500 "Error sending confirmation email"` from `/auth/v1/signup`, Resend API
+key still works fine when called directly). Also ruled out this session: no
+`on_auth_user_created` (or any other) trigger on `auth.users` exists anywhere
+in `supabase/schema.sql` or `supabase/migrations/` — profile-row creation is
+and always was handled by app code (`AuthModal.tsx`'s `.upsert()` calls after
+`signUp`/`verifyOtp`), not a DB trigger, so a missing/broken trigger is not
+the cause. This is purely a Dashboard SMTP config issue with no CLI/Management
+API access available in this environment to fix programmatically — the user
+is fixing it by hand in the Dashboard.
+
 ## Price ingestion pipeline
 Israel's Food Act (2014) requires the major chains to publish real-time prices
 as public XML/JSON feeds. `scripts/ingest-prices.ts` is a standalone script
@@ -534,6 +545,23 @@ app themes without needing tokens there.
       `https://smart-grocery-il.vercel.app`, all 5 fixes re-verified there
 - See "Phase 8" section below for full details on each
 
+**Phase 9 complete — mobile UI fixes (2026-07-27):**
+- [x] Sticky header — `app/page.tsx`'s main-app `<header>` is now
+      `sticky top-0 z-40` with a solid `bg-[var(--color-bg-base)]` background.
+      Required also changing the page wrapper's `overflow-x-hidden` to
+      `overflow-x-clip` — see "Known issues / gotchas" below for why
+      `overflow-x-hidden` silently broke `position: sticky` here.
+- [x] `AuthModal.tsx` mobile keyboard fix — modal content is now its own
+      scroll region (`max-h-[100dvh]`, `overflow-y-auto`) with
+      `pb-[env(keyboard-inset-height,120px)]` bottom padding so the submit
+      button stays reachable when the soft keyboard is open. Verified by
+      constraining the browser viewport to 375×400 and confirming every
+      field + the submit button scroll into view.
+- [ ] Sign-up 500 error — re-diagnosed, not fixed (still the same broken
+      Dashboard SMTP config from Phase 8, see "Custom SMTP" above). Confirmed
+      no missing DB trigger is involved. User is fixing the SMTP config
+      directly in the Supabase Dashboard.
+
 ## Coding conventions
 - All components: functional, TypeScript strict
 - API routes: always use `lib/supabaseServer.ts` (service role), never the anon client
@@ -634,6 +662,21 @@ For now, Option A is the recommended path if/when scheduling this for real —
 lowest setup cost, no new infrastructure, and the repo is already on GitHub.
 
 ## Known issues / gotchas
+- `overflow-x-hidden` on an ancestor silently breaks `position: sticky` on a
+  descendant. Per the CSS overflow spec, setting `overflow-x` to anything
+  other than `visible`/`clip` forces the browser to compute `overflow-y` as
+  `auto` on that same element if it was `visible` — turning it into a scroll
+  container. Since that container (the `page.tsx` root div, `min-h-screen`,
+  no fixed height) never actually needs its own scrollbar and just grows to
+  fit its content, the *real* scrolling happens on `body`/`html` — but any
+  `position: sticky` descendant (the main-app `<header>`) is now scoped to
+  the div as its containing block instead of the real scroll, so it never
+  "sticks" and just scrolls away with everything else. Fix: use
+  `overflow-x-clip` instead of `overflow-x-hidden` — `clip` is excluded from
+  that auto-coupling rule, so it blocks horizontal overflow without hijacking
+  sticky elsewhere in the tree. Found/fixed in Phase 9 (2026-07-27) on the
+  page-root wrapper in `app/page.tsx`; if `overflow-x-hidden` gets
+  reintroduced anywhere above a `sticky` element, expect the same bug.
 - latest_prices is a materialized view — after any price_history insert, call refresh_latest_prices()
 - SUPABASE_SERVICE_ROLE_KEY must be in .env.local (not just the anon key) for API routes to work
 - Next.js does NOT follow symlinks for .env.local — always write the file directly
