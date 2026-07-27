@@ -7,7 +7,7 @@ import {
   MapPin, Navigation, ChevronDown,
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   ArrowDown, Loader2, Bell, Copy, UserPlus, Sun, Moon,
-  ScanBarcode, Camera, Ticket, Check, Mail,
+  ScanBarcode, Camera, Ticket, Check, Mail, Barcode,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BranchMapContainer } from '@/components/BranchMapContainer';
@@ -62,6 +62,7 @@ interface BasketItem {
   name_he: string;
   name_en: string | null;
   category: string | null;
+  barcode: string | null;
   prices: Record<string, ChainPrice>;
   min_price: number | null;
   quantity: number;
@@ -611,8 +612,10 @@ function Toast({ message }: { message: string | null }) {
 
 // Per-chain price list for one product — cheapest/most-expensive highlighted,
 // with a price-per-100g/ml/unit line when the feed has unit data for that chain.
-function ChainPriceBreakdown({ item, chains, lang }: { item: BasketItem; chains: ChainMeta[]; lang: Lang }) {
-  const priceEntries = Object.entries(item.prices);
+// Takes just the price map (not a full BasketItem) so it can be reused for a
+// scanned ProductResult too.
+function ChainPriceBreakdown({ prices, chains, lang }: { prices: Record<string, ChainPrice>; chains: ChainMeta[]; lang: Lang }) {
+  const priceEntries = Object.entries(prices);
   const minPrice = priceEntries.length > 0 ? Math.min(...priceEntries.map(([, cp]) => cp.price)) : null;
   const maxPrice = priceEntries.length > 0 ? Math.max(...priceEntries.map(([, cp]) => cp.price)) : null;
 
@@ -711,18 +714,26 @@ function BasketRow({ item, chains, lang, t, isExpanded, onToggleExpand, onUpdate
             transition={{ duration: 0.15 }} className="overflow-hidden"
           >
             <div className="px-4 pb-3">
-              <ChainPriceBreakdown item={item} chains={chains} lang={lang} />
-              <button
-                onClick={(e) => { e.stopPropagation(); onToggleAlert(); }}
-                className={`mt-1 flex items-center gap-1.5 text-xs font-medium px-2 py-1.5 rounded-lg transition-colors ${
-                  isAlertActive
-                    ? 'text-[var(--color-warning)] bg-[var(--color-warning)]/10'
-                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10'
-                }`}
-              >
-                <Bell className="w-3.5 h-3.5" fill={isAlertActive ? 'currentColor' : 'none'} />
-                {t.priceAlerts}
-              </button>
+              <ChainPriceBreakdown prices={item.prices} chains={chains} lang={lang} />
+              <div className="mt-1 flex items-center justify-between gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onToggleAlert(); }}
+                  className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1.5 rounded-lg transition-colors ${
+                    isAlertActive
+                      ? 'text-[var(--color-warning)] bg-[var(--color-warning)]/10'
+                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10'
+                  }`}
+                >
+                  <Bell className="w-3.5 h-3.5" fill={isAlertActive ? 'currentColor' : 'none'} />
+                  {t.priceAlerts}
+                </button>
+                {item.barcode && (
+                  <span className="flex items-center gap-1 text-[11px] text-[var(--color-text-muted)] font-mono shrink-0">
+                    <Barcode className="w-3.5 h-3.5" />
+                    {item.barcode}
+                  </span>
+                )}
+              </div>
             </div>
           </motion.div>
         )}
@@ -929,7 +940,7 @@ export default function SmartGroceryDashboard() {
 
           if (productIds.length > 0) {
             const [{ data: products }, { data: prices }] = await Promise.all([
-              supabase.from('products').select('id, name_he, name_en, category').in('id', productIds),
+              supabase.from('products').select('id, name_he, name_en, category, barcode').in('id', productIds),
               supabase.from('latest_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', productIds),
             ]);
 
@@ -951,6 +962,7 @@ export default function SmartGroceryDashboard() {
                   name_he: product?.name_he ?? i.product_name,
                   name_en: product?.name_en ?? null,
                   category: product?.category ?? null,
+                  barcode: product?.barcode ?? null,
                   prices: productPrices,
                   min_price: priceValues.length > 0 ? Math.min(...priceValues) : null,
                   quantity: i.quantity_value ?? 1,
@@ -1101,6 +1113,7 @@ export default function SmartGroceryDashboard() {
         name_he: product.name_he,
         name_en: product.name_en,
         category: product.category,
+        barcode: product.barcode,
         prices: product.prices,
         min_price: product.min_price,
         quantity: 1,
