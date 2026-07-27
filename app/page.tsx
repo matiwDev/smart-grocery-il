@@ -224,6 +224,7 @@ const DICTIONARY = {
     navScan: 'סריקה', navCoupons: 'קופונים',
     chainsLabel: 'רשתות להשוואה',
     maxChainsToast: 'ניתן לבחור עד 4 רשתות',
+    selectChainsLabel: 'בחר רשתות',
     pricePerUnit: 'ליח׳',
     scanTitle: 'סריקת ברקוד',
     scanSubtitle: 'סרקו מוצר להשוואת מחירים מיידית',
@@ -331,6 +332,7 @@ const DICTIONARY = {
     navScan: 'Scan', navCoupons: 'Coupons',
     chainsLabel: 'Chains to compare',
     maxChainsToast: 'Maximum 4 chains selected',
+    selectChainsLabel: 'Select chains',
     pricePerUnit: '/ unit',
     scanTitle: 'Barcode Scanner',
     scanSubtitle: 'Scan a product for instant price comparison',
@@ -515,37 +517,78 @@ function ChainBar({ chain, total, maxTotal, isMin, lang }: {
 const CHAIN_SELECTION_KEY = 'sg_selected_chains';
 const MAX_SELECTED_CHAINS = 4;
 
-// Horizontal strip of chain pills — up to MAX_SELECTED_CHAINS selected at once,
-// persisted to localStorage. Drives which chains the comparison panel, the
-// /api/prices/compare call, and the Location map's pins show.
+// Compact dropdown row — collapsed shows up to MAX_SELECTED_CHAINS colored dots
+// (dashed placeholders for unfilled slots) + a "Select chains" label; tapping it
+// expands a panel listing every chain with a checkmark for selected ones. Up to
+// MAX_SELECTED_CHAINS selected at once, persisted to localStorage. Drives which
+// chains the comparison panel, the /api/prices/compare call, and the Location
+// map's pins show.
 function ChainSelectorStrip({ chains, selectedChains, onToggle, lang, t }: {
   chains: ChainMeta[]; selectedChains: string[]; onToggle: (id: string) => void; lang: Lang; t: Dictionary;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setIsOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isOpen]);
+
   if (chains.length === 0) return null;
+
+  const dotSlots = Array.from({ length: MAX_SELECTED_CHAINS }, (_, i) => selectedChains[i] ?? null);
+
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-[var(--color-text-muted)] px-1">{t.chainsLabel}</span>
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-        {chains.map((chain) => {
-          const isSelected = selectedChains.includes(chain.id);
-          const name = lang === 'he' ? chain.name_he : chain.name_en;
-          return (
-            <button
-              key={chain.id}
-              onClick={() => onToggle(chain.id)}
-              className={`flex items-center gap-2 shrink-0 min-h-[36px] px-3 rounded-full border text-xs font-semibold transition-colors ${
-                isSelected
-                  ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
-                  : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)]/50 text-[var(--color-text-muted)]'
-              }`}
-            >
-              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: chain.color_hex }} />
-              {name}
-              {isSelected && <Check className="w-3.5 h-3.5 shrink-0" />}
-            </button>
-          );
-        })}
-      </div>
+    <div ref={ref} className="relative -mx-4 md:-mx-6 lg:-mx-8">
+      <button
+        onClick={() => setIsOpen((o) => !o)}
+        className="w-full h-12 px-4 md:px-6 lg:px-8 flex items-center justify-between bg-[var(--color-bg-base)] border-b border-[var(--color-border)]"
+      >
+        <div className="flex items-center gap-1.5">
+          {dotSlots.map((chainId, i) => {
+            const chain = chainId ? chains.find((c) => c.id === chainId) : null;
+            return chain ? (
+              <span key={i} className="w-5 h-5 rounded-full shrink-0" style={{ backgroundColor: chain.color_hex }} />
+            ) : (
+              <span key={i} className="w-5 h-5 rounded-full shrink-0 border border-dashed border-[var(--color-border)]" />
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-1.5 text-[var(--color-text-secondary)]">
+          <span className="text-xs font-semibold">{t.selectChainsLabel}</span>
+          <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden absolute top-full start-0 end-0 z-30 bg-[var(--color-bg-panel)] border-b border-[var(--color-border)] shadow-2xl"
+          >
+            {chains.map((chain) => {
+              const isSelected = selectedChains.includes(chain.id);
+              const name = lang === 'he' ? chain.name_he : chain.name_en;
+              return (
+                <button
+                  key={chain.id}
+                  onClick={() => onToggle(chain.id)}
+                  className="w-full flex items-center gap-3 px-4 md:px-6 lg:px-8 min-h-[48px] hover:bg-[var(--color-bg-hover)] transition-colors text-start"
+                >
+                  <span className="w-5 h-5 rounded-full shrink-0" style={{ backgroundColor: chain.color_hex }} />
+                  <span className="flex-1 text-sm font-medium text-[var(--color-text-primary)]">{name}</span>
+                  {isSelected && <Check className="w-4 h-4 text-[var(--color-accent)] shrink-0" />}
+                </button>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
