@@ -36,7 +36,41 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          curl -s "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/ingest_log?select=chain_id,started_at,finished_at,products_fetched,products_matched,products_inserted,error_text&order=started_at.desc&limit=5" \
+          curl -s "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/ingest_log?select=chain_id,started_at,finished_at,products_fetched,products_matched,products_inserted,error_text&order=started_at.desc&limit=7" \
             -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
             -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
             | python3 -m json.tool
+
+      # Phase 11 step 5: one-line run summary across every chain runIngestion()
+      # covers (shufersal/rami_levy/victory/mahsanei_hashuk/yohananof/osher_ad/
+      # keshet_teamim) — new chains are picked up automatically as long as
+      # runIngestion() (scripts/ingest-prices.ts) grows to cover them, no
+      # workflow change needed beyond this summary step.
+      - name: Print run summary
+        if: always()
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          node -e '
+            const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+            const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+            const headers = { apikey: key, Authorization: `Bearer ${key}` };
+            (async () => {
+              const logRes = await fetch(
+                `${url}/rest/v1/ingest_log?select=chain_id,products_inserted,error_text&order=started_at.desc&limit=7`,
+                { headers }
+              );
+              const rows = await logRes.json();
+              const chainsIngested = rows.filter((r) => !r.error_text).length;
+              const newPrices = rows.reduce((sum, r) => sum + (r.products_inserted || 0), 0);
+
+              const countRes = await fetch(`${url}/rest/v1/products?select=id`, {
+                method: "HEAD",
+                headers: { ...headers, Prefer: "count=exact" },
+              });
+              const totalProducts = Number(countRes.headers.get("content-range")?.split("/")[1] ?? "unknown");
+
+              console.log(`Chains ingested: ${chainsIngested}, Total products: ${totalProducts}, New prices: ${newPrices}`);
+            })();
+          '
