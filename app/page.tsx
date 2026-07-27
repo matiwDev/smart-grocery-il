@@ -7,9 +7,10 @@ import {
   MapPin, Navigation, ChevronDown,
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   ArrowDown, Loader2, Bell, Copy, UserPlus, Sun, Moon,
-  ScanBarcode, Camera, Ticket, Check, Mail, Barcode,
+  ScanBarcode, Camera, Ticket, Check, Mail, Barcode, VideoOff,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
 import { BranchMapContainer } from '@/components/BranchMapContainer';
 import { AuthModal, AuthMode } from '@/components/AuthModal';
 import { supabase } from '@/utils/supabase';
@@ -229,9 +230,16 @@ const DICTIONARY = {
     pricePerUnit: 'ליח׳',
     scanTitle: 'סריקת ברקוד',
     scanSubtitle: 'סרקו מוצר להשוואת מחירים מיידית',
-    comingSoon: 'בקרוב',
     scanManualLabel: 'הזינו ברקוד ידנית',
     scanManualPlaceholder: 'מספר ברקוד...',
+    scanAddToBasket: 'הוסף לסל',
+    scanAgain: 'סרוק שוב',
+    scanManually: 'חפש ידנית',
+    scanFindingProduct: 'מחפש מוצר...',
+    scanNotFound: 'המוצר לא נמצא',
+    scanCameraDeniedMsg: 'הגישה למצלמה נחסמה. אנא אפשרו גישה למצלמה בהגדרות הדפדפן.',
+    scanEnableCamera: 'נסה שוב',
+    scanNoCameraMsg: 'לא זוהתה מצלמה. ניתן להזין ברקוד ידנית למטה.',
     search: 'חיפוש',
     couponsTitle: 'קופונים והנחות',
     couponsSubtitle: 'בקרוב...',
@@ -337,9 +345,16 @@ const DICTIONARY = {
     pricePerUnit: '/ unit',
     scanTitle: 'Barcode Scanner',
     scanSubtitle: 'Scan a product for instant price comparison',
-    comingSoon: 'Coming Soon',
     scanManualLabel: 'Enter barcode manually',
     scanManualPlaceholder: 'Barcode number...',
+    scanAddToBasket: 'Add to basket',
+    scanAgain: 'Scan again',
+    scanManually: 'Search manually',
+    scanFindingProduct: 'Finding product...',
+    scanNotFound: 'Product not found',
+    scanCameraDeniedMsg: 'Camera access was blocked. Please enable it in your browser settings.',
+    scanEnableCamera: 'Try again',
+    scanNoCameraMsg: 'No camera detected. Enter a barcode manually below.',
     search: 'Search',
     couponsTitle: 'Coupons & Discounts',
     couponsSubtitle: 'Coming soon...',
@@ -785,6 +800,15 @@ export default function SmartGroceryDashboard() {
   const [isScanSearching, setIsScanSearching] = useState(false);
   const [scanSearched, setScanSearched] = useState(false);
 
+  // Scan view: live camera barcode scanner
+  const [cameraStatus, setCameraStatus] = useState<'idle' | 'granted' | 'denied' | 'unavailable'>('idle');
+  const [scanStage, setScanStage] = useState<'scanning' | 'looking-up' | 'found' | 'not-found'>('scanning');
+  const [scannedProduct, setScannedProduct] = useState<ProductResult | null>(null);
+  const [lastScannedBarcode, setLastScannedBarcode] = useState<string | null>(null);
+  const scanVideoRef = useRef<HTMLVideoElement>(null);
+  const scanControlsRef = useRef<IScannerControls | null>(null);
+  const hasHandledScanRef = useRef(false);
+
   // Coupons view: waitlist email signup
   const [couponEmail, setCouponEmail] = useState('');
   const [couponStatus, setCouponStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -1205,6 +1229,109 @@ export default function SmartGroceryDashboard() {
       setIsScanSearching(false);
     }
   };
+
+  // ── Scan: live camera barcode scanner ────────────────────────────────────────
+
+  // A barcode was decoded from the live camera feed: vibrate, pause the
+  // scanner, and look up the single matching product.
+  const handleLiveScanResult = useCallback(async (barcode: string) => {
+    if (hasHandledScanRef.current) return;
+    hasHandledScanRef.current = true;
+    scanControlsRef.current?.stop();
+    if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(100);
+    setLastScannedBarcode(barcode);
+    setScanStage('looking-up');
+    try {
+      const res = await fetch(`/api/products/search?q=${encodeURIComponent(barcode)}&limit=1`);
+      const data = await res.json();
+      const product = (data.products ?? [])[0] as ProductResult | undefined;
+      if (product) {
+        setScannedProduct(product);
+        setScanStage('found');
+      } else {
+        setScannedProduct(null);
+        setScanStage('not-found');
+      }
+    } catch {
+      setScannedProduct(null);
+      setScanStage('not-found');
+    }
+  }, []);
+
+  // Resets scan state and re-mounts the viewfinder, which re-triggers the
+  // camera-start effect below (keyed on scanStage).
+  const handleScanAgain = () => {
+    setScannedProduct(null);
+    setLastScannedBarcode(null);
+    setScanStage('scanning');
+  };
+
+  // Starts (or restarts) the live decode loop whenever the Scan tab is active
+  // and we're in the 'scanning' stage; tears the camera down otherwise (tab
+  // change, or a result was found and the viewfinder is hidden).
+  useEffect(() => {
+    if (currentView !== 'SCAN') {
+      scanControlsRef.current?.stop();
+      scanControlsRef.current = null;
+      setScanStage('scanning');
+      setScannedProduct(null);
+      setLastScannedBarcode(null);
+      hasHandledScanRef.current = false;
+      return;
+    }
+
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setCameraStatus('unavailable');
+      return;
+    }
+
+    if (scanStage !== 'scanning' || !scanVideoRef.current) return;
+
+    let cancelled = false;
+    hasHandledScanRef.current = false;
+
+    // getUserMedia can hang indefinitely (rather than reject) on devices/browsers
+    // with no camera at all, so a permission-query fast path + hard timeout keep
+    // the UI from getting stuck on 'idle' forever.
+    const timeoutId = setTimeout(() => {
+      if (!cancelled) setCameraStatus((prev) => (prev === 'idle' ? 'unavailable' : prev));
+    }, 8000);
+
+    (async () => {
+      try {
+        if (navigator.permissions?.query) {
+          try {
+            const status = await navigator.permissions.query({ name: 'camera' as PermissionName });
+            if (status.state === 'denied') {
+              if (!cancelled) setCameraStatus('denied');
+              return;
+            }
+          } catch {
+            // 'camera' isn't a queryable permission name in every browser — fall through to getUserMedia.
+          }
+        }
+
+        const reader = new BrowserMultiFormatReader();
+        const controls = await reader.decodeFromVideoDevice(undefined, scanVideoRef.current!, (result) => {
+          if (!cancelled && result) handleLiveScanResult(result.getText());
+        });
+        if (cancelled) { controls.stop(); return; }
+        scanControlsRef.current = controls;
+        setCameraStatus('granted');
+      } catch (err: unknown) {
+        if (cancelled) return;
+        const name = (err as { name?: string } | undefined)?.name;
+        setCameraStatus(name === 'NotAllowedError' || name === 'PermissionDeniedError' ? 'denied' : 'unavailable');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+      scanControlsRef.current?.stop();
+      scanControlsRef.current = null;
+    };
+  }, [currentView, scanStage, handleLiveScanResult]);
 
   // ── Coupons: waitlist signup ─────────────────────────────────────────────────
 
@@ -2002,19 +2129,105 @@ export default function SmartGroceryDashboard() {
         {currentView === 'SCAN' && (
           <motion.div key="SCAN" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}
             className="flex-1 flex flex-col gap-6 max-w-lg mx-auto w-full">
-            <div className="flex flex-col items-center text-center bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-8 mt-6">
-              <div className="relative w-24 h-24 bg-[var(--color-bg-subtle)]/50 rounded-3xl flex items-center justify-center mb-6 border border-[var(--color-border)]/50 text-[var(--color-accent)]">
-                <Camera className="w-11 h-11" />
-                <div className="absolute -bottom-2 -end-2 w-10 h-10 bg-[var(--color-accent)] rounded-xl flex items-center justify-center text-[var(--color-accent-text)] shadow-lg shadow-[var(--color-accent)]/20">
-                  <ScanBarcode className="w-5 h-5" />
-                </div>
-              </div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-accent)] bg-[var(--color-accent)]/10 border border-[var(--color-accent)]/20 px-3 py-1 rounded-full mb-4">
-                {t.comingSoon}
-              </span>
-              <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">{t.scanTitle}</h2>
+
+            <div className="text-center mt-6">
+              <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-1">{t.scanTitle}</h2>
               <p className="text-[var(--color-text-muted)] text-sm">{t.scanSubtitle}</p>
             </div>
+
+            {/* Live camera viewfinder — shown only while actively scanning */}
+            {scanStage === 'scanning' && (
+              <div className="relative w-full aspect-[3/4] max-h-[420px] bg-black rounded-3xl overflow-hidden border border-[var(--color-border)] shadow-xl">
+                {cameraStatus === 'denied' ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6 text-center bg-[var(--color-bg-panel)]">
+                    <VideoOff className="w-10 h-10 text-[var(--color-text-muted)]" />
+                    <p className="text-sm text-[var(--color-text-secondary)]">{t.scanCameraDeniedMsg}</p>
+                    <button
+                      onClick={handleScanAgain}
+                      className="min-h-[44px] px-5 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-xl font-semibold transition-colors"
+                    >
+                      {t.scanEnableCamera}
+                    </button>
+                  </div>
+                ) : cameraStatus === 'unavailable' ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center bg-[var(--color-bg-panel)]">
+                    <Camera className="w-10 h-10 text-[var(--color-text-muted)]" />
+                    <p className="text-sm text-[var(--color-text-secondary)]">{t.scanNoCameraMsg}</p>
+                  </div>
+                ) : (
+                  <>
+                    <video ref={scanVideoRef} className="w-full h-full object-cover" muted playsInline autoPlay />
+                    {/* Scanning overlay: centered rectangle with corner markers (CSS only) */}
+                    <div className="absolute inset-8 pointer-events-none">
+                      <div className="absolute top-0 start-0 w-8 h-8 border-t-4 border-s-4 border-white/90 rounded-tl-lg" />
+                      <div className="absolute top-0 end-0 w-8 h-8 border-t-4 border-e-4 border-white/90 rounded-tr-lg" />
+                      <div className="absolute bottom-0 start-0 w-8 h-8 border-b-4 border-s-4 border-white/90 rounded-bl-lg" />
+                      <div className="absolute bottom-0 end-0 w-8 h-8 border-b-4 border-e-4 border-white/90 rounded-br-lg" />
+                    </div>
+                    <div className="absolute top-3 start-3 w-9 h-9 rounded-full bg-[var(--color-accent)] flex items-center justify-center text-[var(--color-accent-text)] shadow-lg">
+                      <ScanBarcode className="w-4 h-4" />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Looking up the scanned barcode */}
+            {scanStage === 'looking-up' && (
+              <div className="w-full flex flex-col items-center justify-center gap-3 py-16 bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl">
+                <Loader2 className="w-8 h-8 text-[var(--color-accent)] animate-spin" />
+                <p className="text-sm text-[var(--color-text-muted)]">{t.scanFindingProduct}</p>
+              </div>
+            )}
+
+            {/* Product found */}
+            {scanStage === 'found' && scannedProduct && (
+              <div className="w-full flex flex-col gap-4 bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-6">
+                <div>
+                  <h3 className="font-bold text-lg text-[var(--color-text-primary)]">{scannedProduct.name_he}</h3>
+                  {scannedProduct.name_en && <p className="text-sm text-[var(--color-text-muted)]">{scannedProduct.name_en}</p>}
+                  {scannedProduct.category && <p className="text-xs text-[var(--color-text-muted)] mt-1">{scannedProduct.category}</p>}
+                </div>
+                <ChainPriceBreakdown prices={scannedProduct.prices} chains={chains} lang={lang} />
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => { handleAddProduct(scannedProduct); setCurrentView('HOME'); }}
+                    className="flex-1 min-h-[44px] bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-[var(--color-accent)]/20"
+                  >
+                    {t.scanAddToBasket}
+                  </button>
+                  <button
+                    onClick={handleScanAgain}
+                    className="flex-1 min-h-[44px] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] border border-[var(--color-border)] rounded-xl text-sm font-semibold transition-colors"
+                  >
+                    {t.scanAgain}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Product not found */}
+            {scanStage === 'not-found' && (
+              <div className="w-full flex flex-col items-center gap-3 bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-6 text-center">
+                <AlertCircle className="w-8 h-8 text-[var(--color-danger)]" />
+                <p className="font-semibold text-[var(--color-text-primary)]">{t.scanNotFound}</p>
+                {lastScannedBarcode && <p className="font-mono text-xs text-[var(--color-text-muted)]">{lastScannedBarcode}</p>}
+                <div className="flex gap-3 w-full mt-1">
+                  <button
+                    onClick={handleScanAgain}
+                    className="flex-1 min-h-[44px] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] border border-[var(--color-border)] rounded-xl text-sm font-semibold transition-colors"
+                  >
+                    {t.scanAgain}
+                  </button>
+                  <button
+                    onClick={() => lastScannedBarcode && setScanBarcodeInput(lastScannedBarcode)}
+                    className="flex-1 min-h-[44px] bg-[var(--color-accent)]/10 hover:bg-[var(--color-accent)]/20 text-[var(--color-accent)] border border-[var(--color-accent)]/20 rounded-xl text-sm font-semibold transition-colors"
+                  >
+                    {t.scanManually}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Manual barcode entry fallback */}
             <div className="bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-6">
