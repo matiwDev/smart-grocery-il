@@ -71,7 +71,10 @@ scripts/
                                    # ts-node; the root tsconfig targets Next.js's bundler
                                    # resolution, which ts-node can't execute directly.
 components/
-  AuthModal.tsx                   # OTP sign-in / sign-up modal + "Dev Login" button (dev only)
+  AuthModal.tsx                   # OTP sign-in / sign-up modal + "Dev Login" button (dev only).
+                                   # Takes a `lang` prop (Phase 10) so its error copy can be
+                                   # bilingual per-message instead of one concatenated "EN / HE"
+                                   # string — see "Phase 10" below.
   BranchMapContainer.tsx          # Branch list + map layout; dynamically imports BranchLeafletMap
   BranchLeafletMap.tsx            # Actual react-leaflet map — pins colored by chain color_hex,
                                    # popups with Waze deep link, flyTo on active-pin change,
@@ -561,6 +564,43 @@ app themes without needing tokens there.
       Dashboard SMTP config from Phase 8, see "Custom SMTP" above). Confirmed
       no missing DB trigger is involved. User is fixing the SMTP config
       directly in the Supabase Dashboard.
+
+**Phase 10 complete — production bug fix session (2026-07-27):**
+- [x] Bilingual, specific auth error messages — `AuthModal.tsx` replaced its
+      one generic error string with `getFriendlyAuthErrorMessage(err, lang,
+      context)`, which matches Supabase's real `AuthApiError.code` values
+      (`invalid_credentials`, `email_not_confirmed`, `otp_expired`, falling
+      back to message-text regexes for older/uncoded errors) and returns
+      Hebrew or English copy based on a new `lang` prop threaded in from
+      `page.tsx`. Wrong email and wrong password intentionally still share
+      one message ("Incorrect email or password") to avoid leaking account
+      existence — this was an explicit requirement, not an oversight. The
+      sign-in branch's old custom throw (`'User account does not exist...'`)
+      was removed since it was the same underlying Supabase error and
+      contradicted that requirement. Verified live on production: submitting
+      bad credentials shows the new copy in both languages.
+- [x] AuthModal mobile-keyboard fix, take 2 — Phase 9 already added
+      `max-h-[100dvh]`/`overflow-y-auto`/keyboard-inset padding, but the
+      *backdrop* (`fixed inset-0 ...`) still also had `overflow-y-auto`,
+      and the panel's `my-8` margin combined with `max-h-[100dvh]` meant the
+      panel could exceed the viewport with no way to reach the clipped
+      portion once backdrop scroll was removed. Fixed by dropping the
+      backdrop's own scroll (only the panel content should scroll) and
+      capping the panel at `max-h-[calc(100dvh-2rem)]` (accounting for the
+      backdrop's `p-4`) instead of the margin-based approach. Keyboard-inset
+      fallback padding bumped 120px → 140px. Verified at 375×400 (viewport
+      height roughly halved, simulating a keyboard) that the submit button
+      and "Sign Up" link scroll fully into view.
+- [x] Sticky header border — the header was already `sticky top-0 z-40` with
+      a solid background from Phase 9; added `border-b
+      border-[var(--color-border)]` for visual separation from scrolled
+      content. Verified on both Home and Location views (the latter has a
+      full-height map underneath).
+- [x] Redeployed — `vercel --prod`, all three fixes re-verified live at
+      `https://smart-grocery-il.vercel.app` (not just localhost), including
+      confirming the Dev Login button correctly stays hidden in production.
+- Each fix landed as its own commit (`git add -p` used to split fix-specific
+  hunks out of files that had multiple fixes' changes interleaved).
 
 ## Coding conventions
 - All components: functional, TypeScript strict
