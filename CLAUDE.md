@@ -73,11 +73,30 @@ scripts/
                                    # both run-ingest-cli.ts and the GET route above.
   run-ingest-cli.ts               # `npm run ingest` CLI entry point (Phase 6) — env check +
                                    # console output + process.exit wrapper around runIngestion().
-  seed-products-from-feed.ts      # Phase 5, widened Phase 8 — pulls unique real products (barcode/
-                                   # name/price) from the first 20 Shufersal branch files (was 3-5)
-                                   # and inserts new ones into products + price_history, skipping
-                                   # barcodes already present (safe to re-run — see Phase 8 below).
+  seed-products-from-feed.ts      # Phase 5, widened Phase 8 (3 -> 20 branch files), widened again
+                                   # Phase 11 to walk every paginated Shufersal listing page (~22
+                                   # pages / ~424 files total, not a fixed file count) — pulls unique
+                                   # real products (barcode/name/price) and inserts new ones into
+                                   # products + price_history per page/batch, skipping barcodes
+                                   # already present (safe to re-run — see Phase 8/11 below).
                                    # Run with `npm run seed:products`.
+  probe-chain-feeds.ts            # Phase 11 — probes candidate feed URLs for chains not yet
+                                   # integrated (both the URLs as originally given in a task spec and
+                                   # the real endpoints found via research — see Phase 11 below). Run
+                                   # with `npm run probe:chains`.
+  parsers/                        # Phase 11 — one fetchAndParse(): Promise<ParsedProduct[]> module
+                                   # per newly-integrated chain, sharing two platform clients:
+    gov-xml.ts                    # Shared Food Act XML parser (Root>Items>Item>ItemCode/ItemName/
+                                   # ItemPrice/...) — every chain below publishes this same schema.
+    laibcatalog.ts                # Shared client for the laibcatalog.co.il ("ניביט"/Nibit) HTTPS
+                                   # JSON API (no auth) — used by victory.ts and mahsanei-hashuk.ts.
+    cerberus.ts                    # Shared client for the Cerberus FTP Server platform at
+                                   # url.retail.publishedprices.co.il (real FTP, port 21, chain-
+                                   # specific username + blank password) — used by yohananof.ts,
+                                   # osher-ad.ts, keshet-teamim.ts. Uses the `basic-ftp` package.
+    victory.ts / mahsanei-hashuk.ts / yohananof.ts / osher-ad.ts / keshet-teamim.ts
+                                   # Thin per-chain wrappers over the two clients above.
+    types.ts                      # Shared ParsedProduct type + a GovFeedItem -> ParsedProduct mapper.
   seed-branches.ts                # Phase 8 — pulls real store metadata (StoreID/StoreName/Address/
                                    # City) from the Shufersal "Stores" feed category (catID=5, a
                                    # single chain-wide file, distinct from the per-branch PriceFull
@@ -187,7 +206,20 @@ ingest_log     — id, chain_id, started_at, finished_at, products_fetched,
                  products_matched, products_inserted, error_text
                  (migration 004, CONFIRMED APPLIED)
 waitlist       — id, email, feature (default 'coupons'), user_id (nullable), created_at
-                 (migration 005, NOT YET APPLIED — see "Repo structure" above)
+                 (migration 005, CONFIRMED APPLIED — see "Phase 11" below; CLAUDE.md
+                 previously said NOT YET APPLIED, that was stale)
+schema_migrations — version (text), applied_at. Discovered live (Phase 11) via a direct
+                 PostgREST check — not mentioned anywhere earlier in this doc, but it's
+                 a real, queryable table (`schema_migrations?select=*` returns 200) that
+                 already tracks 001/002/003/004/005_consolidation/005_waitlist as
+                 applied. It's a plain table (no DDL), so — unlike everything else in
+                 "Applying migrations" below — a migration's own INSERT/UPDATE rows
+                 (not ALTER TABLE/CREATE TABLE) CAN be written directly via the
+                 service-role REST client, no Dashboard SQL Editor needed. Use this to
+                 check whether a migration is applied instead of guessing from this
+                 doc; only add a version row here once its actual DDL has been
+                 confirmed applied (a row with no matching schema change would make
+                 this table lie).
 ```
 
 RPC functions (migration 003, CONFIRMED APPLIED):
@@ -203,11 +235,15 @@ join_household_by_code(code text)  — inserts a household_members row for the c
 - 18 original placeholder products with Hebrew + English names — barcodes are
   plausible-looking fake EAN-13s, **not** real chain SKUs (see "Price ingestion
   pipeline" below), so they never match anything in a real feed
-- **9,648 products total as of Phase 8** (2026-07-21) — grew from 218 (Phase 5)
-  to 9,648 (9,430 new) after widening `seed-products-from-feed.ts` from 3 to 20
-  branch files. `name_en` is null for all real-feed products until
-  `npm run enrich:names` is run
-- 4 chains: shufersal, rami_levy, victory, yohananof
+- **38,346 products total as of Phase 11** (2026-07-27) — grew from 9,648
+  (Phase 8) after widening `seed-products-from-feed.ts` again to walk every
+  paginated Shufersal listing page (~22 pages / ~424 branch files, not just
+  the first 20) — see "Phase 11" below. `name_en` is null for all real-feed
+  products until `npm run enrich:names` is run
+- **7 chains as of Phase 11**: shufersal, rami_levy, victory, yohananof,
+  osher_ad, keshet_teamim, mahsanei_hashuk (the last 3 added Phase 11 — see
+  below). `rami_levy` still has no working feed (see "Price ingestion
+  pipeline" below); the other 6 all have real ingest paths as of Phase 11.
 - **428 branches total as of Phase 8** — grew from the original 8 (Gush Dan
   area, real coordinates) to 428 (420 new) via `scripts/seed-branches.ts`. The
   420 new rows have real `name_he`/`address` but **no `lat`/`lng`** (not in the
@@ -982,6 +1018,131 @@ reported from real production/device testing on `https://smart-grocery-il.vercel
       redeployed via `vercel --prod`; the Leaflet fix was re-verified live on
       `https://smart-grocery-il.vercel.app` after deploy (map renders correctly).
 
+## Phase 14 — full catalog expansion + additional chains
+(2026-07-27; the user's own session prompt called this "Phase 11", already used above for
+the 2026-07-27 UX-overhaul session — numbered 14 here to stay sequential, same renumbering
+reasoning as Phases 11/12/13 above.) Data-engineering session: expand the Shufersal catalog
+to its full feed, probe every other major chain's price-transparency feed, and integrate
+whichever ones actually work.
+
+- [x] **Step 1 — Shufersal full catalog.** `scripts/shufersal-feed.ts` gained
+      `fetchShufersalTotalPages()`/`fetchShufersalFileLinksPage(page)` — the branch-file
+      listing is paginated (~20 files/page), and the old code only ever fetched page 1.
+      `scripts/seed-products-from-feed.ts` now walks every page (22 pages / ~424 files, one
+      page = one batch), inserting new products incrementally per page rather than
+      collecting everything in memory first, so a mid-run failure doesn't lose progress.
+      **Products: 9,738 → 38,346 (28,608 new)**, well past the 5,000 target. One real bug
+      caught and fixed along the way: the pagination links are HTML-entity-encoded
+      (`&amp;page=`), so a naive `[?&]page=(\d+)` regex silently matched nothing and the
+      first attempt only re-processed page 1 — fixed by dropping the anchor requirement.
+- [x] **Step 2 — chain feed probes.** `scripts/probe-chain-feeds.ts` (`npm run
+      probe:chains`) probes both the URLs given in this session's own task spec (all of
+      which turned out to be stale guesses — none resolve or return real data, confirmed
+      by actually running the probe, not assumed) and the real current endpoints, found by
+      researching the public
+      [OpenIsraeliSupermarkets/israeli-supermarket-scarpers](https://github.com/OpenIsraeliSupermarkets/israeli-supermarket-scarpers)
+      project, which already solves this exact problem for every Food-Act-covered chain:
+      | Chain | Status | Real access method |
+      |---|---|---|
+      | Victory | Working | `laibcatalog.co.il` — plain HTTPS JSON API, no auth (`matrixcatalog.co.il`, given in the task spec, is DNS-dead; this is its replacement) |
+      | Mahsanei Hashuk | Working | Same `laibcatalog.co.il` API, different `edi`/chain-ID |
+      | Yohananof | Working | Real FTP (port 21) to `url.retail.publishedprices.co.il`, username `yohananof`, blank password |
+      | Osher Ad | Working | Same FTP host, username `osherad`, blank password |
+      | Keshet Teamim | Working | Same FTP host, username `Keshet`, blank password |
+      | Mega | Dead | The community scraper marks it "removed" as of 2025-07-01; its domain now redirects to Carrefour Israel (apparent rebrand), which Cloudflare-blocks non-browser requests (403) |
+      | Co-op | Dead | `coopisrael.coop` doesn't resolve in DNS at all; not covered by any known scraper project either |
+
+      The FTP-based logins are the platform's actual public, documented access method (see
+      the scraper project above) — a chain-specific username with a blank password, not a
+      credential bypass. Three of the five working chains need **real outbound FTP, not
+      HTTPS** — this works from GitHub Actions (a full Ubuntu VM, already this repo's
+      primary ingestion scheduler) and from local runs, but is not reliably available from
+      Vercel's serverless functions, so expect those three to fail gracefully (logged to
+      `ingest_log`, not blocking the others) if ever triggered through the Vercel
+      `GET /api/prices/ingest` cron route instead of `npm run ingest`.
+- [x] **Step 3 — parsers for all 5 working chains.** `scripts/parsers/`:
+      `gov-xml.ts` (shared Food Act XML parser — every chain here publishes the identical
+      `Root>Items>Item>ItemCode/ItemName/ItemPrice/...` schema as Shufersal),
+      `laibcatalog.ts` (shared HTTPS client for Victory + Mahsanei Hashuk),
+      `cerberus.ts` (shared FTP client, via the new `basic-ftp` dependency, for Yohananof +
+      Osher Ad + Keshet Teamim — keeps only the newest price file per store/branch, since
+      the server lists every historical snapshot still on disk), and five thin
+      `fetchAndParse(): Promise<ParsedProduct[]>` wrappers, one per chain. All five
+      integrated into `scripts/ingest-prices.ts` via a shared `ingestFromParser()` helper
+      (they all reduce to the same shape, so this avoided five near-duplicates of
+      `ingestShufersal()`). Added `osher_ad`, `keshet_teamim`, `mahsanei_hashuk` to
+      `public.chains` (`victory`/`yohananof` rows already existed from the original seed
+      data, just without a working ingest path until now). Each parser was smoke-tested
+      individually against the live feed before integration — sample products actually
+      returned: Victory "פיתה ידעאי ציון" ₪1.50, Mahsanei Hashuk "עמלת החזרת צ'ק" ₪26.90,
+      Yohananof "קולגייט אופטיק וויט" ₪19.90, Osher Ad "חזה עוף טרי פרימה" ₪39.90, Keshet
+      Teamim "אורז בסמטי טאג מאהל" ₪13.90.
+- [x] **Step 4 — online/delivery branches.** `supabase/migrations/006_online_branches.sql`
+      adds `branches.is_online` plus seed rows for Shufersal Online / Rami Levy Online —
+      **written but NOT YET APPLIED** (confirmed live: `branches?select=is_online` returns
+      `42703 column does not exist` — no DB CLI access in this environment, same limitation
+      as every prior migration, see "Applying migrations" above). The Location view gained
+      a "כולל משלוח"/"Include delivery" toggle (persisted to `localStorage`) that shows
+      online branches as a fixed truck-icon chip row above the map instead of as map pins
+      (they have no lat/lng). Online branches are explicitly excluded from the existing
+      GPS/city/map-pin filter pipeline (`filteredBranches`/`visibleBranches`) rather than
+      relying on the lat/lng guard alone, so they can never interfere with distance
+      filtering or the "navigate to cheapest branch" pre-select — computed as their own
+      `liveBranches`-derived memo instead. Degrades safely before the migration is applied:
+      `BranchRow.is_online` is optional and the branches query already used `select('*')`
+      (not an explicit column list), so nothing breaks — the toggle just always shows zero
+      online branches until the migration runs.
+      **Verification note:** this session's sandboxed browser tool could not be used to
+      visually confirm the Location view / toggle in-browser — clicking the bottom-nav
+      Location tab left the view stuck on Home with no console errors, reproduced
+      identically on the last commit *before* this session's changes too (confirmed via
+      `git stash`), so it's the same Framer-Motion rAF-throttling tab-visibility quirk this
+      doc already documented in Phase 12/13 ("this session's own Browser-pane testing tool
+      runs the tab with `document.hidden === true`... throttles/delays Framer Motion's
+      rAF-driven view-transition animations"), not a regression from this change. Verified
+      instead via `npx tsc --noEmit`, `npm run lint`, and `npm run build` (all clean) plus
+      careful code review of the filter-pipeline exclusion logic above.
+- [x] **Step 5 — ingest workflow.** `npm run ingest` already covers all 7 chains
+      automatically once `runIngestion()` grew to include them in Step 3 — no schedule or
+      step changes needed for that part.
+      [.github/workflows/ingest-prices.yml](.github/workflows/ingest-prices.yml) gained a
+      "Print run summary" step logging one line — `Chains ingested: X, Total products: Y,
+      New prices: Z` — computed from the latest 7 `ingest_log` rows plus a live `products`
+      count.
+- [x] **Step 6 — full ingest run, real numbers.** `npm run ingest` end to end:
+      ```
+      shufersal        fetched=20139   matched=20139   inserted=20139
+      rami_levy        fetched=0       matched=0       inserted=0      ERROR: HTTP 404 (unchanged, see "Price ingestion pipeline" above)
+      victory          fetched=159037  matched=95650   inserted=95650
+      mahsanei_hashuk  fetched=216810  matched=110688  inserted=110688
+      yohananof        fetched=549     matched=130     inserted=130
+      osher_ad         fetched=399     matched=199     inserted=199
+      keshet_teamim    fetched=1167    matched=335     inserted=335
+      ```
+      **207,102 new price_history rows** inserted across the 5 newly-integrated chains in
+      one run. Final state, queried live via PostgREST (not assumed):
+      **38,346 products total.** `latest_prices` — **55,474 rows total**, per chain_id:
+      ```
+      shufersal         38,346
+      mahsanei_hashuk    9,073
+      victory            7,655
+      osher_ad             172
+      keshet_teamim        169
+      yohananof             41
+      rami_levy             18
+      ```
+      **6 of 7 chains have real price data** (all but rami_levy, whose feed URL still
+      404s — unchanged from before this session, see "Price ingestion pipeline" above;
+      the 18 existing rami_levy rows predate this session).
+- Discovered mid-session, unrelated to the task list but corrected here: a real
+  `schema_migrations` table already exists and tracks 001-005 as applied — `005_waitlist`
+  is actually **CONFIRMED APPLIED** (this doc previously said NOT YET APPLIED; that was
+  stale, not re-verified since Phase 12). See "Applying migrations" above for the full
+  correction and how this table works.
+- Not done this session (deferred, needs explicit user go-ahead first): Step 7's
+  `schema_migrations` INSERT for `006_online_branches` (correctly withheld — its DDL
+  hasn't actually run yet, see Step 4 above) and Step 9's `git push`/`vercel --prod`.
+
 ## Coding conventions
 - All components: functional, TypeScript strict
 - API routes: always use `lib/supabaseServer.ts` (service role), never the anon client
@@ -1000,6 +1161,7 @@ npm run ingest         # Run the price ingestion pipeline (see "Price ingestion 
 npm run seed:products  # Seed real products + prices from the Shufersal feed (Phase 5/8)
 npm run seed:branches  # Seed real branches from the Shufersal Stores feed (Phase 8)
 npm run enrich:names   # Translate name_he -> name_en via claude-haiku-4-5 (needs ANTHROPIC_API_KEY)
+npm run probe:chains   # Probe candidate chain feed URLs, report status per chain (Phase 11)
 ```
 
 ## How to reset the database
@@ -1028,6 +1190,19 @@ exists and runs. The corresponding app features (price alert bell, household
 invite/join, `scripts/ingest-prices.ts` writing its summary row) should all
 work end-to-end now. If a future session sees PGRST205/PGRST202 again, treat
 it as a regression (e.g. a project reset), not the original unapplied state.
+
+**Phase 11 correction:** `005_waitlist.sql` — previously documented above as
+NOT YET APPLIED — is actually **CONFIRMED APPLIED** (`waitlist?select=id`
+returns `200 []`, and a `schema_migrations` row exists with
+`applied_at: 2026-07-27T12:56:47`, the same day as this session but evidently
+before it started). This doc just hadn't been updated to reflect it — a
+reminder that "NOT YET APPLIED" in this file is a snapshot, not a live fact;
+re-check via PostgREST before trusting it. Also discovered this session: a
+real `schema_migrations` table exists (see "Database schema" above) tracking
+001-005 as applied. `006_online_branches.sql` (Phase 11) is written but its
+`ALTER TABLE`/seed-data statements are genuinely NOT YET APPLIED (confirmed:
+`branches?select=is_online` returns `42703 column does not exist`) — do not
+add a `schema_migrations` row for it until that's actually run by hand.
 
 ## Scheduling the ingestion pipeline
 **Option A is now wired up (Phase 6, 2026-07-21)** —
