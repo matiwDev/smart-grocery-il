@@ -292,8 +292,8 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t, lang, dismi
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 overflow-y-auto p-4">
-      <div className="bg-[var(--color-bg-panel)] border border-[var(--color-border)] shadow-2xl rounded-3xl w-full max-w-md overflow-hidden relative my-8 sm:my-0 flex flex-col max-h-[100dvh]">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-start sm:items-center justify-center z-50 p-4">
+      <div className="bg-[var(--color-bg-panel)] border border-[var(--color-border)] shadow-2xl rounded-3xl w-full max-w-md overflow-hidden relative flex flex-col max-h-[calc(100dvh-2rem)]">
         {dismissible && (
           <button
             onClick={() => setAuthMode('NONE')}
@@ -303,7 +303,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t, lang, dismi
           </button>
         )}
 
-        <div className="p-8 overflow-y-auto min-h-0 pb-[env(keyboard-inset-height,120px)]">
+        <div className="p-8 overflow-y-auto min-h-0 pb-[env(keyboard-inset-height,140px)]">
           <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-6 text-center">
             {authMode === 'SIGN_IN' ? t.authModalTitleIn : t.authModalTitleUp}
           </h2>
