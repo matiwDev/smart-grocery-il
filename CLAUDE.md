@@ -14,6 +14,8 @@ Users build a shopping basket, the app compares total cost across 4 supermarket 
 - **Styling:** Light/dark theme via CSS variables (see "Theme system" below), RTL/LTR Hebrew/English toggle
 - **Animation:** motion (framer-motion v12)
 - **Map:** react-leaflet + leaflet (client-only, dynamically imported — see gotchas)
+- **Barcode scanning:** @zxing/browser + @zxing/library (`BrowserMultiFormatReader`,
+  live camera decode — see "Phase 12" below)
 
 ## Repo structure
 ```
@@ -26,9 +28,18 @@ app/
                                    # navigation — the old hamburger drawer is triggered by the
                                    # profile avatar instead (still a side drawer as of Phase 11
                                    # step 5; becomes a bottom sheet in step 6, not yet done). New
-                                   # sub-components: BottomNav, ChainSelectorStrip, Toast,
-                                   # ChainPriceBreakdown (shared per-chain price list, used by
-                                   # BasketRow's expand panel), BasketRow (compact basket item row).
+                                   # sub-components: BottomNav, ChainSelectorStrip (Phase 12: now a
+                                   # collapsible dropdown row, not a pill strip — see "Phase 12"
+                                   # below), Toast, ChainPriceBreakdown (shared per-chain price
+                                   # list — takes a plain `prices` map, not a full BasketItem, so
+                                   # it's reusable for a scanned ProductResult too; used by
+                                   # BasketRow's expand panel and the Scan view's found-product
+                                   # card), BasketRow (compact basket item row; expand panel now
+                                   # also shows the barcode, Phase 12). LOCATION view redesigned
+                                   # Phase 12 to a full-screen map (see below) — BranchMapContainer
+                                   # no longer takes a side branch-list. SCAN view redesigned
+                                   # Phase 12 from a placeholder to a real live-camera scanner via
+                                   # @zxing/browser (see "Phase 12" below).
   layout.tsx                      # Root layout, RTL support, pre-hydration theme-init script (see
                                    # "Theme system" below)
   api/
@@ -90,7 +101,9 @@ components/
                                    # Takes a `lang` prop (Phase 10) so its error copy can be
                                    # bilingual per-message instead of one concatenated "EN / HE"
                                    # string — see "Phase 10" below.
-  BranchMapContainer.tsx          # Branch list + map layout; dynamically imports BranchLeafletMap
+  BranchMapContainer.tsx          # Phase 12: full-bleed map only (no side branch-list panel —
+                                   # removed as part of the Location-view redesign, see "Phase 12"
+                                   # below). Dynamically imports BranchLeafletMap
   BranchLeafletMap.tsx            # Actual react-leaflet map — pins colored by chain color_hex,
                                    # popups with Waze deep link, flyTo on active-pin change,
                                    # optional userPosition prop renders a blue "you are here" pin
@@ -120,6 +133,11 @@ supabase/
     004_ingest_log.sql            # ingest_log table (see "Price ingestion pipeline" below).
                                    # CONFIRMED APPLIED (same verification pass) — ingest-prices.ts
                                    # successfully writes rows to it now.
+    005_waitlist.sql               # waitlist table (Phase 11 step 7 / Phase 12, see "Phase 12"
+                                   # below). Written this session — checked live via PostgREST
+                                   # (`waitlist?select=id` → PGRST205) and confirmed NOT YET
+                                   # APPLIED. Needs to be pasted into the Supabase SQL Editor by
+                                   # hand before the Coupons view's waitlist signup will work.
 ```
 
 ## Environment variables
@@ -159,6 +177,8 @@ price_alerts   — id, product_id, user_id, target_price, chain_id, is_active
 ingest_log     — id, chain_id, started_at, finished_at, products_fetched,
                  products_matched, products_inserted, error_text
                  (migration 004, CONFIRMED APPLIED)
+waitlist       — id, email, feature (default 'coupons'), user_id (nullable), created_at
+                 (migration 005, NOT YET APPLIED — see "Repo structure" above)
 ```
 
 RPC functions (migration 003, CONFIRMED APPLIED):
@@ -684,13 +704,191 @@ toward a native-app feel. Steps 1-5 done, steps 6-7 not started:
       invite block — kept even though not in the task's shorter Step 7 list,
       to avoid silently dropping a shipped feature) directly into the sheet
       alongside Saved Lists/Chat/Price Updates/Community links and sign-out.
-- [ ] **Step 7 — waitlist migration + deploy.** Not started:
-      `supabase/migrations/005_waitlist.sql` (table: `id`, `email`,
-      `feature` default `'coupons'`, `user_id` nullable FK to `profiles`,
-      `created_at`, unique on `(email, feature)`; RLS: authenticated insert
-      only, no select policy — write-only from the client, same pattern as
-      `price_alerts`), then `tsc`/`build`/`lint`, push, `vercel --prod`,
-      375px mobile verification.
+- [x] **Step 7 — waitlist migration + deploy.** `supabase/migrations/005_waitlist.sql`
+      written this session (see "Phase 12" below for the migration text and why
+      it's not applied yet); build/lint/deploy done as part of Phase 12.
+
+## Phase 12 — chain selector dropdown, full-screen map, real barcode scanner
+(2026-07-27; the user's own session prompt called this "Phase 9", reusing a
+number already used above for the 2026-07-27 mobile-UI-fixes session —
+numbered 12 here to stay sequential, same reasoning as the Phase 11 renumber
+note above). Covers Phase 11's remaining steps 6-7 (waitlist migration,
+deploy) plus new redesign work not in Phase 11's original scope: the chain
+selector strip → dropdown, the Location view → full-screen map, and the Scan
+view's placeholder → a real live-camera scanner.
+
+- [x] **Chain selector: pill strip → dropdown.** `ChainSelectorStrip` in
+      `app/page.tsx` no longer renders a horizontal scrollable pill row.
+      Collapsed state: a 48px full-width row (bled to the viewport edge via
+      the same `-mx-4 md:-mx-6 lg:-mx-8` trick the header uses) showing up to
+      `MAX_SELECTED_CHAINS` (4) colored dots for the current selection —
+      dashed-border placeholder circles fill unused slots — plus a
+      "בחר רשתות"/"Select chains" label and a `ChevronDown` that rotates on
+      open. Expanded state: an absolutely-positioned panel (`z-30`, so it
+      layers above the search bar's own `z-20`) listing every row from
+      `chains` with a checkmark on selected ones; tapping a row calls the
+      same `toggleChainSelection` used previously (unchanged logic: max 4,
+      toast on a 5th attempt, at least one stays selected, persisted to
+      `localStorage` under `sg_selected_chains`); tapping outside the
+      component (a `mousedown` listener, same pattern as the search
+      autocomplete) or the collapsed row itself closes it. All downstream
+      behavior — `/api/prices/compare`'s `chain_ids` filter, the Location
+      map's `visibleBranches` filter — is unchanged, since it all reads from
+      the same `selectedChains` state.
+- [x] **Home: redundant location row removed.** The button that sat beside
+      the search bar and navigated to the Location tab is gone (the bottom
+      nav's מיקום/Location tab already does this); the search bar now spans
+      the full row width, directly below the chain selector dropdown.
+- [x] **Location view: full-screen map.** Redesigned from a rounded map card
+      + a scrollable branch-list side panel into an edge-to-edge map that
+      fills all space between the header and the bottom nav:
+      - A 56px (`h-14`) distance-slider bar, bled full-width the same way as
+        the chain selector, now **always visible** regardless of GPS status
+        (previously it only showed once `userPosition` was set) — showing
+        "טווח: X.X ק״מ"/"Range: X.X km" and the existing 0.5-50km slider.
+      - The map itself sits in a `flex-1 min-h-0` sibling below the slider —
+        this (plain flexbox, not a `calc(100dvh - ...)` with hardcoded
+        pixel constants) is what makes it "fill all remaining space": the
+        LOCATION `motion.div` is `flex flex-col`, so the map flex-item
+        naturally grows to whatever's left of the viewport once the header,
+        slider, and (hidden-for-this-view, see below) footer/bottom-nav
+        clearance are accounted for. More robust than a magic-number calc
+        since it doesn't need to know the header's exact height.
+      - `BranchMapContainer` (`components/BranchMapContainer.tsx`) had its
+        entire branch-list side panel deleted — it now renders only the
+        full-height map plus the small "current GPS location" badge.
+        Branches are still reachable via the (unchanged) Leaflet popups
+        (name, basket cost, Waze link) from Phase 2/3.
+      - The city-search fallback (shown when GPS is denied) moved from an
+        inline row above the map to a compact absolutely-positioned overlay
+        in the map's top corner (`top-3 end-3` — logical, not literal
+        "top-right", to stay correct in RTL, consistent with how the rest of
+        the app positions things).
+      - The page footer (`בקרת מפתחים (Locked)`) is now conditionally hidden
+        specifically on the LOCATION view (`currentView !== 'LOCATION'`) —
+        without this, its ~50-60px would eat into the "fills ALL remaining
+        space" map area, since it's a flex sibling that sits after the map
+        in the same column.
+      - **Bug caught during verification, not anticipated going in:** the
+        map's "current GPS location" badge (top-start) and the new
+        city-search overlay (top-end) both rendered unconditionally, so on a
+        narrow (375px) viewport with GPS denied they visually collided/
+        overflowed off-screen. Fixed by only rendering the GPS badge when
+        `userPosition` is actually set (`{userPosition && (...)}` in
+        `BranchMapContainer`) — the three location states (requesting/
+        denied/granted) are mutually exclusive, so exactly one of
+        badge/loader/city-search shows at a time now, never two at once.
+- [x] **Barcode number in the basket fold-down.** `BasketItem` gained a
+      `barcode: string | null` field (threaded through both places a
+      `BasketItem` is constructed: `handleAddProduct`'s new-item branch, and
+      the login-time basket-rehydration effect's `products` select, which now
+      also selects `barcode`). In `BasketRow`'s expanded panel, the price-
+      alert bell button and the barcode now share one row
+      (`justify-between`): bell stays on its original side, a
+      `Barcode`-icon (lucide) + monospace 11px barcode number sits on the
+      other, and renders nothing if the product has no barcode.
+      `ChainPriceBreakdown`'s prop signature was narrowed from `item:
+      BasketItem` to `prices: Record<string, ChainPrice>` in the same pass
+      (it only ever read `.prices`) — this is what let the Scan view's
+      found-product card reuse it for a `ProductResult` below, without
+      needing a fake `quantity` field to satisfy `BasketItem`'s shape.
+- [x] **Real barcode scanner.** Installed `@zxing/browser` + `@zxing/library`.
+      The Scan view's "Coming Soon" placeholder is replaced by an actual live
+      decoder:
+      - A `<video>` element (muted, `playsInline`, `autoPlay`) inside a
+        `aspect-[3/4]` black rounded box, with a CSS-only scanning overlay
+        (four corner-bracket `div`s, no images) and a small accent-colored
+        badge icon — shown only while `scanStage === 'scanning'`.
+      - `BrowserMultiFormatReader.decodeFromVideoDevice(undefined, videoEl,
+        callback)` drives continuous decoding; the callback fires per frame
+        with `(result, error)`, and a `hasHandledScanRef` guard makes sure
+        only the *first* successful decode in a session is acted on (zxing
+        keeps calling back after a match until you call `controls.stop()`).
+      - On a match: `navigator.vibrate(100)`, stop the decoder, `scanStage`
+        moves `'scanning' → 'looking-up'` (spinner + "מחפש מוצר.../Finding
+        product..."), then a single-result `/api/products/search?q=
+        {barcode}&limit=1` lookup drives `'found'` (product card, reusing
+        `ChainPriceBreakdown`, with "הוסף לסל"/"Add to basket" — calls the
+        same `handleAddProduct` as everywhere else, then navigates to HOME —
+        and "סרוק שוב"/"Scan again") or `'not-found'` (barcode number shown,
+        "Scan again" + "חפש ידנית"/"Search manually" which just pre-fills the
+        always-visible manual-entry input below, per spec — it doesn't also
+        reset the scan session).
+      - **Camera lifecycle** (`useEffect` keyed on `[currentView, scanStage,
+        handleLiveScanResult]`): tears the camera down (`controls.stop()`)
+        and resets scan state whenever the Scan tab isn't active or the user
+        taps "Scan again" (`scanStage` flips back to `'scanning'`, which is
+        what re-triggers this effect — deliberately *not* a separate
+        `scanSessionKey` counter, since `scanStage` transitioning back to
+        `'scanning'` is already a sufficient, simpler trigger). Camera
+        permission handling: a `navigator.permissions.query({name:'camera'})`
+        pre-check fast-paths straight to the `'denied'` UI state without ever
+        calling `getUserMedia` (and thus without a browser permission prompt)
+        if it's already known to be denied; otherwise falls through to
+        `decodeFromVideoDevice`, whose rejection's `err.name` (
+        `NotAllowedError`/`PermissionDeniedError` → `'denied'`, anything else
+        including "no camera device" → `'unavailable'`) drives the UI. A
+        **hard 8-second `setTimeout` fallback** forces `'unavailable'` if
+        neither path has resolved by then — added specifically because
+        `getUserMedia` can hang indefinitely rather than reject on some
+        devices/browsers with literally no camera hardware, which is exactly
+        what this session's own verification environment does (see the
+        note below).
+      - `cameraStatus === 'denied'`: hides the viewfinder, shows a
+        `VideoOff` icon + explanatory copy + a retry button (re-attempts the
+        permission negotiation; it cannot deep-link to OS camera settings
+        from a web page, so this is a "try again", not a settings shortcut).
+        `cameraStatus === 'unavailable'` (no camera device, e.g. desktop):
+        hides the viewfinder, shows a `Camera` icon + "use manual entry
+        below" copy, nothing else.
+      - Manual barcode entry (always visible below the viewfinder,
+        pre-existing from Phase 11 step 5) is untouched — it's a fully
+        separate code path (`handleScanSearch`, `scanBarcodeInput`/
+        `scanResults`) from the live-scan result flow described above.
+      - **Verification note:** this session's own Browser-pane testing tool
+        runs the tab with `document.hidden === true` / `document
+        .visibilityState === 'hidden'` even while actively driving it —
+        confirmed directly via `javascript_tool`. This throttles/delays
+        Framer Motion's rAF-driven view-transition animations and (observed,
+        not fully root-caused) the camera-permission negotiation inside the
+        Scan effect, sometimes by 10+ seconds. This is a property of the
+        test tool's tab, not the app: a raw, unwrapped `getUserMedia()` call
+        injected directly into the same page resolved/rejected normally in
+        ~3s regardless. Verified working end-to-end despite the lag: manual
+        barcode entry (searched a real seeded barcode, found the product,
+        added it to the basket, quantity incremented correctly); the
+        `cameraStatus === 'denied'` and `'unavailable'` UI branches (each
+        confirmed correct by briefly forcing the initial state and
+        reverting — not by completing a real getUserMedia round trip, which
+        never resolved fast enough in this specific tool's tab to observe
+        directly). Real foregrounded mobile browsers do not exhibit this
+        throttling.
+      - New dictionary keys (both `he`/`en`): `selectChainsLabel`,
+        `scanAddToBasket`, `scanAgain`, `scanManually`, `scanFindingProduct`,
+        `scanNotFound`, `scanCameraDeniedMsg`, `scanEnableCamera`,
+        `scanNoCameraMsg`. Removed as dead code: `comingSoon` (only prior
+        user was the placeholder this step replaced).
+- [x] `supabase/migrations/005_waitlist.sql` written (see "Repo structure"
+      above for the table shape) — **checked live via PostgREST first**
+      (`waitlist?select=id` → `PGRST205`, i.e. genuinely not applied, not
+      just assumed) per this repo's established migration-check convention.
+      Per this session's own task instructions, migrations are written and
+      documented here but **not applied** (no CLI/DB access in this
+      environment — same limitation as every prior migration, see "Applying
+      migrations" below); paste the file's contents into the Supabase SQL
+      Editor by hand before the Coupons view's waitlist signup will work.
+- [x] `npx tsc --noEmit`, `npm run lint`, `npm run build` all clean.
+      Verified in a real browser (desktop 1280×720 and mobile 375×812):
+      chain selector dropdown (all 4 chains listed, toggle + persistence +
+      dot updates confirmed), Location view fills the screen edge-to-edge on
+      375px with no footer/branch-list intruding, basket fold-down shows the
+      barcode, and the manual-entry scan-to-basket flow works end-to-end.
+      Live-camera happy path (an actual decoded barcode from the physical
+      camera) was **not** verified in this session — no camera hardware is
+      available in the sandboxed verification environment; the code path
+      (video ref → `decodeFromVideoDevice` → `handleLiveScanResult`) is
+      standard `@zxing/browser` usage and shares its lookup/add-to-basket
+      logic with the already-verified manual-entry path.
 
 ## Coding conventions
 - All components: functional, TypeScript strict
