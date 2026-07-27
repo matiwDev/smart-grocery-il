@@ -7,7 +7,7 @@ import {
   MapPin, Navigation, ChevronDown,
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   ArrowDown, Loader2, Bell, Copy, UserPlus, Sun, Moon,
-  ScanBarcode, Camera, Ticket, Check, Mail, Barcode, VideoOff,
+  ScanBarcode, Camera, Ticket, Check, Mail, Barcode, VideoOff, Truck,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
@@ -96,6 +96,10 @@ interface BranchRow {
   chain_id: string;
   lat: number | null;
   lng: number | null;
+  // Phase 11: absent until supabase/migrations/006_online_branches.sql is
+  // applied (select('*') just omits the key rather than erroring) — treat
+  // as false until then.
+  is_online?: boolean;
 }
 
 interface LiveBranch {
@@ -110,6 +114,7 @@ interface LiveBranch {
   lat: number | null;
   lng: number | null;
   color_hex: string;
+  isOnline: boolean;
 }
 
 interface SavedBasketItem {
@@ -534,6 +539,7 @@ function ChainBar({ chain, total, maxTotal, isMin, lang }: {
 
 const CHAIN_SELECTION_KEY = 'sg_selected_chains';
 const MAX_SELECTED_CHAINS = 4;
+const INCLUDE_DELIVERY_KEY = 'sg_include_delivery';
 
 // Brand colors, hardcoded as a fallback for the brief window before the
 // `chains` table fetch resolves (selectedChains can already be populated from
@@ -857,6 +863,10 @@ export default function SmartGroceryDashboard() {
   const [locationStatus, setLocationStatus] = useState<'idle' | 'requesting' | 'granted' | 'denied'>('idle');
   const [distanceKm, setDistanceKm] = useState<number>(5);
   const [cityQuery, setCityQuery] = useState('');
+  // Phase 11: "כולל משלוח"/"Include delivery" toggle — shows online (no
+  // lat/lng) branches as a fixed chip row above the map instead of as map
+  // pins. Persisted like the other location prefs.
+  const [includeDelivery, setIncludeDelivery] = useState(false);
   const hasLoadedLocationPrefRef = useRef(false);
 
   // Chat
@@ -915,6 +925,19 @@ export default function SmartGroceryDashboard() {
     if (selectedChains.length === 0) return;
     try { localStorage.setItem(CHAIN_SELECTION_KEY, JSON.stringify(selectedChains)); } catch {}
   }, [selectedChains]);
+
+  // ── Include-delivery toggle: load once, then persist ────────────────────────
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(INCLUDE_DELIVERY_KEY);
+      if (raw) setIncludeDelivery(raw === 'true');
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem(INCLUDE_DELIVERY_KEY, String(includeDelivery)); } catch {}
+  }, [includeDelivery]);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -1410,6 +1433,7 @@ export default function SmartGroceryDashboard() {
           lat: b.lat,
           lng: b.lng,
           color_hex: chains.find((c) => c.id === b.chain_id)?.color_hex ?? '#6366f1',
+          isOnline: b.is_online ?? false,
         })));
       }
     });
@@ -1467,8 +1491,14 @@ export default function SmartGroceryDashboard() {
   // Branches within the selected radius of the user's GPS position, or matching
   // the manually-entered city when location access was denied.
   const filteredBranches = React.useMemo(() => {
+    // Online branches have no lat/lng and are surfaced separately (see
+    // onlineBranches below) — excluded here up front rather than relying on
+    // the lat/lng guard below alone, so they never enter the map-pin
+    // pipeline (e.g. the "pre-select cheapest chain's branch" effect) even
+    // in the brief window before GPS/city filtering applies.
+    const physicalBranches = liveBranches.filter((b) => !b.isOnline);
     if (userPosition) {
-      return liveBranches
+      return physicalBranches
         .filter((b): b is LiveBranch & { lat: number; lng: number } => !!(b.lat && b.lng))
         .map((b) => {
           const distKm = haversineKm(userPosition.lat, userPosition.lng, b.lat, b.lng);
@@ -1479,11 +1509,11 @@ export default function SmartGroceryDashboard() {
     }
     if (locationStatus === 'denied' && cityQuery.trim()) {
       const q = cityQuery.trim().toLowerCase();
-      return liveBranches.filter((b) =>
+      return physicalBranches.filter((b) =>
         (b.cityHe ?? '').includes(cityQuery.trim()) || (b.cityEn ?? '').toLowerCase().includes(q)
       );
     }
-    return liveBranches;
+    return physicalBranches;
   }, [liveBranches, userPosition, distanceKm, locationStatus, cityQuery, lang]);
 
   // Further narrowed to the chain selector strip's current selection
@@ -1491,6 +1521,17 @@ export default function SmartGroceryDashboard() {
     if (selectedChains.length === 0) return filteredBranches;
     return filteredBranches.filter((b) => selectedChains.includes(b.chain_id));
   }, [filteredBranches, selectedChains]);
+
+  // Online (delivery) branches — shown as a fixed chip row above the map
+  // instead of as map pins, gated behind the "כולל משלוח"/"Include delivery"
+  // toggle. Computed from liveBranches directly (not filteredBranches), since
+  // GPS distance / city filtering don't apply to a branch with no location.
+  const onlineBranches = React.useMemo(() => {
+    if (!includeDelivery) return [];
+    return liveBranches.filter(
+      (b) => b.isOnline && (selectedChains.length === 0 || selectedChains.includes(b.chain_id))
+    );
+  }, [liveBranches, includeDelivery, selectedChains]);
 
   // Pre-select the cheapest chain's first branch when arriving via "Navigate to cheapest"
   useEffect(() => {
@@ -1924,7 +1965,35 @@ export default function SmartGroceryDashboard() {
                 onChange={(e) => setDistanceKm(Number(e.target.value))}
                 className="flex-1 accent-[var(--color-accent)]"
               />
+              <button
+                type="button"
+                onClick={() => setIncludeDelivery((v) => !v)}
+                className={`shrink-0 flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium border transition-colors ${
+                  includeDelivery
+                    ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)] border-[var(--color-accent)]'
+                    : 'bg-transparent text-[var(--color-text-secondary)] border-[var(--color-border)]'
+                }`}
+              >
+                <Truck className="w-3.5 h-3.5" />
+                {lang === 'he' ? 'כולל משלוח' : 'Include delivery'}
+              </button>
             </div>
+
+            {/* Online (delivery) branches — fixed row above the map, not map pins */}
+            {includeDelivery && onlineBranches.length > 0 && (
+              <div className="shrink-0 -mx-4 md:-mx-6 lg:-mx-8 px-4 md:px-6 lg:px-8 py-2 flex items-center gap-2 overflow-x-auto bg-[var(--color-bg-subtle)] border-b border-[var(--color-border)]">
+                {onlineBranches.map((b) => (
+                  <div
+                    key={b.id}
+                    className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium"
+                    style={{ backgroundColor: `${b.color_hex}1a`, color: b.color_hex }}
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    {b.name}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Map fills all remaining space down to the bottom nav. `flex` (not a
                 percentage height) is deliberate: BranchMapContainer's child chain
