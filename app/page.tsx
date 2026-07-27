@@ -725,6 +725,16 @@ export default function SmartGroceryDashboard() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Scan view: manual barcode entry
+  const [scanBarcodeInput, setScanBarcodeInput] = useState('');
+  const [scanResults, setScanResults] = useState<ProductResult[]>([]);
+  const [isScanSearching, setIsScanSearching] = useState(false);
+  const [scanSearched, setScanSearched] = useState(false);
+
+  // Coupons view: waitlist email signup
+  const [couponEmail, setCouponEmail] = useState('');
+  const [couponStatus, setCouponStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
   // Basket state
   const [basket, setBasket] = useState<BasketItem[]>([]);
   const [activeBasketId, setActiveBasketId] = useState<string | null>(null);
@@ -1120,6 +1130,44 @@ export default function SmartGroceryDashboard() {
       const p = item.prices[chainId]?.price ?? item.min_price ?? 0;
       return acc + (p * item.quantity);
     }, 0);
+  };
+
+  // ── Scan: manual barcode search ──────────────────────────────────────────────
+
+  const handleScanSearch = async () => {
+    const q = scanBarcodeInput.trim();
+    if (!q) return;
+    setIsScanSearching(true);
+    setScanSearched(true);
+    try {
+      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&limit=8`);
+      const data = await res.json();
+      setScanResults(data.products ?? []);
+    } catch {
+      setScanResults([]);
+    } finally {
+      setIsScanSearching(false);
+    }
+  };
+
+  // ── Coupons: waitlist signup ─────────────────────────────────────────────────
+
+  const handleJoinWaitlist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase || !couponEmail.trim()) return;
+    setCouponStatus('loading');
+    const { error } = await supabase.from('waitlist').insert({
+      email: couponEmail.trim(),
+      feature: 'coupons',
+      user_id: currentUser?.id ?? null,
+    });
+    if (error) {
+      setCouponStatus('error');
+    } else {
+      setCouponStatus('success');
+      setCouponEmail('');
+    }
+    setTimeout(() => setCouponStatus('idle'), 4000);
   };
 
   // ── Map branches load ────────────────────────────────────────────────────────
@@ -1907,24 +1955,139 @@ export default function SmartGroceryDashboard() {
         {/* ═══ SCAN ═══ */}
         {currentView === 'SCAN' && (
           <motion.div key="SCAN" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}
-            className="flex-1 flex flex-col items-center justify-center min-h-[50vh] bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-8 text-center">
-            <div className="w-20 h-20 bg-[var(--color-bg-subtle)]/50 rounded-2xl flex items-center justify-center mb-6 border border-[var(--color-border)]/50 text-[var(--color-accent)]">
-              <ScanBarcode className="w-10 h-10" />
+            className="flex-1 flex flex-col gap-6 max-w-lg mx-auto w-full">
+            <div className="flex flex-col items-center text-center bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-8 mt-6">
+              <div className="relative w-24 h-24 bg-[var(--color-bg-subtle)]/50 rounded-3xl flex items-center justify-center mb-6 border border-[var(--color-border)]/50 text-[var(--color-accent)]">
+                <Camera className="w-11 h-11" />
+                <div className="absolute -bottom-2 -end-2 w-10 h-10 bg-[var(--color-accent)] rounded-xl flex items-center justify-center text-[var(--color-accent-text)] shadow-lg shadow-[var(--color-accent)]/20">
+                  <ScanBarcode className="w-5 h-5" />
+                </div>
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-accent)] bg-[var(--color-accent)]/10 border border-[var(--color-accent)]/20 px-3 py-1 rounded-full mb-4">
+                {t.comingSoon}
+              </span>
+              <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">{t.scanTitle}</h2>
+              <p className="text-[var(--color-text-muted)] text-sm">{t.scanSubtitle}</p>
             </div>
-            <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">{t.scanTitle}</h2>
-            <p className="text-[var(--color-text-muted)]">{t.comingSoon}</p>
+
+            {/* Manual barcode entry fallback */}
+            <div className="bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-6">
+              <label className="block text-sm font-medium text-[var(--color-text-muted)] mb-2">{t.scanManualLabel}</label>
+              <form
+                onSubmit={(e) => { e.preventDefault(); handleScanSearch(); }}
+                className="flex gap-3"
+              >
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={scanBarcodeInput}
+                  onChange={(e) => setScanBarcodeInput(e.target.value)}
+                  placeholder={t.scanManualPlaceholder}
+                  className="flex-1 min-h-[44px] bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-xl px-4 text-[var(--color-text-primary)] font-mono focus:outline-none focus:border-[var(--color-accent)] transition-colors"
+                  dir="ltr"
+                />
+                <button
+                  type="submit"
+                  disabled={!scanBarcodeInput.trim() || isScanSearching}
+                  className="min-h-[44px] px-5 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-xl font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isScanSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                  {t.search}
+                </button>
+              </form>
+
+              {scanSearched && !isScanSearching && (
+                <div className="mt-4 flex flex-col gap-2">
+                  {scanResults.length === 0 && (
+                    <p className="text-sm text-[var(--color-text-muted)]">{t.noResults}</p>
+                  )}
+                  {scanResults.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => handleAddProduct(p)}
+                      className="w-full flex items-center justify-between p-3 bg-[var(--color-bg-subtle)]/50 hover:bg-[var(--color-bg-hover)] rounded-xl border border-[var(--color-border)]/50 transition-colors text-start"
+                    >
+                      <span className="font-medium text-sm text-[var(--color-text-primary)]">{p.name_he}</span>
+                      {p.min_price !== null && (
+                        <span className="font-mono text-[var(--color-success)] text-sm shrink-0 ms-3">₪{p.min_price.toFixed(2)}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </motion.div>
         )}
 
         {/* ═══ COUPONS ═══ */}
         {currentView === 'COUPONS' && (
           <motion.div key="COUPONS" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}
-            className="flex-1 flex flex-col items-center justify-center min-h-[50vh] bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-8 text-center">
-            <div className="w-20 h-20 bg-[var(--color-bg-subtle)]/50 rounded-2xl flex items-center justify-center mb-6 border border-[var(--color-border)]/50 text-[var(--color-accent)]">
-              <Ticket className="w-10 h-10" />
+            className="flex-1 flex flex-col gap-6 max-w-lg mx-auto w-full">
+            <div className="text-center mt-6">
+              <div className="w-20 h-20 mx-auto bg-[var(--color-bg-subtle)]/50 rounded-2xl flex items-center justify-center mb-4 border border-[var(--color-border)]/50 text-[var(--color-accent)]">
+                <Ticket className="w-10 h-10" />
+              </div>
+              <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-1">{t.couponsTitle}</h2>
+              <p className="text-[var(--color-text-muted)] text-sm">{t.couponsSubtitle}</p>
             </div>
-            <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">{t.couponsTitle}</h2>
-            <p className="text-[var(--color-text-muted)]">{t.comingSoon}</p>
+
+            {/* Placeholder coupon cards (illustrative only, no real data) */}
+            <div className="flex flex-col gap-3">
+              {[
+                { pct: '15%', color: 'var(--color-success)' },
+                { pct: '20%', color: 'var(--color-accent)' },
+                { pct: '10%', color: 'var(--color-warning)' },
+              ].map((c, i) => (
+                <div
+                  key={i}
+                  className="relative flex items-center gap-4 bg-[var(--color-bg-panel)]/60 border border-dashed border-[var(--color-border-strong)] rounded-2xl p-5 opacity-60 select-none"
+                >
+                  <div
+                    className="w-14 h-14 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0"
+                    style={{ backgroundColor: c.color }}
+                  >
+                    {c.pct}
+                  </div>
+                  <div className="flex-1 h-3 bg-[var(--color-bg-subtle)] rounded-full" />
+                  <Ticket className="w-5 h-5 text-[var(--color-text-muted)] shrink-0" />
+                </div>
+              ))}
+            </div>
+
+            {/* Waitlist signup */}
+            <div className="bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-6">
+              <p className="text-sm font-medium text-[var(--color-text-primary)] mb-3 flex items-center gap-2">
+                <Mail className="w-4 h-4 text-[var(--color-accent)]" /> {t.couponsNotifyMe}
+              </p>
+              <form onSubmit={handleJoinWaitlist} className="flex flex-col sm:flex-row gap-3">
+                <input
+                  type="email"
+                  required
+                  value={couponEmail}
+                  onChange={(e) => setCouponEmail(e.target.value)}
+                  placeholder={t.couponsEmailPlaceholder}
+                  className="flex-1 min-h-[44px] bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-xl px-4 text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] transition-colors"
+                  dir="ltr"
+                />
+                <button
+                  type="submit"
+                  disabled={couponStatus === 'loading' || !couponEmail.trim()}
+                  className="min-h-[44px] px-5 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-xl font-semibold transition-colors disabled:opacity-50"
+                >
+                  {couponStatus === 'loading' ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : t.couponsJoinButton}
+                </button>
+              </form>
+              {couponStatus === 'success' && (
+                <p className="mt-3 text-sm font-bold text-[var(--color-success)] flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4" /> {t.couponsJoined}
+                </p>
+              )}
+              {couponStatus === 'error' && (
+                <p className="mt-3 text-sm font-bold text-[var(--color-danger)] flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4" /> {t.couponsError}
+                </p>
+              )}
+            </div>
           </motion.div>
         )}
 

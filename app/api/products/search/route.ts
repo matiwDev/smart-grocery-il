@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const { data: products, error: productError } = await supabase
       .from('products')
       .select('id, barcode, name_he, name_en, category, image_url')
-      .or(`name_he.ilike.%${query}%,name_en.ilike.%${query}%`)
+      .or(`name_he.ilike.%${query}%,name_en.ilike.%${query}%,barcode.eq.${query}`)
       .limit(limit);
 
     if (productError) throw productError;
