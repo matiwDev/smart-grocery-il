@@ -471,6 +471,60 @@ function ChainBar({ chain, total, maxTotal, isMin, lang }: {
   );
 }
 
+const CHAIN_SELECTION_KEY = 'sg_selected_chains';
+const MAX_SELECTED_CHAINS = 4;
+
+// Horizontal strip of chain pills — up to MAX_SELECTED_CHAINS selected at once,
+// persisted to localStorage. Drives which chains the comparison panel, the
+// /api/prices/compare call, and the Location map's pins show.
+function ChainSelectorStrip({ chains, selectedChains, onToggle, lang, t }: {
+  chains: ChainMeta[]; selectedChains: string[]; onToggle: (id: string) => void; lang: Lang; t: Dictionary;
+}) {
+  if (chains.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs font-medium text-[var(--color-text-muted)] px-1">{t.chainsLabel}</span>
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+        {chains.map((chain) => {
+          const isSelected = selectedChains.includes(chain.id);
+          const name = lang === 'he' ? chain.name_he : chain.name_en;
+          return (
+            <button
+              key={chain.id}
+              onClick={() => onToggle(chain.id)}
+              className={`flex items-center gap-2 shrink-0 min-h-[36px] px-3 rounded-full border text-xs font-semibold transition-colors ${
+                isSelected
+                  ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+                  : 'border-[var(--color-border)] bg-[var(--color-bg-subtle)]/50 text-[var(--color-text-muted)]'
+              }`}
+            >
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: chain.color_hex }} />
+              {name}
+              {isSelected && <Check className="w-3.5 h-3.5 shrink-0" />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Small auto-dismissing toast, used for the "max 4 chains" notice.
+function Toast({ message }: { message: string | null }) {
+  return (
+    <AnimatePresence>
+      {message && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 bg-[var(--color-text-primary)] text-[var(--color-bg-panel)] text-sm font-medium px-4 py-2.5 rounded-full shadow-2xl whitespace-nowrap"
+        >
+          {message}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function SmartGroceryDashboard() {
@@ -501,6 +555,12 @@ export default function SmartGroceryDashboard() {
   const [showPredictions, setShowPredictions] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Chain selector (up to MAX_SELECTED_CHAINS, persisted to localStorage)
+  const [selectedChains, setSelectedChains] = useState<string[]>([]);
+  const hasInitedChainSelectionRef = useRef(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Basket state
   const [basket, setBasket] = useState<BasketItem[]>([]);
@@ -566,6 +626,47 @@ export default function SmartGroceryDashboard() {
       if (data) setChains(data);
     });
   }, []);
+
+  // ── Chain selection: load saved preference once chains arrive, then persist ──
+
+  useEffect(() => {
+    if (chains.length === 0 || hasInitedChainSelectionRef.current) return;
+    hasInitedChainSelectionRef.current = true;
+    try {
+      const raw = localStorage.getItem(CHAIN_SELECTION_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as string[];
+        const valid = saved.filter((id) => chains.some((c) => c.id === id));
+        if (valid.length > 0) { setSelectedChains(valid); return; }
+      }
+    } catch {}
+    setSelectedChains(chains.map((c) => c.id));
+  }, [chains]);
+
+  useEffect(() => {
+    if (selectedChains.length === 0) return;
+    try { localStorage.setItem(CHAIN_SELECTION_KEY, JSON.stringify(selectedChains)); } catch {}
+  }, [selectedChains]);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMsg(null), 2500);
+  }, []);
+
+  const toggleChainSelection = (id: string) => {
+    setSelectedChains((prev) => {
+      if (prev.includes(id)) {
+        if (prev.length === 1) return prev; // keep at least one chain selected
+        return prev.filter((c) => c !== id);
+      }
+      if (prev.length >= MAX_SELECTED_CHAINS) {
+        showToast(t.maxChainsToast);
+        return prev;
+      }
+      return [...prev, id];
+    });
+  };
 
   // ── Auth & profile load ──────────────────────────────────────────────────────
 
@@ -736,7 +837,7 @@ export default function SmartGroceryDashboard() {
     fetch('/api/prices/compare', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({ items, chain_ids: selectedChains.length > 0 ? selectedChains : undefined }),
     })
       .then((r) => r.json())
       .then((data) => {
@@ -745,7 +846,7 @@ export default function SmartGroceryDashboard() {
       })
       .catch(() => {})
       .finally(() => setIsComparing(false));
-  }, [basket]);
+  }, [basket, selectedChains]);
 
   // ── Basket CRUD ──────────────────────────────────────────────────────────────
 
@@ -954,12 +1055,18 @@ export default function SmartGroceryDashboard() {
     return liveBranches;
   }, [liveBranches, userPosition, distanceKm, locationStatus, cityQuery, lang]);
 
+  // Further narrowed to the chain selector strip's current selection
+  const visibleBranches = React.useMemo(() => {
+    if (selectedChains.length === 0) return filteredBranches;
+    return filteredBranches.filter((b) => selectedChains.includes(b.chain_id));
+  }, [filteredBranches, selectedChains]);
+
   // Pre-select the cheapest chain's first branch when arriving via "Navigate to cheapest"
   useEffect(() => {
-    if (!preferredChainId || filteredBranches.length === 0) return;
-    const match = filteredBranches.find((b) => b.chain_id === preferredChainId);
+    if (!preferredChainId || visibleBranches.length === 0) return;
+    const match = visibleBranches.find((b) => b.chain_id === preferredChainId);
     if (match) setActiveMapPin(match.id);
-  }, [preferredChainId, filteredBranches]);
+  }, [preferredChainId, visibleBranches]);
 
   // ── Saved lists load ─────────────────────────────────────────────────────────
 
@@ -1167,6 +1274,9 @@ export default function SmartGroceryDashboard() {
         {/* ═══ HOME ═══ */}
         {currentView === 'HOME' && (
           <motion.div key="HOME" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1 flex flex-col gap-6">
+
+            {/* Chain selector strip */}
+            <ChainSelectorStrip chains={chains} selectedChains={selectedChains} onToggle={toggleChainSelection} lang={lang} t={t} />
 
             {/* Search bar + location button */}
             <div className="flex flex-col md:flex-row gap-4">
@@ -1515,7 +1625,7 @@ export default function SmartGroceryDashboard() {
               city={t.telAviv}
               lang={lang}
               theme={theme}
-              liveBranches={filteredBranches}
+              liveBranches={visibleBranches}
               activeMapPin={activeMapPin}
               setActiveMapPin={setActiveMapPin}
               preferredChainId={preferredChainId}
@@ -1825,6 +1935,8 @@ export default function SmartGroceryDashboard() {
           </div>
         )}
       </AnimatePresence>
+
+      <Toast message={toastMsg} />
 
       {/* ── About sheet ── */}
       <AnimatePresence>

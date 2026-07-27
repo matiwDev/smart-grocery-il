@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabaseServer';
 
 // POST /api/prices/compare
-// Body: { items: [{ product_id: string, quantity: number }] }
-// Returns total cost per chain + per-item breakdown
+// Body: { items: [{ product_id: string, quantity: number }], chain_ids?: string[] }
+// Returns total cost per chain + per-item breakdown. When chain_ids is given,
+// only those chains are included (Phase 8 chain selector strip).
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { items } = body as {
+    const { items, chain_ids: chainIdFilter } = body as {
       items: Array<{ product_id: string; quantity: number }>;
+      chain_ids?: string[];
     };
 
     if (!Array.isArray(items) || items.length === 0) {
@@ -38,8 +40,12 @@ export async function POST(req: NextRequest) {
       priceMap[p.product_id][p.chain_id] = p.price;
     }
 
-    // Get unique chain ids that appear in the price data
-    const chainIds = [...new Set((prices ?? []).map((p) => p.chain_id))];
+    // Get unique chain ids that appear in the price data, optionally narrowed
+    // to the caller's selected chains
+    let chainIds = [...new Set((prices ?? []).map((p) => p.chain_id))];
+    if (Array.isArray(chainIdFilter) && chainIdFilter.length > 0) {
+      chainIds = chainIds.filter((id) => chainIdFilter.includes(id));
+    }
 
     // For each chain: compute total, track which items are missing (not sold there)
     const comparison: Record<
