@@ -15,8 +15,15 @@ import { AuthModal, AuthMode } from '@/components/AuthModal';
 import { supabase } from '@/utils/supabase';
 
 type Lang = 'he' | 'en';
-type View = 'HOME' | 'PROFILE' | 'SAVED_LISTS' | 'PRICE_UPDATES' | 'COMMUNITY' | 'LOCATION' | 'CHAT';
+type View = 'HOME' | 'PROFILE' | 'SAVED_LISTS' | 'PRICE_UPDATES' | 'COMMUNITY' | 'LOCATION' | 'CHAT' | 'SCAN' | 'COUPONS';
 type Theme = 'light' | 'dark';
+
+const BOTTOM_NAV_TABS: { view: View; icon: React.ComponentType<{ className?: string }> }[] = [
+  { view: 'HOME', icon: Home },
+  { view: 'SCAN', icon: ScanBarcode },
+  { view: 'COUPONS', icon: Ticket },
+  { view: 'LOCATION', icon: MapPin },
+];
 
 const THEME_STORAGE_KEY = 'sg_theme';
 
@@ -365,6 +372,44 @@ function DrawerItem({ view, currentView, setCurrentView, icon: Icon, label, clos
       <Icon className="w-5 h-5" />
       {label}
     </button>
+  );
+}
+
+interface BottomNavProps {
+  currentView: View;
+  setCurrentView: (v: View) => void;
+  t: Dictionary;
+}
+
+function BottomNav({ currentView, setCurrentView, t }: BottomNavProps) {
+  const labelFor = (view: View) => ({
+    HOME: t.navHome, SCAN: t.navScan, COUPONS: t.navCoupons, LOCATION: t.location,
+  } as Record<string, string>)[view];
+
+  return (
+    <nav
+      className="fixed bottom-0 start-0 end-0 z-40 bg-[var(--color-bg-panel)] border-t border-[var(--color-border)] flex items-stretch"
+      style={{ height: 'calc(64px + env(safe-area-inset-bottom, 16px))', paddingBottom: 'env(safe-area-inset-bottom, 16px)' }}
+    >
+      {BOTTOM_NAV_TABS.map(({ view, icon: Icon }) => {
+        const isActive = currentView === view;
+        return (
+          <button
+            key={view}
+            onClick={() => setCurrentView(view)}
+            className="flex-1 flex flex-col items-center justify-center gap-1 relative min-h-[44px]"
+          >
+            {isActive && (
+              <span className="absolute top-1.5 w-1.5 h-1.5 rounded-full bg-[var(--color-accent)]" />
+            )}
+            <Icon className={`w-6 h-6 ${isActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-muted)]'}`} />
+            <span className={`text-[10px] font-medium ${isActive ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-muted)]'}`}>
+              {labelFor(view)}
+            </span>
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -1059,7 +1104,7 @@ export default function SmartGroceryDashboard() {
 
   return (
     <div
-      className="w-full min-h-screen flex flex-col font-sans p-4 md:p-6 lg:p-8 overflow-x-clip relative transition-colors duration-300 bg-[var(--color-bg-base)] text-[var(--color-text-primary)]"
+      className="w-full min-h-screen flex flex-col font-sans p-4 md:p-6 lg:p-8 pb-[80px] overflow-x-clip relative transition-colors duration-300 bg-[var(--color-bg-base)] text-[var(--color-text-primary)]"
       dir={lang === 'he' ? 'rtl' : 'ltr'}
     >
       {/* ── Header: compact icon row ── */}
@@ -1678,6 +1723,30 @@ export default function SmartGroceryDashboard() {
           </motion.div>
         )}
 
+        {/* ═══ SCAN ═══ */}
+        {currentView === 'SCAN' && (
+          <motion.div key="SCAN" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}
+            className="flex-1 flex flex-col items-center justify-center min-h-[50vh] bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-8 text-center">
+            <div className="w-20 h-20 bg-[var(--color-bg-subtle)]/50 rounded-2xl flex items-center justify-center mb-6 border border-[var(--color-border)]/50 text-[var(--color-accent)]">
+              <ScanBarcode className="w-10 h-10" />
+            </div>
+            <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">{t.scanTitle}</h2>
+            <p className="text-[var(--color-text-muted)]">{t.comingSoon}</p>
+          </motion.div>
+        )}
+
+        {/* ═══ COUPONS ═══ */}
+        {currentView === 'COUPONS' && (
+          <motion.div key="COUPONS" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}
+            className="flex-1 flex flex-col items-center justify-center min-h-[50vh] bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-8 text-center">
+            <div className="w-20 h-20 bg-[var(--color-bg-subtle)]/50 rounded-2xl flex items-center justify-center mb-6 border border-[var(--color-border)]/50 text-[var(--color-accent)]">
+              <Ticket className="w-10 h-10" />
+            </div>
+            <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">{t.couponsTitle}</h2>
+            <p className="text-[var(--color-text-muted)]">{t.comingSoon}</p>
+          </motion.div>
+        )}
+
       </AnimatePresence>
 
       {/* ── Footer ── */}
@@ -1687,6 +1756,8 @@ export default function SmartGroceryDashboard() {
           <span className="text-xs font-mono text-[var(--color-text-muted)]">{t.devOptionsLocked}</span>
         </div>
       </footer>
+
+      <BottomNav currentView={currentView} setCurrentView={setCurrentView} t={t} />
 
       {/* ── Drawer ── */}
       <AnimatePresence>
@@ -1704,7 +1775,6 @@ export default function SmartGroceryDashboard() {
                 <button onClick={() => setIsDrawerOpen(false)} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] p-3 -m-3"><X className="w-5 h-5" /></button>
               </div>
               <div className="flex-1 overflow-y-auto py-4 flex flex-col gap-1 px-3">
-                <DrawerItem view="HOME"          currentView={currentView} setCurrentView={setCurrentView} icon={Home}         label={t.navHome}         close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="PROFILE"       currentView={currentView} setCurrentView={setCurrentView} icon={User}         label={t.navProfile}      close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="SAVED_LISTS"   currentView={currentView} setCurrentView={setCurrentView} icon={List}         label={t.navSavedLists}   close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="CHAT"          currentView={currentView} setCurrentView={setCurrentView} icon={MessageSquare} label={t.navChat}         close={() => setIsDrawerOpen(false)} />
