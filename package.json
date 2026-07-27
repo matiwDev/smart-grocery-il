@@ -12,7 +12,8 @@
     "ingest": "ts-node --project scripts/tsconfig.json scripts/run-ingest-cli.ts",
     "seed:products": "ts-node --project scripts/tsconfig.json scripts/seed-products-from-feed.ts",
     "seed:branches": "ts-node --project scripts/tsconfig.json scripts/seed-branches.ts",
-    "enrich:names": "ts-node --project scripts/tsconfig.json scripts/enrich-product-names.ts"
+    "enrich:names": "ts-node --project scripts/tsconfig.json scripts/enrich-product-names.ts",
+    "probe:chains": "ts-node --project scripts/tsconfig.json scripts/probe-chain-feeds.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",
