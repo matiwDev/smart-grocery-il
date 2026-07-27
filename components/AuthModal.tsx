@@ -12,10 +12,7 @@ export type AuthMode = 'SIGN_IN' | 'SIGN_UP' | 'NONE';
 // That was surfacing verbatim in the error box (reported as a mysterious
 // "red brackets" panel after sign-up) whenever the auth server hit a
 // transient/infra failure (e.g. the confirmation email failing to send).
-function getErrorMessage(err: unknown): string | undefined {
-  if (isAuthRetryableFetchError(err)) {
-    return 'A temporary server error occurred. Please try again in a moment. / אירעה שגיאת שרת זמנית. אנא נסה שוב בעוד רגע.';
-  }
+function rawErrorMessage(err: unknown): string | undefined {
   if (err instanceof Error && err.message.trim() && err.message.trim() !== '{}') {
     return err.message;
   }
@@ -28,15 +25,54 @@ function getErrorCode(err: unknown): string | undefined {
     : undefined;
 }
 
+type AuthErrorContext = 'sign_in' | 'sign_up' | 'otp';
+
+// Translates raw Supabase auth errors into clear, human copy without leaking
+// whether a specific email/password was the wrong part of a sign-in attempt
+// (see Bug fix session, Fix 1 — combining those keeps account enumeration
+// no easier than before).
+function getFriendlyAuthErrorMessage(err: unknown, lang: 'he' | 'en', context: AuthErrorContext): string {
+  if (isAuthRetryableFetchError(err)) {
+    return lang === 'he'
+      ? 'משהו השתבש. בדקו את החיבור לאינטרנט ונסו שוב.'
+      : 'Something went wrong. Please check your connection and try again.';
+  }
+
+  const code = getErrorCode(err);
+  const message = rawErrorMessage(err) || '';
+
+  if (context === 'otp' && (code === 'otp_expired' || /expired|invalid/i.test(message))) {
+    return lang === 'he'
+      ? 'הקוד לא תקין. בדקו אותו ונסו שוב, או בקשו קוד חדש.'
+      : "That code didn't work. Please check and try again, or request a new one.";
+  }
+
+  if (context === 'sign_in') {
+    if (code === 'email_not_confirmed' || /email not confirmed/i.test(message)) {
+      return lang === 'he'
+        ? 'יש לבדוק את תיבת האימייל שלכם לקבלת קוד אימות.'
+        : 'Please check your email for a verification code.';
+    }
+    if (code === 'invalid_credentials' || /invalid login credentials/i.test(message)) {
+      return lang === 'he'
+        ? 'אימייל או סיסמה שגויים. נסו שוב.'
+        : 'Incorrect email or password. Please try again.';
+    }
+  }
+
+  return message || (lang === 'he' ? 'האימות נכשל.' : 'Authentication failed.');
+}
+
   interface AuthModalProps {
     authMode: AuthMode;
     setAuthMode: (mode: AuthMode) => void;
     onAuthSuccess: (nickname: string) => void;
     t: Dictionary;
+    lang: 'he' | 'en';
     dismissible?: boolean;
   }
 
-export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t, dismissible = true }: AuthModalProps) {
+export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t, lang, dismissible = true }: AuthModalProps) {
   const [usernameInput, setUsernameInput] = useState('');
   const [emailInput, setEmailInput] = useState('');
   const [phoneInput, setPhoneInput] = useState('');
@@ -70,7 +106,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t, dismissible
       setAuthMode('NONE');
     } catch (err: unknown) {
       console.error('Dev login error:', err);
-      setErrorMsg(getErrorMessage(err) || 'Dev login failed');
+      setErrorMsg(getFriendlyAuthErrorMessage(err, lang, 'sign_in'));
     } finally {
       setIsLoading(false);
     }
@@ -113,7 +149,7 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t, dismissible
         }
       } catch (err: unknown) {
         console.error('Verify OTP error:', err);
-        setErrorMsg(getErrorMessage(err) || 'Verification failed.');
+        setErrorMsg(getFriendlyAuthErrorMessage(err, lang, 'otp'));
       } finally {
         setIsLoading(false);
       }
@@ -205,13 +241,8 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t, dismissible
             password: passwordInput.trim(),
           });
           
-          if (authError) {
-            if (authError.message.includes('Invalid login credentials') || authError.status === 400) {
-              throw new Error('User account does not exist. Please sign up first / החשבון אינו קיים. אנא הרשם תחילה');
-            }
-            throw authError;
-          }
-          
+          if (authError) throw authError;
+
           if (authData.user) {
             userProfile.id = authData.user.id;
             const { data: profile, error: profileError } = await supabase
@@ -237,13 +268,17 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t, dismissible
       } catch (err: unknown) {
         console.error('Auth error:', err);
 
-        const message = getErrorMessage(err);
-        if (getErrorCode(err) === '23505' && message?.includes('nickname')) {
-          setErrorMsg('This Nickname is already taken inside your household / כינוי זה כבר תפוס בקבוצה זו');
-        } else if (message && (message.includes('does not exist') || message.includes('already registered'))) {
-           setErrorMsg(message);
+        if (authMode === 'SIGN_IN') {
+          setErrorMsg(getFriendlyAuthErrorMessage(err, lang, 'sign_in'));
         } else {
-           setErrorMsg(message || 'Authentication failed.');
+          const message = rawErrorMessage(err);
+          if (getErrorCode(err) === '23505' && message?.includes('nickname')) {
+            setErrorMsg('This Nickname is already taken inside your household / כינוי זה כבר תפוס בקבוצה זו');
+          } else if (message && message.includes('already registered')) {
+            setErrorMsg(message);
+          } else {
+            setErrorMsg(getFriendlyAuthErrorMessage(err, lang, 'sign_up'));
+          }
         }
       } finally {
         setIsLoading(false);

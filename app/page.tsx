@@ -995,6 +995,7 @@ export default function SmartGroceryDashboard() {
           dismissible={false}
           onAuthSuccess={handleAuthSuccess}
           t={t}
+          lang={lang}
         />
       </div>
     );
