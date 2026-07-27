@@ -535,6 +535,16 @@ function ChainBar({ chain, total, maxTotal, isMin, lang }: {
 const CHAIN_SELECTION_KEY = 'sg_selected_chains';
 const MAX_SELECTED_CHAINS = 4;
 
+// Brand colors, hardcoded as a fallback for the brief window before the
+// `chains` table fetch resolves (selectedChains can already be populated from
+// localStorage by then) — kept in sync with the `chains.color_hex` values.
+const CHAIN_COLOR_FALLBACKS: Record<string, string> = {
+  shufersal: '#E11D48',
+  rami_levy: '#2563EB',
+  victory: '#16A34A',
+  yohananof: '#D97706',
+};
+
 // Compact dropdown row — collapsed shows up to MAX_SELECTED_CHAINS colored dots
 // (dashed placeholders for unfilled slots) + a "Select chains" label; tapping it
 // expands a panel listing every chain with a checkmark for selected ones. Up to
@@ -556,7 +566,7 @@ function ChainSelectorStrip({ chains, selectedChains, onToggle, lang, t }: {
     return () => document.removeEventListener('mousedown', handler);
   }, [isOpen]);
 
-  if (chains.length === 0) return null;
+  if (chains.length === 0 && selectedChains.length === 0) return null;
 
   const dotSlots = Array.from({ length: MAX_SELECTED_CHAINS }, (_, i) => selectedChains[i] ?? null);
 
@@ -568,9 +578,11 @@ function ChainSelectorStrip({ chains, selectedChains, onToggle, lang, t }: {
       >
         <div className="flex items-center gap-1.5">
           {dotSlots.map((chainId, i) => {
-            const chain = chainId ? chains.find((c) => c.id === chainId) : null;
-            return chain ? (
-              <span key={i} className="w-5 h-5 rounded-full shrink-0" style={{ backgroundColor: chain.color_hex }} />
+            const color = chainId
+              ? (chains.find((c) => c.id === chainId)?.color_hex ?? CHAIN_COLOR_FALLBACKS[chainId])
+              : null;
+            return color ? (
+              <span key={i} className="w-5 h-5 rounded-full shrink-0" style={{ backgroundColor: color }} />
             ) : (
               <span key={i} className="w-5 h-5 rounded-full shrink-0 border border-dashed border-[var(--color-border)]" />
             );
@@ -598,7 +610,7 @@ function ChainSelectorStrip({ chains, selectedChains, onToggle, lang, t }: {
                   onClick={() => onToggle(chain.id)}
                   className="w-full flex items-center gap-3 px-4 md:px-6 lg:px-8 min-h-[48px] hover:bg-[var(--color-bg-hover)] transition-colors text-start"
                 >
-                  <span className="w-5 h-5 rounded-full shrink-0" style={{ backgroundColor: chain.color_hex }} />
+                  <span className="w-5 h-5 rounded-full shrink-0" style={{ backgroundColor: chain.color_hex || CHAIN_COLOR_FALLBACKS[chain.id] }} />
                   <span className="flex-1 text-sm font-medium text-[var(--color-text-primary)]">{name}</span>
                   {isSelected && <Check className="w-4 h-4 text-[var(--color-accent)] shrink-0" />}
                 </button>
