@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ShoppingCart, ExternalLink, TrendingDown,
   LogOut, Globe, User, X, Home, List, Users, Search,
-  MapPin, Trash2, Navigation, ChevronDown,
+  MapPin, Navigation, ChevronDown,
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   ArrowDown, Loader2, Bell, Copy, UserPlus, Sun, Moon,
   ScanBarcode, Camera, Ticket, Check, Mail,
@@ -33,6 +33,8 @@ interface ChainPrice {
   chain_id: string;
   price: number;
   is_sale?: boolean;
+  unit_qty?: number | null;
+  unit_type?: string | null;
 }
 
 interface ProductResult {
@@ -435,6 +437,45 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// Cheapest (chain_id, price) entry for a product's per-chain price map.
+function computeCheapestEntry(prices: Record<string, ChainPrice>): [string, ChainPrice] | null {
+  return Object.entries(prices).reduce<[string, ChainPrice] | null>(
+    (best, [cid, cp]) => (!best || cp.price < best[1].price) ? [cid, cp] : best,
+    null
+  );
+}
+
+// Price per 100g/100ml (or per unit for unit-priced items), derived from the
+// feed's unit_qty/unit_type. The government feed's UnitOfMeasure values are
+// free-text Hebrew (e.g. "100 גרם", "1קילוגרם", "1ליטר", "יחידות") rather than
+// a clean enum, so this matches on the actual strings seen in production
+// rather than guessing — anything unrecognized (e.g. "מטרים") returns null
+// rather than showing a misleading number.
+function formatUnitPrice(cp: ChainPrice | undefined | null, lang: Lang): string | null {
+  if (!cp || cp.unit_qty == null || !cp.unit_type || cp.unit_qty <= 0) return null;
+  const { price, unit_qty: qty, unit_type: type } = cp;
+
+  const isUnit = type === 'unit' || /יחיד/.test(type);
+  if (isUnit) {
+    return lang === 'he' ? `₪${price.toFixed(2)} / יח׳` : `₪${price.toFixed(2)} / unit`;
+  }
+
+  const isKg = /קילוגרם/.test(type);
+  const isGram = !isKg && /גרם/.test(type);
+  const isMl = /מיליליטר/.test(type);
+  const isLiter = !isMl && /ליטר/.test(type);
+
+  let per100: number | null = null;
+  let unitLabel: string | null = null;
+  if (isGram) { per100 = (price / qty) * 100; unitLabel = lang === 'he' ? '100 גרם' : '100g'; }
+  else if (isKg) { per100 = (price / qty) / 10; unitLabel = lang === 'he' ? '100 גרם' : '100g'; }
+  else if (isMl) { per100 = (price / qty) * 100; unitLabel = lang === 'he' ? '100 מ״ל' : '100ml'; }
+  else if (isLiter) { per100 = (price / qty) / 10; unitLabel = lang === 'he' ? '100 מ״ל' : '100ml'; }
+
+  if (per100 == null || unitLabel == null || !isFinite(per100)) return null;
+  return lang === 'he' ? `₪${per100.toFixed(2)} ל-${unitLabel}` : `₪${per100.toFixed(2)} per ${unitLabel}`;
+}
+
 const LOCATION_PREF_KEY = 'sg_location_pref';
 
 // Price comparison bar for a single chain
@@ -522,6 +563,128 @@ function Toast({ message }: { message: string | null }) {
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+// Per-chain price list for one product — cheapest/most-expensive highlighted,
+// with a price-per-100g/ml/unit line when the feed has unit data for that chain.
+function ChainPriceBreakdown({ item, chains, lang }: { item: BasketItem; chains: ChainMeta[]; lang: Lang }) {
+  const priceEntries = Object.entries(item.prices);
+  const minPrice = priceEntries.length > 0 ? Math.min(...priceEntries.map(([, cp]) => cp.price)) : null;
+  const maxPrice = priceEntries.length > 0 ? Math.max(...priceEntries.map(([, cp]) => cp.price)) : null;
+
+  return (
+    <div className="flex flex-col gap-1.5 py-2 ps-2 border-s-2 border-[var(--color-border)] mt-1 mb-1">
+      {priceEntries
+        .slice()
+        .sort((a, b) => a[1].price - b[1].price)
+        .map(([cid, cp]) => {
+          const cName = chains.find((c) => c.id === cid)?.[lang === 'he' ? 'name_he' : 'name_en'] ?? cid;
+          const isCheapest = cp.price === minPrice;
+          const isExpensive = cp.price === maxPrice && minPrice !== maxPrice;
+          const unitLine = formatUnitPrice(cp, lang);
+          return (
+            <div
+              key={cid}
+              className={`flex items-center justify-between text-xs px-2 py-1.5 rounded-lg ${
+                isCheapest ? 'bg-[var(--color-success)]/10 text-[var(--color-success)]' :
+                isExpensive ? 'bg-[var(--color-danger)]/10 text-[var(--color-danger)]' :
+                'text-[var(--color-text-muted)]'
+              }`}
+            >
+              <span>{cName}</span>
+              <span className="text-end">
+                <span className="font-mono font-medium block">₪{cp.price.toFixed(2)}</span>
+                {unitLine && <span className="block text-[10px] opacity-70 font-mono">{unitLine}</span>}
+              </span>
+            </div>
+          );
+        })}
+    </div>
+  );
+}
+
+interface BasketRowProps {
+  item: BasketItem;
+  chains: ChainMeta[];
+  lang: Lang;
+  t: Dictionary;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onUpdateQuantity: (delta: number) => void;
+  onRemove: () => void;
+  isAlertActive: boolean;
+  onToggleAlert: () => void;
+}
+
+// Compact (<=56px) basket row: name + unit price on the left, quantity
+// controls centered, cheapest-chain line total + delete on the right.
+// Tapping the row expands the per-chain breakdown (with the price-alert
+// toggle, which doesn't fit in the compact row itself).
+function BasketRow({ item, chains, lang, t, isExpanded, onToggleExpand, onUpdateQuantity, onRemove, isAlertActive, onToggleAlert }: BasketRowProps) {
+  const cheapestEntry = computeCheapestEntry(item.prices);
+  const unitLine = formatUnitPrice(cheapestEntry?.[1], lang);
+  const lineTotal = (cheapestEntry?.[1].price ?? item.min_price ?? 0) * item.quantity;
+
+  return (
+    <div className="bg-[var(--color-bg-subtle)]/50 rounded-2xl border border-[var(--color-border)]/50 overflow-hidden">
+      <div
+        onClick={onToggleExpand}
+        className="flex items-center gap-2 px-3 min-h-[56px] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors"
+      >
+        {/* Left: name + unit price */}
+        <div className="flex-1 min-w-0 text-start">
+          <h3 className="font-semibold text-sm text-[var(--color-text-primary)] truncate">{item.name_he}</h3>
+          {unitLine && <p className="text-[11px] text-[var(--color-text-muted)] font-mono truncate">{unitLine}</p>}
+        </div>
+
+        {/* Center: quantity controls */}
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center bg-[var(--color-bg-panel)] rounded-lg border border-[var(--color-border)] shrink-0"
+        >
+          <button onClick={() => onUpdateQuantity(-1)} className="w-7 h-8 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors">−</button>
+          <span className="w-6 text-center font-mono text-sm font-medium text-[var(--color-text-primary)]">{item.quantity}</span>
+          <button onClick={() => onUpdateQuantity(1)} className="w-7 h-8 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors">+</button>
+        </div>
+
+        {/* Right: cheapest-chain line total + delete */}
+        <span className="font-mono font-semibold text-[var(--color-accent)] text-sm shrink-0 whitespace-nowrap">
+          ₪{lineTotal.toFixed(2)}
+        </span>
+        <button
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          aria-label={t.clearList}
+          className="w-8 h-8 shrink-0 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded-lg transition-colors"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.15 }} className="overflow-hidden"
+          >
+            <div className="px-4 pb-3">
+              <ChainPriceBreakdown item={item} chains={chains} lang={lang} />
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleAlert(); }}
+                className={`mt-1 flex items-center gap-1.5 text-xs font-medium px-2 py-1.5 rounded-lg transition-colors ${
+                  isAlertActive
+                    ? 'text-[var(--color-warning)] bg-[var(--color-warning)]/10'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10'
+                }`}
+              >
+                <Bell className="w-3.5 h-3.5" fill={isAlertActive ? 'currentColor' : 'none'} />
+                {t.priceAlerts}
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 
@@ -1367,7 +1530,7 @@ export default function SmartGroceryDashboard() {
             <div className="flex-1 flex flex-col lg:flex-row gap-6">
 
               {/* Basket list */}
-              <div className="flex-1 bg-[var(--color-bg-panel)]/40 backdrop-blur-sm border border-[var(--color-border)]/80 rounded-3xl p-6 overflow-y-auto min-h-[300px]">
+              <div className="flex-1 bg-[var(--color-bg-panel)]/40 backdrop-blur-sm border border-[var(--color-border)]/80 rounded-3xl p-4 sm:p-6 overflow-y-auto min-h-[300px]">
                 {basket.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-[var(--color-text-muted)] min-h-[200px]">
                     <ShoppingCart className="w-12 h-12 mb-4 opacity-40" />
@@ -1376,43 +1539,19 @@ export default function SmartGroceryDashboard() {
                 ) : (
                   <div className="space-y-3">
                     {basket.map((item) => (
-                      <div key={item.id} className="flex flex-col sm:flex-row items-center justify-between bg-[var(--color-bg-subtle)]/50 p-4 rounded-2xl border border-[var(--color-border)]/50 gap-4 group hover:bg-[var(--color-bg-hover)] transition-colors">
-                        <div className="flex-1 text-start w-full">
-                          <h3 className="font-semibold text-[var(--color-text-primary)]">{item.name_he}</h3>
-                          {item.name_en && <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{item.name_en}</p>}
-                          {item.min_price !== null && (
-                            <p className="text-sm text-[var(--color-text-muted)] mt-1">
-                              {t.basePrice}: <span className="font-mono text-[var(--color-success)]">₪{item.min_price.toFixed(2)}</span>
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
-                          <div className="flex items-center bg-[var(--color-bg-panel)] rounded-xl border border-[var(--color-border)] p-1">
-                            <button onClick={() => updateQuantity(item.id, -1)} className="w-11 h-11 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors text-lg">−</button>
-                            <span className="w-10 text-center font-mono font-medium text-[var(--color-text-primary)]">{item.quantity}</span>
-                            <button onClick={() => updateQuantity(item.id, 1)} className="w-11 h-11 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors text-lg">+</button>
-                          </div>
-                          <div className="w-24 text-end">
-                            <span className="font-mono font-bold text-[var(--color-success)] text-lg">
-                              ₪{((item.min_price ?? 0) * item.quantity).toFixed(2)}
-                            </span>
-                          </div>
-                          <button
-                            onClick={() => togglePriceAlert(item)}
-                            title={t.priceAlerts}
-                            className={`w-11 h-11 flex items-center justify-center rounded-xl transition-colors ${
-                              priceAlerts[item.id]
-                                ? 'text-[var(--color-warning)] bg-[var(--color-warning)]/10 hover:bg-[var(--color-warning)]/20'
-                                : 'text-[var(--color-text-muted)] hover:text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10'
-                            }`}
-                          >
-                            <Bell className="w-5 h-5" fill={priceAlerts[item.id] ? 'currentColor' : 'none'} />
-                          </button>
-                          <button onClick={() => removeProduct(item.id)} className="w-11 h-11 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded-xl transition-colors">
-                            <Trash2 className="w-5 h-5" />
-                          </button>
-                        </div>
-                      </div>
+                      <BasketRow
+                        key={item.id}
+                        item={item}
+                        chains={chains}
+                        lang={lang}
+                        t={t}
+                        isExpanded={expandedPriceItemId === item.id}
+                        onToggleExpand={() => setExpandedPriceItemId(expandedPriceItemId === item.id ? null : item.id)}
+                        onUpdateQuantity={(delta) => updateQuantity(item.id, delta)}
+                        onRemove={() => removeProduct(item.id)}
+                        isAlertActive={!!priceAlerts[item.id]}
+                        onToggleAlert={() => togglePriceAlert(item)}
+                      />
                     ))}
 
                     {/* Total */}
@@ -1489,74 +1628,6 @@ export default function SmartGroceryDashboard() {
                       </div>
 
                       {/* Per-item cheapest chain (tap to expand full breakdown) */}
-                      <div className="mt-2 pt-4 border-t border-[var(--color-border)] flex flex-col gap-2">
-                        <p className="text-xs text-[var(--color-text-muted)] font-medium">{lang === 'he' ? 'מחיר לפריט' : 'Price per item'}</p>
-                        {basket.map((item) => {
-                          const priceEntries = Object.entries(item.prices);
-                          const cheapestEntry = priceEntries.reduce<[string, ChainPrice] | null>(
-                            (best, [cid, cp]) => (!best || cp.price < best[1].price) ? [cid, cp] : best,
-                            null
-                          );
-                          const chainName = cheapestEntry
-                            ? (chains.find((c) => c.id === cheapestEntry[0])?.[lang === 'he' ? 'name_he' : 'name_en'] ?? cheapestEntry[0])
-                            : '—';
-                          const isExpanded = expandedPriceItemId === item.id;
-                          const minPrice = priceEntries.length > 0 ? Math.min(...priceEntries.map(([, cp]) => cp.price)) : null;
-                          const maxPrice = priceEntries.length > 0 ? Math.max(...priceEntries.map(([, cp]) => cp.price)) : null;
-                          return (
-                            <div key={item.id}>
-                              <button
-                                onClick={() => setExpandedPriceItemId(isExpanded ? null : item.id)}
-                                className="w-full flex items-center justify-between text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors py-1"
-                              >
-                                <span className="truncate me-2" style={{ maxWidth: '55%' }}>{item.name_he}</span>
-                                <span className="flex items-center gap-1 shrink-0">
-                                  <span className="text-[var(--color-success)] font-mono">
-                                    ₪{(cheapestEntry?.[1].price ?? 0).toFixed(2)}
-                                    <span className="text-[var(--color-text-muted)] ms-1">{chainName}</span>
-                                  </span>
-                                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                                </span>
-                              </button>
-                              <AnimatePresence>
-                                {isExpanded && (
-                                  <motion.div
-                                    initial={{ opacity: 0, height: 0 }}
-                                    animate={{ opacity: 1, height: 'auto' }}
-                                    exit={{ opacity: 0, height: 0 }}
-                                    transition={{ duration: 0.15 }}
-                                    className="overflow-hidden"
-                                  >
-                                    <div className="flex flex-col gap-1.5 py-2 ps-2 border-s-2 border-[var(--color-border)] mt-1 mb-1">
-                                      {priceEntries
-                                        .slice()
-                                        .sort((a, b) => a[1].price - b[1].price)
-                                        .map(([cid, cp]) => {
-                                          const cName = chains.find((c) => c.id === cid)?.[lang === 'he' ? 'name_he' : 'name_en'] ?? cid;
-                                          const isCheapest = cp.price === minPrice;
-                                          const isExpensive = cp.price === maxPrice && minPrice !== maxPrice;
-                                          return (
-                                            <div
-                                              key={cid}
-                                              className={`flex items-center justify-between text-xs px-2 py-1.5 rounded-lg ${
-                                                isCheapest ? 'bg-[var(--color-success)]/10 text-[var(--color-success)]' :
-                                                isExpensive ? 'bg-[var(--color-danger)]/10 text-[var(--color-danger)]' :
-                                                'text-[var(--color-text-muted)]'
-                                              }`}
-                                            >
-                                              <span>{cName}</span>
-                                              <span className="font-mono font-medium">₪{cp.price.toFixed(2)}</span>
-                                            </div>
-                                          );
-                                        })}
-                                    </div>
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </div>
-                          );
-                        })}
-                      </div>
                     </>
                   )}
 
