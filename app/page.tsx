@@ -1532,9 +1532,8 @@ export default function SmartGroceryDashboard() {
             {/* Chain selector strip */}
             <ChainSelectorStrip chains={chains} selectedChains={selectedChains} onToggle={toggleChainSelection} lang={lang} t={t} />
 
-            {/* Search bar + location button */}
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="md:w-3/4 relative z-20" ref={searchRef}>
+            {/* Search bar */}
+            <div className="w-full relative z-20" ref={searchRef}>
                 <div className="relative">
                   <div className="absolute inset-y-0 start-0 flex items-center ps-4 pointer-events-none">
                     {isSearching
@@ -1603,18 +1602,6 @@ export default function SmartGroceryDashboard() {
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </div>
-
-              <button
-                onClick={() => setCurrentView('LOCATION')}
-                className="md:w-1/4 bg-[var(--color-bg-panel)]/80 border border-[var(--color-border)]/50 text-[var(--color-text-primary)] rounded-2xl h-14 px-5 flex items-center justify-between hover:bg-[var(--color-bg-hover)] hover:border-[var(--color-accent)]/50 transition-colors group"
-              >
-                <div className="flex items-center gap-3">
-                  <MapPin className="w-5 h-5 text-[var(--color-accent)] group-hover:scale-110 transition-transform" />
-                  <span className="font-semibold">{t.location}</span>
-                </div>
-                <ChevronDown className="w-5 h-5 text-[var(--color-text-muted)] -rotate-90 rtl:rotate-90" />
-              </button>
             </div>
 
             {/* Basket + Price Comparison side by side on wide screens */}
