@@ -18,12 +18,27 @@ Users build a shopping basket, the app compares total cost across 4 supermarket 
 ## Repo structure
 ```
 app/
-  page.tsx                        # Main UI — all views (HOME, LOCATION, PROFILE, CHAT, SAVED_LISTS)
+  page.tsx                        # Main UI — all views (HOME, LOCATION, PROFILE, CHAT, SAVED_LISTS,
+                                   # SCAN, COUPONS — the latter two added Phase 11, see below).
+                                   # Compact icon-row header (app icon opens an About sheet; lang/
+                                   # theme/notifications/profile-avatar buttons) + a fixed 4-tab
+                                   # bottom nav (Home/Scan/Coupons/Location) are now the primary
+                                   # navigation — the old hamburger drawer is triggered by the
+                                   # profile avatar instead (still a side drawer as of Phase 11
+                                   # step 5; becomes a bottom sheet in step 6, not yet done). New
+                                   # sub-components: BottomNav, ChainSelectorStrip, Toast,
+                                   # ChainPriceBreakdown (shared per-chain price list, used by
+                                   # BasketRow's expand panel), BasketRow (compact basket item row).
   layout.tsx                      # Root layout, RTL support, pre-hydration theme-init script (see
                                    # "Theme system" below)
   api/
-    products/search/route.ts      # GET ?q=<query> — returns products + latest prices per chain
-    prices/compare/route.ts       # POST {items:[{product_id,quantity}]} — returns cost per chain
+    products/search/route.ts      # GET ?q=<query> — returns products + latest prices per chain.
+                                   # Phase 11: the `.or(...)` filter also matches `barcode.eq.<q>`
+                                   # (exact match), so the Scan view's manual barcode entry works
+                                   # against this same endpoint instead of needing a new one.
+    prices/compare/route.ts       # POST {items:[{product_id,quantity}], chain_ids?:[...]} — returns
+                                   # cost per chain, optionally narrowed to chain_ids (Phase 11 chain
+                                   # selector strip; client omits it until the user deselects a chain)
     baskets/sync/route.ts         # Basket UPSERT/sync — NOT called from the frontend (dead code);
                                    # page.tsx writes to basket_items directly via the anon client
     dev/login/route.ts            # Dev-only: get-or-creates a fixed pre-confirmed test user via
@@ -601,6 +616,81 @@ app themes without needing tokens there.
       confirming the Dev Login button correctly stays hidden in production.
 - Each fix landed as its own commit (`git add -p` used to split fix-specific
   hunks out of files that had multiple fixes' changes interleaved).
+
+**Phase 11 in progress — UX overhaul (2026-07-27; the user's own session
+prompt called this "Phase 8", but that number was already used above for the
+2026-07-21 production-smoke-test session — numbered 11 here to stay
+sequential with this doc's history).** Restructures navigation/visual layout
+toward a native-app feel. Steps 1-5 done, steps 6-7 not started:
+- [x] **Step 1 — simplified header.** Compact icon row: app icon (opens a
+      new About sheet: name/tagline/version 1.0.0/close), then 44×44
+      lang/theme/notifications(badged when `priceAlerts` is non-empty)/
+      profile-avatar buttons. Removed the title/subtitle text, the old
+      user-name block, and the hamburger button — the profile avatar now
+      opens the (still side-slide-in, pending step 6) drawer.
+- [x] **Step 2 — bottom navigation bar.** Fixed 4-tab bar (Home/Scan/
+      Coupons/Location — new `BottomNav` component), `height: calc(64px +
+      env(safe-area-inset-bottom, 16px))`, active-tab indicator dot, always-
+      visible labels. Added `SCAN`/`COUPONS` to the `View` type with stub
+      content (polished in step 5). Content area got `pb-[80px]` so it's
+      never hidden behind the bar. Home/Location removed from the drawer's
+      item list (now bottom-nav tabs); Saved Lists/Chat/Price Updates/
+      Community stay in the drawer.
+- [x] **Step 3 — chain selector strip.** New `ChainSelectorStrip` above the
+      Home search bar — up to 4 chains selected (`MAX_SELECTED_CHAINS`),
+      persisted to localStorage `sg_selected_chains`, a `Toast` component on
+      a 5th attempt. Wired through: `/api/prices/compare` now accepts an
+      optional `chain_ids` array and narrows its per-chain totals to it
+      (client sends `selectedChains`); the Location map's branch pins are
+      filtered to selected chains via a new `visibleBranches` memo (layered
+      on top of the existing distance/city filter).
+- [x] **Step 4 — leaner product rows + price-per-100g.** New `BasketRow`
+      component: a single ≤56px row (name + unit price / compact qty
+      controls / cheapest-chain line total + a 32×32 `×` delete button),
+      tapping it expands a per-chain breakdown (extracted into a shared
+      `ChainPriceBreakdown` component). This *replaced* the old ~80px basket
+      card **and** the side panel's separate "price per item" expandable
+      list, which was now duplicate UI — removed as dead weight. The price-
+      alert bell (no room in the compact row) moved into the expanded panel.
+      **Key discovery:** `latest_prices.unit_type` is NOT a clean enum —
+      queried live data and found real values are free-text Hebrew from the
+      government feed's UnitOfMeasure field: `"100 גרם"`, `"100 מיליליטר"`,
+      `"1קילוגרם"`, `"1ליטר"`, `"יחידות"`, plus `"unit"` (only on the 18
+      original seed-placeholder rows) and `"מטרים"` (non-food, no per-100g
+      equivalent). `formatUnitPrice()` in `page.tsx` matches these actual
+      strings via substring checks rather than the idealized `'kg'`/
+      `'liter'`/`'unit'` set a literal reading of the task would imply —
+      otherwise the feature would render for ~0 real products. Verified
+      against live data: a 250g cheese product at ₪5.87 correctly shows
+      "₪2.35 ל-100 גרם". Unrecognized unit types (e.g. `"מטרים"`) show
+      nothing rather than a guessed number, per the task's own instruction.
+- [x] **Step 5 — Scan/Coupons placeholder views.** Scan: camera+scanner
+      icon illustration, "Coming Soon" badge, and a manual barcode entry
+      form that calls `/api/products/search` (now barcode-aware, see repo
+      structure above) with add-to-basket on tap. Coupons: title/subtitle,
+      3 illustrative dashed-border placeholder cards (no real data), and an
+      email waitlist form (`handleJoinWaitlist`) that inserts into a
+      `waitlist` table — **not yet migrated, see step 7 below**, so this
+      insert will fail until `005_waitlist.sql` is applied.
+      Mid-session note: this step's code (search-route barcode match +
+      page.tsx Scan/Coupons views/state) was committed directly by the user
+      as `302bc2f "Route and Page updates"` while a tool call was
+      interrupted — same content, just not the usual Co-Authored-By commit
+      message from this session.
+- [ ] **Step 6 — Profile as bottom sheet.** Not started. Plan: convert the
+      drawer from side-slide-in to a bottom sheet, remove `PROFILE` from the
+      `View` type/switch, fold the old Profile view's content (avatar/
+      nickname, theme+language toggle rows, edit-credentials form, household
+      invite block — kept even though not in the task's shorter Step 7 list,
+      to avoid silently dropping a shipped feature) directly into the sheet
+      alongside Saved Lists/Chat/Price Updates/Community links and sign-out.
+- [ ] **Step 7 — waitlist migration + deploy.** Not started:
+      `supabase/migrations/005_waitlist.sql` (table: `id`, `email`,
+      `feature` default `'coupons'`, `user_id` nullable FK to `profiles`,
+      `created_at`, unique on `(email, feature)`; RLS: authenticated insert
+      only, no select policy — write-only from the client, same pattern as
+      `price_alerts`), then `tsc`/`build`/`lint`, push, `vercel --prod`,
+      375px mobile verification.
 
 ## Coding conventions
 - All components: functional, TypeScript strict
