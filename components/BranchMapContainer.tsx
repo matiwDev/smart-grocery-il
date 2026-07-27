@@ -1,6 +1,5 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
-import { Navigation, Tag } from 'lucide-react';
 import type { Dictionary } from '@/app/page';
 
 const BranchLeafletMap = dynamic(
@@ -67,77 +66,35 @@ function buildCostRanking(comparison: ComparisonResult[] | undefined) {
   return { colorByChain, totalByChain };
 }
 
-export function BranchMapContainer({ city, lang, theme, liveBranches, activeMapPin, setActiveMapPin, preferredChainId, comparison, userPosition, youAreHereLabel, t }: BranchMapContainerProps) {
-  const sortedBranches = preferredChainId
-    ? liveBranches.slice().sort((a, b) => (a.chain_id === preferredChainId ? -1 : 0) - (b.chain_id === preferredChainId ? -1 : 0))
-    : liveBranches;
-
+// Full-bleed map view — no side branch-list panel. Branch details are surfaced
+// via the Leaflet popups (name, basket cost, Waze link) instead.
+export function BranchMapContainer({ city, theme, liveBranches, activeMapPin, setActiveMapPin, comparison, userPosition, youAreHereLabel, t }: BranchMapContainerProps) {
   const { colorByChain, totalByChain } = buildCostRanking(comparison);
 
   return (
-    <div className="flex-1 w-full flex flex-col lg:flex-row gap-6 text-start h-full mt-6">
-      <div className="w-full lg:w-2/3 bg-[var(--color-bg-panel)]/60 backdrop-blur-xl border border-[var(--color-border)] rounded-3xl p-2 h-[70vh] lg:h-auto lg:min-h-[500px] relative overflow-hidden flex flex-col shadow-xl">
-        <div className="absolute top-6 start-6 end-6 flex justify-between items-start pointer-events-none z-[400]">
-          <div className="bg-[var(--color-bg-subtle)]/80 backdrop-blur-md px-4 py-2 rounded-xl border border-[var(--color-border)]/50 text-sm font-bold text-[var(--color-text-primary)] pointer-events-auto shadow-xl">
+    <div className="relative w-full h-full">
+      {/* Only shown once we actually have a GPS fix — avoids colliding with the
+          city-search overlay (top-end), which only renders when GPS was denied. */}
+      {userPosition && (
+        <div className="absolute top-3 start-3 z-[400] pointer-events-none">
+          <div className="bg-[var(--color-bg-subtle)]/80 backdrop-blur-md px-3 py-1.5 rounded-xl border border-[var(--color-border)]/50 text-xs font-bold text-[var(--color-text-primary)] pointer-events-auto shadow-xl">
             {t.currentGpsLocation} - {city}
           </div>
         </div>
+      )}
 
-        <BranchLeafletMap
-          branches={liveBranches}
-          activeMapPin={activeMapPin}
-          setActiveMapPin={setActiveMapPin}
-          theme={theme}
-          quickNavigateLabel={t.quickNavigate}
-          costColorByChain={colorByChain}
-          costTotalByChain={totalByChain}
-          basketAtBranchLabel={t.basketAtBranch}
-          userPosition={userPosition}
-          youAreHereLabel={youAreHereLabel}
-        />
-      </div>
-
-      <div className="w-full lg:w-1/3 flex flex-col gap-4 overflow-y-auto max-h-[500px] lg:max-h-full pe-2">
-         {sortedBranches.map(b => (
-           <div
-             key={b.id}
-             onClick={() => setActiveMapPin(b.id)}
-             className={`bg-[var(--color-bg-panel)]/60 backdrop-blur-xl border ${activeMapPin === b.id ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10' : 'border-[var(--color-border)]'} rounded-3xl p-5 flex flex-col gap-4 shadow-xl hover:bg-[var(--color-bg-panel)] transition-colors shrink-0 cursor-pointer`}
-           >
-             <div className="flex items-center gap-4">
-               <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: colorByChain[b.chain_id] ?? b.color_hex }} />
-               <div className="flex-1">
-                 <h4 className="font-bold text-[var(--color-text-primary)]">{b.name}</h4>
-                 <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{b.desc}</p>
-               </div>
-               {totalByChain[b.chain_id] !== undefined && (
-                 <span className="text-xs font-mono text-[var(--color-text-secondary)] shrink-0">₪{totalByChain[b.chain_id].toFixed(2)}</span>
-               )}
-               {preferredChainId && b.chain_id === preferredChainId && (
-                 <span className="flex items-center gap-1 text-[10px] font-bold text-[var(--color-success)] bg-[var(--color-success)]/10 border border-[var(--color-success)]/20 px-2 py-1 rounded-full shrink-0">
-                   <Tag className="w-3 h-3" /> {lang === 'he' ? 'הכי זול' : 'Cheapest'}
-                 </span>
-               )}
-             </div>
-
-             <div className="flex items-center justify-between border-t border-[var(--color-border)]/80 pt-4">
-               <div className="flex items-center gap-1.5 text-[var(--color-text-secondary)]">
-                 <Navigation className="w-4 h-4 text-[var(--color-success)]" />
-                 <span className="font-mono text-sm">{b.dist}</span>
-               </div>
-
-               <a
-                href={b.mapsLink}
-                target="_blank"
-                rel="noreferrer"
-                className="bg-[var(--color-accent)]/10 hover:bg-[var(--color-accent)]/20 text-[var(--color-accent)] px-4 py-2 rounded-xl text-sm font-semibold transition-colors border border-[var(--color-accent)]/20 text-center min-h-[44px] flex items-center"
-               >
-                 {t.quickNavigate}
-               </a>
-             </div>
-           </div>
-         ))}
-      </div>
+      <BranchLeafletMap
+        branches={liveBranches}
+        activeMapPin={activeMapPin}
+        setActiveMapPin={setActiveMapPin}
+        theme={theme}
+        quickNavigateLabel={t.quickNavigate}
+        costColorByChain={colorByChain}
+        costTotalByChain={totalByChain}
+        basketAtBranchLabel={t.basketAtBranch}
+        userPosition={userPosition}
+        youAreHereLabel={youAreHereLabel}
+      />
     </div>
   );
 }

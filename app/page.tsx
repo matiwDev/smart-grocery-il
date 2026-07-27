@@ -1731,58 +1731,61 @@ export default function SmartGroceryDashboard() {
 
         {/* ═══ LOCATION ═══ */}
         {currentView === 'LOCATION' && (
-          <motion.div key="LOCATION" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1">
+          <motion.div key="LOCATION" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1 flex flex-col min-h-0">
 
-            {/* Location filter bar */}
-            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-              {userPosition ? (
-                <div className="flex items-center gap-3 bg-[var(--color-bg-panel)]/60 border border-[var(--color-border)] rounded-2xl px-4 py-3">
-                  <span className="text-xs font-semibold text-[var(--color-text-secondary)] whitespace-nowrap">{t.distanceFilter}</span>
-                  <input
-                    type="range"
-                    min={0.5}
-                    max={50}
-                    step={0.5}
-                    value={distanceKm}
-                    onChange={(e) => setDistanceKm(Number(e.target.value))}
-                    className="w-40 accent-[var(--color-accent)]"
-                  />
-                  <span className="font-mono text-sm text-[var(--color-accent)] shrink-0 w-16 text-end">
-                    {distanceKm.toFixed(1)} {lang === 'he' ? 'ק"מ' : 'km'}
-                  </span>
-                </div>
-              ) : locationStatus === 'denied' ? (
-                <div className="flex items-center gap-2 bg-[var(--color-bg-panel)]/60 border border-[var(--color-border)] rounded-2xl px-4 h-12 flex-1 sm:flex-none sm:w-72">
-                  <Search className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
+            {/* Distance slider bar — full width, 56px, pinned directly below the header */}
+            <div className="shrink-0 h-14 -mx-4 md:-mx-6 lg:-mx-8 px-4 md:px-6 lg:px-8 flex items-center gap-3 bg-[var(--color-bg-base)] border-b border-[var(--color-border)]">
+              <span className="text-xs font-semibold text-[var(--color-text-secondary)] whitespace-nowrap">
+                {lang === 'he' ? 'טווח' : 'Range'}: {distanceKm.toFixed(1)} {lang === 'he' ? 'ק״מ' : 'km'}
+              </span>
+              <input
+                type="range"
+                min={0.5}
+                max={50}
+                step={0.5}
+                value={distanceKm}
+                onChange={(e) => setDistanceKm(Number(e.target.value))}
+                className="flex-1 accent-[var(--color-accent)]"
+              />
+            </div>
+
+            {/* Map fills all remaining space down to the bottom nav */}
+            <div className="flex-1 min-h-0 relative -mx-4 md:-mx-6 lg:-mx-8">
+              <BranchMapContainer
+                city={t.telAviv}
+                lang={lang}
+                theme={theme}
+                liveBranches={visibleBranches}
+                activeMapPin={activeMapPin}
+                setActiveMapPin={setActiveMapPin}
+                preferredChainId={preferredChainId}
+                comparison={comparison}
+                userPosition={userPosition}
+                youAreHereLabel={t.myLocation}
+                t={t}
+              />
+
+              {/* City search fallback overlay (GPS denied) */}
+              {locationStatus === 'denied' && (
+                <div className="absolute top-3 end-3 z-[500] flex items-center gap-2 bg-[var(--color-bg-panel)]/95 backdrop-blur-md border border-[var(--color-border)] rounded-xl px-3 h-10 shadow-xl w-48">
+                  <Search className="w-3.5 h-3.5 text-[var(--color-text-muted)] shrink-0" />
                   <input
                     type="text"
                     value={cityQuery}
                     onChange={(e) => setCityQuery(e.target.value)}
                     placeholder={t.searchByCity}
-                    className="bg-transparent outline-none text-sm text-[var(--color-text-primary)] w-full"
+                    className="bg-transparent outline-none text-xs text-[var(--color-text-primary)] w-full"
                     dir="auto"
                   />
                 </div>
-              ) : (
-                <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] h-12">
+              )}
+
+              {locationStatus === 'requesting' && (
+                <div className="absolute top-3 end-3 z-[500] flex items-center gap-2 bg-[var(--color-bg-panel)]/95 backdrop-blur-md border border-[var(--color-border)] rounded-xl px-3 h-10 shadow-xl text-xs text-[var(--color-text-muted)]">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" /> {t.currentGpsLocation}...
                 </div>
               )}
             </div>
-
-            <BranchMapContainer
-              city={t.telAviv}
-              lang={lang}
-              theme={theme}
-              liveBranches={visibleBranches}
-              activeMapPin={activeMapPin}
-              setActiveMapPin={setActiveMapPin}
-              preferredChainId={preferredChainId}
-              comparison={comparison}
-              userPosition={userPosition}
-              youAreHereLabel={t.myLocation}
-              t={t}
-            />
           </motion.div>
         )}
 
@@ -2123,13 +2126,15 @@ export default function SmartGroceryDashboard() {
 
       </AnimatePresence>
 
-      {/* ── Footer ── */}
-      <footer className="mt-8 pt-6 border-t border-[var(--color-border)]/50 flex justify-center md:justify-end">
-        <div className="flex items-center gap-2 bg-[var(--color-bg-panel)]/50 px-4 py-2 rounded-full border border-[var(--color-border)]/50 opacity-60">
-          <div className="w-2 h-2 rounded-full bg-[var(--color-success)] animate-pulse" />
-          <span className="text-xs font-mono text-[var(--color-text-muted)]">{t.devOptionsLocked}</span>
-        </div>
-      </footer>
+      {/* ── Footer (hidden on LOCATION so the map truly fills all remaining space) ── */}
+      {currentView !== 'LOCATION' && (
+        <footer className="mt-8 pt-6 border-t border-[var(--color-border)]/50 flex justify-center md:justify-end">
+          <div className="flex items-center gap-2 bg-[var(--color-bg-panel)]/50 px-4 py-2 rounded-full border border-[var(--color-border)]/50 opacity-60">
+            <div className="w-2 h-2 rounded-full bg-[var(--color-success)] animate-pulse" />
+            <span className="text-xs font-mono text-[var(--color-text-muted)]">{t.devOptionsLocked}</span>
+          </div>
+        </footer>
+      )}
 
       <BottomNav currentView={currentView} setCurrentView={setCurrentView} t={t} />
 

@@ -90,7 +90,7 @@ export function BranchLeafletMap({ branches, activeMapPin, setActiveMapPin, them
       : DEFAULT_CENTER;
 
   return (
-    <MapContainer center={center} zoom={12} scrollWheelZoom className="w-full h-full rounded-3xl" style={{ zIndex: 0 }}>
+    <MapContainer center={center} zoom={12} scrollWheelZoom className="w-full h-full" style={{ zIndex: 0 }}>
       {theme === 'dark' ? (
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
