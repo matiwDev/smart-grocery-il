@@ -13,9 +13,12 @@ Users build a shopping basket, the app compares total cost across 4 supermarket 
   session exists (see "Phase 8" below)
 - **Styling:** Light/dark theme via CSS variables (see "Theme system" below), RTL/LTR Hebrew/English toggle
 - **Animation:** motion (framer-motion v12)
-- **Map:** react-leaflet + leaflet (client-only, dynamically imported — see gotchas)
+- **Map:** react-leaflet + leaflet (client-only, dynamically imported; **Phase 13** found and
+  fixed a separate flexbox percentage-height bug that also caused a blank map in production
+  — see "Phase 13" below and gotchas)
 - **Barcode scanning:** @zxing/browser + @zxing/library (`BrowserMultiFormatReader`,
-  live camera decode — see "Phase 12" below)
+  live camera decode, explicit "Start Camera" tap as of **Phase 13** — see "Phase 12" and
+  "Phase 13" below)
 
 ## Repo structure
 ```
@@ -39,7 +42,9 @@ app/
                                    # Phase 12 to a full-screen map (see below) — BranchMapContainer
                                    # no longer takes a side branch-list. SCAN view redesigned
                                    # Phase 12 from a placeholder to a real live-camera scanner via
-                                   # @zxing/browser (see "Phase 12" below).
+                                   # @zxing/browser (see "Phase 12" below). Phase 13: the Scan
+                                   # view opens on an idle "Start Camera" button instead of
+                                   # auto-starting — see "Phase 13" below.
   layout.tsx                      # Root layout, RTL support, pre-hydration theme-init script (see
                                    # "Theme system" below)
   api/
@@ -103,7 +108,11 @@ components/
                                    # string — see "Phase 10" below.
   BranchMapContainer.tsx          # Phase 12: full-bleed map only (no side branch-list panel —
                                    # removed as part of the Location-view redesign, see "Phase 12"
-                                   # below). Dynamically imports BranchLeafletMap
+                                   # below). Dynamically imports BranchLeafletMap. Phase 13: root
+                                   # div is `relative w-full flex-1 min-h-0` (no `h-full`) — its
+                                   # parent in page.tsx is a `flex` container specifically so this
+                                   # gets a real height from flex layout instead of a percentage
+                                   # that never resolves — see "Phase 13" below.
   BranchLeafletMap.tsx            # Actual react-leaflet map — pins colored by chain color_hex,
                                    # popups with Waze deep link, flyTo on active-pin change,
                                    # optional userPosition prop renders a blue "you are here" pin
@@ -890,6 +899,89 @@ view's placeholder → a real live-camera scanner.
       standard `@zxing/browser` usage and shares its lookup/add-to-basket
       logic with the already-verified manual-entry path.
 
+## Phase 13 — production bug fixes: scanner gesture, Leaflet flexbox height, chain colors
+(2026-07-27; the user's own session prompt called this "Phase 10", already used above for the
+2026-07-27 bilingual-auth-error/mobile-keyboard/sticky-header-border session — numbered 13
+here to stay sequential, same renumbering reasoning as Phases 11/12 above.) Three issues
+reported from real production/device testing on `https://smart-grocery-il.vercel.app`.
+
+- [x] **Scanner: camera never requested permission on a real device.** Root cause matched the
+      task's own diagnosis: the live-decode `useEffect` (added Phase 12) auto-started
+      `getUserMedia` as soon as the Scan tab mounted and `scanStage` defaulted to `'scanning'`
+      — no user gesture at all preceded it, which iOS Safari / Android Chrome silently block
+      (they don't even show a permission prompt). Fixed by adding a new `'idle'` stage: `scanStage`
+      now **defaults to `'idle'`**, which renders a camera icon + "הפעל מצלמה"/"Start Camera"
+      button instead of the viewfinder. The existing camera-acquisition `useEffect` was left
+      almost untouched (same permission-check + `decodeFromVideoDevice` body) — the only
+      structural change is that it now simply never runs until `scanStage` becomes `'scanning'`,
+      which only ever happens via the new `handleStartScan()` handler wired to that button's
+      `onClick` (and to the denied-state's "Try again" button, replacing its previous
+      `handleScanAgain` wiring so a retry re-requests the camera directly rather than bouncing
+      back to the idle button first). `handleScanAgain` (used after a found/not-found result)
+      now resets to `'idle'` instead of `'scanning'`, and the tab-away cleanup effect resets to
+      `'idle'` too — so leaving and returning to the Scan tab always re-shows the Start Camera
+      button rather than auto-restarting. A new `hasCameraSupport` state (checked once on mount
+      via `navigator.mediaDevices?.getUserMedia`) hides the button entirely in favor of the
+      existing `scanNoCameraMsg` copy on devices with no camera API at all (e.g. plain desktop
+      browsers), per the task's explicit ask. New dictionary key: `scanStartCamera` (he/en).
+      **Verified end-to-end in a real browser against a production build:** idle state shows
+      only the button (confirmed no `getUserMedia` call fires before the tap — no permission
+      prompt, no `cameraStatus` change); tapping it visibly triggers the real permission flow
+      (this sandboxed test environment has no camera, so it correctly lands on the existing
+      `cameraStatus === 'denied'` UI, which is itself proof the call actually fired); navigating
+      away to another tab and back to Scan correctly resets to the idle button rather than
+      getting stuck in the denied state or auto-restarting. (Real camera hardware / an actual
+      granted permission was not available to test in this environment, same limitation noted
+      in Phase 12 — the granted-state code path itself was not touched by this fix.)
+- [x] **Leaflet map blank in production — root cause was NOT what the task assumed.** The task's
+      hypothesis was the classic "Leaflet touches `window`/`document` at import time, SSR
+      crashes" bug, and asked for a dynamic import + `ssr:false` + `'use client'` + a manual
+      default-marker-icon fix. All of that was checked first and ruled out: `BranchMapContainer`
+      already dynamically imports `BranchLeafletMap` with `{ ssr: false }` (Phase 12), both files
+      already have `'use client'` where needed, and neither ever used Leaflet's default
+      `L.Icon.Default` (every marker — branch pins and the "you are here" pin — uses a custom
+      `L.divIcon`), so there was no default-icon/webpack asset path to fix. The **actual** bug,
+      found by building for production locally (`npm run build && npm run start`, see gotchas
+      below for the harmless `output: standalone` warning that comes with that) and inspecting
+      the live DOM: the Location view's map slot (`app/page.tsx`, the `flex-1 min-h-0` div
+      wrapping `<BranchMapContainer>`) is a `display:block` flex item — its height comes purely
+      from `flex-grow`, not an explicit CSS `height`. `BranchMapContainer`'s own root div used
+      `h-full` (a percentage height) against that parent, and — confirmed directly via
+      `getComputedStyle`/`getBoundingClientRect` in the running app, including forcing the same
+      inline style manually to rule out a missing/purged Tailwind class — that percentage never
+      resolves in this configuration; it computes to an effective 0px. Since every one of
+      Leaflet's internal panes is `position:absolute` (no in-flow content), the 0px box just
+      rendered as nothing. Fix: made the map slot `flex` (`className="flex-1 min-h-0 relative
+      -mx-4 md:-mx-6 lg:-mx-8 flex"`) and dropped `h-full` from `BranchMapContainer`'s root div
+      (now `"relative w-full flex-1 min-h-0"`) — flex layout assigns the box a real height
+      directly instead of going through CSS percentage resolution. See the new gotcha below for
+      the general pattern. **Verified:** confirmed broken first (blank map, `.leaflet-container`
+      measured at `height: 0px` in a local production build), confirmed the fix live-patched in
+      the DOM before touching source, then confirmed the actual source fix renders the map
+      correctly (tiles + colored branch pins + zoom control) in a fresh production build AND
+      live on `https://smart-grocery-il.vercel.app` after deploying.
+- [x] **Chain selector dot colors — already correct, not actually broken.** Queried the live
+      `chains` table directly via PostgREST and confirmed `color_hex` already matched the task's
+      expected values exactly (`shufersal #e11d48`, `rami_levy #2563eb`, `victory #16a34a`,
+      `yohananof #d97706`), and both the collapsed row and the expanded dropdown already read
+      `chain.color_hex` straight from that fetched data. Verified visually in a real browser too
+      (all four dot colors correct, including green for victory). Since the task explicitly
+      asked for a hardcoded fallback for the pre-load window, added `CHAIN_COLOR_FALLBACKS`
+      (same four hex values) and wired it into both the collapsed dots and the expanded list as
+      a `?? CHAIN_COLOR_FALLBACKS[...]` fallback, and stopped the collapsed row from bailing out
+      entirely (`if (chains.length === 0 && selectedChains.length === 0) return null`) so
+      persisted `selectedChains` from `localStorage` can render fallback-colored dots even
+      before the `chains` fetch resolves. This is defensive/as-requested, not a fix for an
+      observed bug.
+- [x] Each fix committed separately (`git add -p`-equivalent hunk splitting, since all three
+      touched `app/page.tsx`): `fix: barcode scanner explicit start button + cleanup`,
+      `fix: leaflet map blank in production (flexbox height, not SSR)`,
+      `fix: chain selector dot colors from chain data`. `npx tsc --noEmit`, `npm run lint`
+      (pre-existing warnings only, same two files as always — see "Applying migrations"-adjacent
+      lint note elsewhere in this doc), and `npm run build` all clean. Pushed to `main` and
+      redeployed via `vercel --prod`; the Leaflet fix was re-verified live on
+      `https://smart-grocery-il.vercel.app` after deploy (map renders correctly).
+
 ## Coding conventions
 - All components: functional, TypeScript strict
 - API routes: always use `lib/supabaseServer.ts` (service role), never the anon client
@@ -1014,6 +1106,28 @@ lowest setup cost, no new infrastructure, and the repo is already on GitHub.
 - Leaflet needs `window`/`document` at import time — `BranchLeafletMap` is loaded via
   `next/dynamic(..., { ssr: false })` from `BranchMapContainer`; don't import react-leaflet
   directly into a component that can render server-side
+- **A `h-full` (percentage height) child of a `display:block` element whose OWN height comes
+  purely from `flex-grow` does not reliably resolve — it can compute to `auto`/0px even
+  though the parent has a real, definite pixel height.** This caused the Location map to
+  render as a blank area in production (Phase 13, 2026-07-27) — it looked exactly like the
+  classic "Leaflet + SSR" bug (and the dynamic-import/`ssr:false` setup described above was
+  double-checked and was NOT the cause), but was actually this pure CSS issue: Leaflet's own
+  panes are all `position:absolute`, so once the percentage height fails to resolve there's no
+  in-flow content to give the box an auto height, and it collapses to 0px. Confirmed by
+  live-patching the DOM in a production build: forcing the parent to `display:flex` and
+  removing the child's `h-full` (so flex stretch sizes it instead of a percentage) fixed it
+  immediately. Fix: make the parent a flex container and drop the percentage height on the
+  child — see `BranchMapContainer.tsx`'s root div and its parent in `app/page.tsx` (LOCATION
+  view's map slot). If a similar "block child needs to fill a flex-grown ancestor" pattern
+  shows up elsewhere and renders blank/collapsed, suspect this same issue before assuming it's
+  an SSR/hydration/library bug — verify with `getComputedStyle(el).height` on the actual
+  child, not just its parent
+- `npm run start` prints `"next start" does not work with "output: standalone" configuration.
+  Use "node .next/standalone/server.js" instead` — this is just a warning, not a hard failure;
+  the server still starts and serves the built app fine, so it's a valid quick way to smoke-test
+  a production build locally (as used in Phase 13) without needing the standalone server entry
+  point. Vercel's own deploy pipeline doesn't go through `next start` at all, so this warning is
+  irrelevant to the real production deployment
 - If you edit a hook's dependency array while the dev server is running, Fast Refresh can
   throw a spurious "final argument passed to useEffect changed size between renders" error.
   It's not a real bug — restart the dev server (or hard-reload) and it clears
