@@ -24,7 +24,8 @@ Users build a shopping basket, the app compares total cost across 4 supermarket 
 ```
 app/
   page.tsx                        # Main UI — all views (HOME, LOCATION, PROFILE, CHAT, SAVED_LISTS,
-                                   # SCAN, COUPONS — the latter two added Phase 11, see below).
+                                   # SCAN, COUPONS — the latter two added Phase 11, see below;
+                                   # ANALYTICS, Phase 15 — renamed from PRICE_UPDATES, see below).
                                    # Compact icon-row header (app icon opens an About sheet; lang/
                                    # theme/notifications/profile-avatar buttons) + a fixed 4-tab
                                    # bottom nav (Home/Scan/Coupons/Location) are now the primary
@@ -44,10 +45,20 @@ app/
                                    # Phase 12 from a placeholder to a real live-camera scanner via
                                    # @zxing/browser (see "Phase 12" below). Phase 13: the Scan
                                    # view opens on an idle "Start Camera" button instead of
-                                   # auto-starting — see "Phase 13" below.
+                                   # auto-starting — see "Phase 13" below. Phase 15: SavedList cards
+                                   # get a real load handler (handleLoadSavedList, rebuilds BasketItem
+                                   # rows with current prices) and a delete button + styled confirm
+                                   # sheet; handleSaveList no longer clears the active basket; CHAT
+                                   # view groups messages under date-separator pills and gained a
+                                   # client-side search (buildChatTimeline/HighlightMatch); new
+                                   # AnalyticsView component (savings/chain-ranking/price-drops/
+                                   # top-products/price-trend, recharts) renders the ANALYTICS view.
   layout.tsx                      # Root layout, RTL support, pre-hydration theme-init script (see
                                    # "Theme system" below)
   api/
+    analytics/route.ts            # Phase 15 — GET ?type=savings|chain_ranking|price_drops|
+                                   # top_products|price_trend, backs AnalyticsView. See "Phase 15"
+                                   # below for what each type computes.
     products/search/route.ts      # GET ?q=<query> — returns products + latest prices per chain.
                                    # Phase 11: the `.or(...)` filter also matches `barcode.eq.<q>`
                                    # (exact match), so the Scan view's manual barcode entry works
@@ -100,10 +111,17 @@ scripts/
   seed-branches.ts                # Phase 8 — pulls real store metadata (StoreID/StoreName/Address/
                                    # City) from the Shufersal "Stores" feed category (catID=5, a
                                    # single chain-wide file, distinct from the per-branch PriceFull
-                                   # files) and inserts new branches, deduping client-side on
-                                   # (name_he, address) since branches has no unique constraint to
-                                   # on_conflict against. See "Phase 8" below for the City-field
-                                   # caveat. Run with `npm run seed:branches`.
+                                   # files) and inserts new branches. Phase 15: extended beyond
+                                   # Shufersal to Victory/Mahsanei Hashuk (laibcatalog.co.il
+                                   # `getbranches?edi=` — branch number + name, no address) and
+                                   # Yohananof/Osher Ad/Keshet Teamim (Cerberus FTP — no store-
+                                   # metadata feed at all, confirmed live; branches get a synthesized
+                                   # "<chain> - סניף <StoreID>" name from the price-file StoreID).
+                                   # Dedup switched from client-side (name_he, address) matching to a
+                                   # (chain_id, external_id) unique index (migration
+                                   # 007_branches_external_id.sql, see "Phase 15" below) via a real
+                                   # PostgREST upsert. See "Phase 8" below for the City-field caveat.
+                                   # Run with `npm run seed:branches`.
   enrich-product-names.ts         # Phase 5 — batches products missing name_en 50 at a time and
                                    # asks claude-haiku-4-5 to translate name_he to English. Run
                                    # with `npm run enrich:names`. Needs ANTHROPIC_API_KEY in
@@ -168,11 +186,21 @@ supabase/
                                    # 2026-07-27, evidently before the Phase 14 session started) —
                                    # see "Applying migrations" below for the correction.
     006_online_branches.sql        # branches.is_online column + Shufersal/Rami Levy Online seed
-                                   # rows (Phase 14, see below). Written this session — checked live
-                                   # via PostgREST (`branches?select=is_online` → `42703 column does
-                                   # not exist`) and confirmed NOT YET APPLIED. Needs to be pasted
-                                   # into the Supabase SQL Editor by hand before the Location view's
-                                   # "כולל משלוח"/"Include delivery" toggle will show anything.
+                                   # rows (Phase 14, see below). CONFIRMED APPLIED — re-checked live
+                                   # via PostgREST in Phase 15 (`branches?select=is_online` → `200`,
+                                   # real `false` values, not `42703`). This file previously said NOT
+                                   # YET APPLIED here; that was stale — see "Applying migrations"
+                                   # below for the correction.
+    007_branches_external_id.sql   # branches.external_id column + a (chain_id, external_id) unique
+                                   # index (Phase 15, see below) — lets seed-branches.ts dedupe
+                                   # branches from chains with no name/address feed. NOT a partial
+                                   # index (deliberately — see the file's own comment for why a
+                                   # partial index would break PostgREST's on_conflict upsert). NOT
+                                   # YET APPLIED (confirmed: `branches?select=external_id` → `42703`).
+    008_analytics_indexes.sql      # ph_captured_chain (price_history(chain_id, captured_at DESC)) +
+                                   # bi_product (basket_items(product_id)) — speed up the Phase 15
+                                   # analytics queries. Performance only, not correctness — the
+                                   # analytics route works without them. NOT YET APPLIED.
 ```
 
 ## Environment variables
@@ -195,7 +223,9 @@ needed for local dev unless you're manually testing that route.
 ```sql
 chains         — id (text PK), name_he, name_en, color_hex
 products       — id (uuid), barcode (unique), name_he, name_en, category
-branches       — id, chain_id, name_he, name_en, city_he, city_en, lat, lng, is_active
+branches       — id, chain_id, name_he, name_en, city_he, city_en, lat, lng, is_active,
+                 is_online (migration 006, CONFIRMED APPLIED), external_id (migration 007,
+                 NOT YET APPLIED — see "Applying migrations" below)
 price_history  — id, product_id, chain_id, branch_id, price, captured_at, source
 latest_prices  — MATERIALIZED VIEW: latest price per (product_id, chain_id)
 profiles       — id (= auth.users.id), nickname, phone_number, avatar_url, selected_skin
@@ -1156,6 +1186,146 @@ whichever ones actually work.
   INSERT for `006_online_branches`. Adding that row before the migration's own DDL has
   run would make the tracking table lie about what's actually applied.
 
+## Phase 15 — branch seeding, saved-lists fixes, chat improvements, Analytics view
+(2026-07-28; the user's own session prompt called this "Phase 12", already used above for
+the 2026-07-27 chain-selector-dropdown/full-screen-map/barcode-scanner session — numbered 15
+here to stay sequential, same renumbering reasoning as Phases 11-14 above.)
+
+- [x] **Step 1 — branch seeding extended to all 6 working chains.** `scripts/
+      seed-branches.ts` (previously Shufersal-only, Phase 8) now also pulls branches from
+      Victory + Mahsanei Hashuk (laibcatalog.co.il `getbranches?edi=` — returns branch
+      `number` + `name`, confirmed live this session: no address/city/lat-lng field exists
+      on this endpoint at all) and Yohananof + Osher Ad + Keshet Teamim (the Cerberus FTP
+      platform — confirmed live this session that it publishes **no store-metadata feed of
+      any kind**: the file listing has only `Price*.gz`/`Promo*.gz`, and a downloaded
+      `Price*.gz`'s XML root has only `ChainID`/`SubChainID`/`StoreID`/`BikoretNo`, no
+      name/address, matching the same finding Phase 8 made for Shufersal's PriceFull
+      files). Those three chains' branches get a synthesized `"<chain name> - סניף
+      <StoreID>"` name from the price-file StoreID instead of a real one. Dedup switched
+      from the old Shufersal-only client-side `(name_he, address)` check to a real
+      PostgREST upsert on a new `(chain_id, external_id)` unique index (migration
+      `007_branches_external_id.sql`, see "Repo structure" above) — `external_id` is
+      StoreID for Shufersal/Cerberus chains and the laibcatalog branch `number` for
+      Victory/Mahsanei Hashuk.
+      **Migration not yet applied, so the upsert itself hasn't landed rows yet** — running
+      `npm run seed:branches` this session correctly fetched real data from all 6 chains'
+      feeds (proving the fetch/parse logic works) but every upsert failed with
+      `PGRST204 Could not find the 'external_id' column`, confirming `007` genuinely isn't
+      applied (checked live, not assumed). Feed counts observed this session (branches
+      found in each chain's live feed, not yet persisted):
+      ```
+      shufersal          420   (Stores feed, real name+address+city, no lat/lng)
+      victory             70   (laibcatalog, real name, no address)
+      mahsanei_hashuk     71   (laibcatalog, real name, no address)
+      yohananof           19   (Cerberus, synthesized name from StoreID)
+      osher_ad            24   (Cerberus, synthesized name from StoreID)
+      keshet_teamim        2   (Cerberus, synthesized name from StoreID)
+      ```
+      **0 of these have lat/lng** — confirmed by downloading a live Shufersal Stores file
+      and inspecting its raw XML this session: no `GPSLat`/`GPSLng`/`Latitude`/`Longitude`
+      field exists anywhere in it (the task's own instructions asked to check for these).
+      Total branches unchanged at 432 until `007` is applied and `npm run seed:branches`
+      is re-run — see "Applying migrations" above for the exact SQL to paste.
+- [x] **Step 2 — Save List no longer clears the basket.** `handleSaveList` in
+      `app/page.tsx` previously deleted the active basket's `basket_items` and cleared
+      local `basket` state right after copying it into a new saved-basket row — this was
+      flagged as wrong behavior this session and fixed: it now only inserts the new
+      `baskets` row (with `is_archived: true`, which the insert never explicitly set
+      before, relying only on the column default) and the copied `basket_items` rows, then
+      shows a 2.5s auto-dismissing toast (`showToast`, the same helper already used for the
+      "max 4 chains" notice) reading "הרשמה נשמרה"/"List saved". Clear List is untouched.
+- [x] **Step 3 — saved-list load actually restores the basket.** Root cause, found by
+      reading the code rather than assumed: tapping a saved-list card only ran
+      `setActiveBasketId(sb.id); setCurrentView('HOME')` — it never read that basket's
+      `basket_items` into `basket` state at all, so the Home view kept showing whatever
+      the *previous* working basket happened to be (empty, if nothing had been added yet).
+      New `handleLoadSavedList` rebuilds full `BasketItem` rows from the saved basket's
+      `basket_items` — for rows with a `product_id` it re-fetches the product + latest
+      prices (same reconstruction the login-time rehydration effect already does for the
+      active basket, factored the same way: current prices, not save-time prices); for
+      legacy rows with no `product_id` it falls back to an `ilike` search on
+      `product_name`. Shows a "הרשימה נטענה"/"List loaded" toast on completion.
+- [x] **Step 4 — delete saved list.** Each `SAVED_LISTS` card gets a `Trash2` icon button
+      (top-end corner) wired to a new `deleteConfirmId` state instead of a bare
+      `window.confirm` — a styled confirm sheet (same visual pattern as the existing About
+      sheet: dark backdrop + centered rounded panel) with a red "מחק"/"Delete" button and a
+      neutral "ביטול"/"Cancel" button. Confirming calls `handleDeleteSavedList`, which
+      removes the card from `savedBaskets` state immediately (optimistic) and issues
+      `DELETE .../baskets?id=eq.<id>&user_id=eq.<uid>` (RLS already scopes this to the
+      caller's own rows), then shows a "הרשימה נמחקה"/"List deleted" toast.
+- [x] **Step 5 — chat date separators + search.** New `buildChatTimeline()` groups
+      `chatMessages` into a flat render list with a centered, non-interactive date pill
+      (`formatDateSeparator`: "היום"/"Today", "אתמול"/"Yesterday", else a localized
+      `DD/MM/YYYY`) inserted whenever the calendar date changes between consecutive
+      messages. A new search icon in the CHAT view header expands a filter input
+      (`chatSearchQuery` state) that narrows the visible messages by a case-insensitive
+      substring match on `content` and highlights every match inline via a new
+      `HighlightMatch` component (wraps matches in `<mark>`); a clear (X) button resets the
+      query and un-filters. Purely client-side over the existing local `chatMessages` mock
+      state — no new query against the `messages` table (still unwired, see Phase 2 above).
+- [x] **Step 6 — Analytics view.** The `PRICE_UPDATES` placeholder (shared with
+      `COMMUNITY` since Phase 11) is now a real view: the `View` type value renamed to
+      `ANALYTICS` and the dictionary key `navPriceUpdates` renamed to `navAnalytics`
+      (displayed label: "אנליטיקס"/"Analytics"). New `AnalyticsView` component, five
+      sections, each with its own skeleton loader and empty state:
+      - **Savings summary** — total ₪ saved vs. the most expensive chain, across every
+        `basket_items` row the signed-in user has ever had (not just the active basket).
+      - **Cheapest chain this week** — a recharts horizontal `BarChart` ranking all chains
+        by average `latest_prices` price, bars colored by `chain.color_hex`.
+      - **Biggest price drops** — top 5 by % drop, comparing each product+chain's latest
+        `price_history` snapshot in the last 7 days against its latest snapshot before
+        that window.
+      - **Most compared products** — top 5 products by how many `basket_items` rows
+        reference them across all of the user's baskets, with current min price.
+      - **Price trend for a product** — a product-name search (reuses
+        `/api/products/search`) followed by a recharts `LineChart`, one line per chain,
+        over the last 30 days; shows "אין מספיק היסטוריה עדיין — בדקו שוב מחר"/"Not enough
+        history yet — check back tomorrow" when fewer than 2 data points exist for every
+        chain (true for most real products right now, since ingestion runs daily and this
+        feature only shipped this session — verified this is exactly what renders for a
+        freshly-searched product on production).
+      Added `recharts` as a real dependency (`package.json` — the task's own instructions
+      assumed it was already installed; it wasn't, `npm install recharts` added it).
+- [x] **Step 7 — analytics API.** `app/api/analytics/route.ts`, one `GET` handler keyed on
+      `?type=`: `savings`, `chain_ranking`, `price_drops`, `top_products`, `price_trend` —
+      see "Repo structure" above for what each computes. `supabase/migrations/
+      008_analytics_indexes.sql` adds `ph_captured_chain` (`price_history(chain_id,
+      captured_at DESC)`) and `bi_product` (`basket_items(product_id)`) — performance only,
+      NOT YET APPLIED (same manual-paste limitation as every other migration this session).
+      **Bug caught only after the first production deploy, not anticipated going in:**
+      `chain_ranking` initially did a plain `.from('latest_prices').select('chain_id,
+      price')` with no range — checking the live response immediately after deploying
+      showed only 5 of 7 chains with implausible averages; summing every chain's
+      `product_count` came to exactly 1000, proving PostgREST's server-side max-rows
+      setting (1000 on this project) silently truncates any unranged select regardless of
+      an explicit client-side `.limit()` — the `price_drops`/`price_trend` queries had the
+      identical latent bug via `.limit(5000)`/`.limit(2000)`, which look larger but get
+      capped the same way. Fixed with a `fetchAllPages()` `.range()`-pagination helper
+      applied to all three queries; re-verified on production immediately after redeploying
+      that `chain_ranking` now returns all 7 chains with `product_count` matching the exact
+      totals already documented in "Phase 14" above (mahsanei_hashuk 9073, victory 7655,
+      shufersal 38346, etc — small drift on keshet_teamim/osher_ad is just the daily
+      scheduled ingest run between sessions, not a bug).
+- [x] **Step 8 — migrations.** Two new migrations this session
+      (`007_branches_external_id.sql`, `008_analytics_indexes.sql`) plus one correction to
+      an existing one — see "Applying migrations" below for full detail and the exact SQL.
+      Summary: `006_online_branches.sql` (Phase 14) was re-checked live this session and is
+      actually **CONFIRMED APPLIED** (this doc previously said NOT YET APPLIED — stale, same
+      pattern as the 005_waitlist correction in Phase 12/14). `007` and `008` are
+      genuinely NOT YET APPLIED as of this writing.
+- [x] **Step 9 — build and deploy.** `npx tsc --noEmit` (both the root config and
+      `scripts/tsconfig.json`), `npm run lint` (pre-existing warnings only, same two files
+      as always), and `npm run build` all clean. Pushed to `main` and deployed via
+      `vercel --prod` **twice** this session — the first deploy shipped the
+      `chain_ranking` 1000-row-cap bug described in Step 7 above (caught by checking the
+      live endpoint immediately after deploying, not assumed fixed from local testing
+      alone), the second deploy shipped the fix; re-verified live at
+      `https://smart-grocery-il.vercel.app/api/analytics?type=chain_ranking` returning all
+      7 chains with correct counts after the second deploy. UI verified in a real browser
+      (local dev server): saved-list save/load/delete cycle, chat date separators + search
+      + highlight, and all 5 Analytics sections (including the product-search-driven price
+      trend chart) all confirmed working end-to-end with real data before either deploy.
+
 ## Coding conventions
 - All components: functional, TypeScript strict
 - API routes: always use `lib/supabaseServer.ts` (service role), never the anon client
@@ -1216,6 +1386,20 @@ real `schema_migrations` table exists (see "Database schema" above) tracking
 `ALTER TABLE`/seed-data statements are genuinely NOT YET APPLIED (confirmed:
 `branches?select=is_online` returns `42703 column does not exist`) — do not
 add a `schema_migrations` row for it until that's actually run by hand.
+
+**Phase 15 correction:** `006_online_branches.sql` — previously documented
+directly above as NOT YET APPLIED — is actually **CONFIRMED APPLIED**
+(`branches?select=is_online` now returns `200` with real `false` values, not
+`42703`, and `schema_migrations` has a `006_online_branches` row with
+`applied_at: 2026-07-27T21:08:05`). Same lesson as the 005_waitlist
+correction above: this file's "NOT YET APPLIED" notes are snapshots that go
+stale the moment someone pastes the SQL into the Dashboard by hand outside of
+a session — always re-check via PostgREST rather than trusting this doc.
+`007_branches_external_id.sql` and `008_analytics_indexes.sql` (both Phase
+15, see below) are genuinely NOT YET APPLIED as of this writing (confirmed:
+`branches?select=external_id` returns `42703 column does not exist`) — paste
+both into the Supabase Dashboard SQL Editor before `npm run seed:branches`
+or the analytics indexes take effect.
 
 ## Scheduling the ingestion pipeline
 **Option A is now wired up (Phase 6, 2026-07-21)** —
