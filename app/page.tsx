@@ -10,13 +10,17 @@ import {
   ScanBarcode, Camera, Ticket, Check, Mail, Barcode, VideoOff, Truck, Trash2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import {
+  ResponsiveContainer, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  LineChart, Line,
+} from 'recharts';
 import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
 import { BranchMapContainer } from '@/components/BranchMapContainer';
 import { AuthModal, AuthMode } from '@/components/AuthModal';
 import { supabase } from '@/utils/supabase';
 
 type Lang = 'he' | 'en';
-type View = 'HOME' | 'PROFILE' | 'SAVED_LISTS' | 'PRICE_UPDATES' | 'COMMUNITY' | 'LOCATION' | 'CHAT' | 'SCAN' | 'COUPONS';
+type View = 'HOME' | 'PROFILE' | 'SAVED_LISTS' | 'ANALYTICS' | 'COMMUNITY' | 'LOCATION' | 'CHAT' | 'SCAN' | 'COUPONS';
 type Theme = 'light' | 'dark';
 
 const BOTTOM_NAV_TABS: { view: View; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -154,7 +158,7 @@ const DICTIONARY = {
     basePrice: 'מחיר מינימלי',
     total: 'סה״כ',
     navHome: 'ראשי', navProfile: 'הגדרות פרופיל',
-    navSavedLists: 'רשימות שמורות', navPriceUpdates: 'עדכוני מחירים',
+    navSavedLists: 'רשימות שמורות', navAnalytics: 'אנליטיקס',
     navCommunity: 'קהילת צרכנים', navChat: 'צ׳אט משפחתי',
     chatSearchPlaceholder: 'חפש בהודעות...',
     chatNoResults: 'לא נמצאו הודעות תואמות',
@@ -165,6 +169,18 @@ const DICTIONARY = {
     viewDetails: 'צפה בפרטים',
     backToHome: 'חזרה לראשי',
     placeholderDesc: 'העמוד הזה נמצא כעת בפיתוח.',
+    analyticsSavingsTitle: 'חסכתם עד כה',
+    analyticsSavingsSubtitle: 'בהשוואה לרשת היקרה ביותר',
+    analyticsChainRankingTitle: 'הרשת הזולה השבוע',
+    analyticsPriceDropsTitle: 'הירידות הגדולות השבוע',
+    analyticsTopProductsTitle: 'המוצרים שהכי השווית',
+    analyticsTrendTitle: 'מגמת מחיר למוצר',
+    analyticsTrendSearchPlaceholder: 'הקלד שם מוצר...',
+    analyticsNotEnoughHistory: 'אין מספיק היסטוריה עדיין — בדקו שוב מחר',
+    analyticsEmptyDrops: 'אין ירידות מחיר משמעותיות כרגע',
+    analyticsEmptyRanking: 'אין עדיין נתוני מחירים',
+    analyticsEmptyTopProducts: 'עדיין לא הוספתם מספיק מוצרים',
+    analyticsTimesAdded: 'פעמים',
     devOptionsLocked: 'בקרת מפתחים (Locked)',
     profileDataTitle: 'פרטים אישיים',
     avatarPickerTitle: 'בחר דמות',
@@ -279,7 +295,7 @@ const DICTIONARY = {
     basePrice: 'Min Price',
     total: 'Total',
     navHome: 'Home', navProfile: 'Profile Settings',
-    navSavedLists: 'Saved Lists', navPriceUpdates: 'Price Updates',
+    navSavedLists: 'Saved Lists', navAnalytics: 'Analytics',
     navCommunity: 'Community', navChat: 'Household Chat',
     chatSearchPlaceholder: 'Search messages...',
     chatNoResults: 'No matching messages found',
@@ -290,6 +306,18 @@ const DICTIONARY = {
     viewDetails: 'View Details',
     backToHome: 'Back to Home',
     placeholderDesc: 'This page is currently in development.',
+    analyticsSavingsTitle: 'Total saved so far',
+    analyticsSavingsSubtitle: 'vs. most expensive chain',
+    analyticsChainRankingTitle: 'Cheapest chain this week',
+    analyticsPriceDropsTitle: 'Biggest price drops this week',
+    analyticsTopProductsTitle: 'Your most compared products',
+    analyticsTrendTitle: 'Price trend for a product',
+    analyticsTrendSearchPlaceholder: 'Type a product name...',
+    analyticsNotEnoughHistory: 'Not enough history yet — check back tomorrow',
+    analyticsEmptyDrops: 'No significant price drops right now',
+    analyticsEmptyRanking: 'No price data yet',
+    analyticsEmptyTopProducts: "You haven't added enough products yet",
+    analyticsTimesAdded: 'times',
     devOptionsLocked: 'Developer Options (Locked)',
     profileDataTitle: 'Personal Information',
     avatarPickerTitle: 'Choose Avatar',
@@ -844,6 +872,283 @@ function BasketRow({ item, chains, lang, t, isExpanded, onToggleExpand, onUpdate
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+
+interface ChainRankingEntry {
+  chain_id: string;
+  name_he: string;
+  name_en: string;
+  color_hex: string;
+  avg_price: number;
+  product_count: number;
+}
+
+interface PriceDropEntry {
+  product_id: string;
+  chain_id: string;
+  old_price: number;
+  new_price: number;
+  pct_drop: number;
+  product_name_he: string;
+  product_name_en: string | null;
+  chain_name_he: string;
+  chain_name_en: string;
+}
+
+interface TopProductEntry {
+  product_id: string;
+  name_he: string;
+  name_en: string | null;
+  times_added: number;
+  min_price: number | null;
+}
+
+interface TrendSearchResult {
+  id: string;
+  name_he: string;
+  name_en: string | null;
+}
+
+interface TrendHistoryRow {
+  chain_id: string;
+  price: number;
+  captured_at: string;
+}
+
+// Groups raw price_history rows into one row per day (recharts wants a flat
+// array with one key per line), keeping the last price seen that day per
+// chain since `history` is already ordered oldest-first.
+function buildTrendChartData(history: TrendHistoryRow[]): Array<Record<string, string | number>> {
+  const byDate = new Map<string, Record<string, string | number>>();
+  for (const h of history) {
+    const day = h.captured_at.slice(0, 10);
+    if (!byDate.has(day)) byDate.set(day, { date: day });
+    byDate.get(day)![h.chain_id] = h.price;
+  }
+  return [...byDate.values()].sort((a, b) => (a.date as string).localeCompare(b.date as string));
+}
+
+function SkeletonBlock({ height = 120 }: { height?: number }) {
+  return <div className="w-full bg-[var(--color-bg-subtle)] rounded-xl animate-pulse" style={{ height }} />;
+}
+
+function AnalyticsEmptyState({ text }: { text: string }) {
+  return <p className="text-sm text-[var(--color-text-muted)] text-center py-6">{text}</p>;
+}
+
+function AnalyticsView({ t, lang, currentUserId }: { t: Dictionary; lang: Lang; currentUserId: string | null }) {
+  const [savings, setSavings] = useState<number | null>(null);
+  const [savingsLoading, setSavingsLoading] = useState(true);
+
+  const [ranking, setRanking] = useState<ChainRankingEntry[]>([]);
+  const [rankingLoading, setRankingLoading] = useState(true);
+
+  const [drops, setDrops] = useState<PriceDropEntry[]>([]);
+  const [dropsLoading, setDropsLoading] = useState(true);
+
+  const [topProducts, setTopProducts] = useState<TopProductEntry[]>([]);
+  const [topProductsLoading, setTopProductsLoading] = useState(true);
+
+  const [trendQuery, setTrendQuery] = useState('');
+  const [trendResults, setTrendResults] = useState<TrendSearchResult[]>([]);
+  const [trendSelected, setTrendSelected] = useState<TrendSearchResult | null>(null);
+  const [trendData, setTrendData] = useState<Array<Record<string, string | number>>>([]);
+  const [trendChainsPresent, setTrendChainsPresent] = useState<ChainMeta[]>([]);
+  const [trendLoading, setTrendLoading] = useState(false);
+  const [trendHasEnough, setTrendHasEnough] = useState(true);
+
+  useEffect(() => {
+    if (!currentUserId) { setSavingsLoading(false); setTopProductsLoading(false); return; }
+    setSavingsLoading(true);
+    fetch(`/api/analytics?type=savings&user_id=${currentUserId}`)
+      .then((r) => r.json()).then((d) => setSavings(d.total_saved ?? 0))
+      .finally(() => setSavingsLoading(false));
+    setTopProductsLoading(true);
+    fetch(`/api/analytics?type=top_products&user_id=${currentUserId}`)
+      .then((r) => r.json()).then((d) => setTopProducts(d.products ?? []))
+      .finally(() => setTopProductsLoading(false));
+  }, [currentUserId]);
+
+  useEffect(() => {
+    setRankingLoading(true);
+    fetch('/api/analytics?type=chain_ranking')
+      .then((r) => r.json()).then((d) => setRanking(d.ranking ?? []))
+      .finally(() => setRankingLoading(false));
+    setDropsLoading(true);
+    fetch('/api/analytics?type=price_drops&days=7')
+      .then((r) => r.json()).then((d) => setDrops(d.drops ?? []))
+      .finally(() => setDropsLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!trendQuery.trim()) { setTrendResults([]); return; }
+    const handle = setTimeout(() => {
+      fetch(`/api/products/search?q=${encodeURIComponent(trendQuery.trim())}&limit=6`)
+        .then((r) => r.json())
+        .then((d) => setTrendResults((d.products ?? []).map((p: TrendSearchResult) => ({ id: p.id, name_he: p.name_he, name_en: p.name_en }))));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [trendQuery]);
+
+  const handleSelectTrendProduct = async (p: TrendSearchResult) => {
+    setTrendSelected(p);
+    setTrendResults([]);
+    setTrendQuery('');
+    setTrendLoading(true);
+    try {
+      const res = await fetch(`/api/analytics?type=price_trend&product_id=${p.id}&days=30`);
+      const data = await res.json();
+      const history: TrendHistoryRow[] = data.history ?? [];
+      setTrendHasEnough(!!data.has_enough_history);
+      setTrendData(buildTrendChartData(history));
+      const presentIds = new Set(history.map((h) => h.chain_id));
+      setTrendChainsPresent((data.chains ?? []).filter((c: ChainMeta) => presentIds.has(c.id)));
+    } finally {
+      setTrendLoading(false);
+    }
+  };
+
+  const cardClass = 'bg-[var(--color-bg-panel)]/60 backdrop-blur-xl border border-[var(--color-border)] rounded-3xl p-6 shadow-xl';
+
+  return (
+    <motion.div key="ANALYTICS" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}
+      className="flex-1 max-w-4xl mx-auto w-full flex flex-col gap-6 text-start mt-6">
+      <h2 className="text-3xl font-bold text-[var(--color-text-primary)]">{t.navAnalytics}</h2>
+
+      {/* A: savings summary */}
+      <div className={cardClass}>
+        <p className="text-sm text-[var(--color-text-muted)] mb-1">{t.analyticsSavingsTitle}</p>
+        {savingsLoading ? (
+          <SkeletonBlock height={44} />
+        ) : (
+          <p className="text-4xl font-bold text-[var(--color-success)]">₪{(savings ?? 0).toFixed(2)}</p>
+        )}
+        <p className="text-xs text-[var(--color-text-muted)] mt-1">{t.analyticsSavingsSubtitle}</p>
+      </div>
+
+      {/* B: cheapest chain ranking */}
+      <div className={cardClass}>
+        <h3 className="font-semibold text-[var(--color-text-primary)] mb-4">{t.analyticsChainRankingTitle}</h3>
+        {rankingLoading ? (
+          <SkeletonBlock height={180} />
+        ) : ranking.length === 0 ? (
+          <AnalyticsEmptyState text={t.analyticsEmptyRanking} />
+        ) : (
+          <div style={{ width: '100%', height: Math.max(120, ranking.length * 48) }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={ranking} layout="vertical" margin={{ top: 4, right: 24, bottom: 4, left: 4 }}>
+                <XAxis type="number" hide />
+                <YAxis type="category" dataKey={lang === 'he' ? 'name_he' : 'name_en'} width={90} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                <Tooltip formatter={(value) => [`₪${value}`, '']} />
+                <Bar dataKey="avg_price" radius={[0, 8, 8, 0]} barSize={22}>
+                  {ranking.map((r) => <Cell key={r.chain_id} fill={r.color_hex} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      {/* C: biggest price drops */}
+      <div className={cardClass}>
+        <h3 className="font-semibold text-[var(--color-text-primary)] mb-2">{t.analyticsPriceDropsTitle}</h3>
+        {dropsLoading ? (
+          <SkeletonBlock height={160} />
+        ) : drops.length === 0 ? (
+          <AnalyticsEmptyState text={t.analyticsEmptyDrops} />
+        ) : (
+          <div className="flex flex-col">
+            {drops.map((d) => (
+              <div key={`${d.product_id}-${d.chain_id}`} className="flex items-center justify-between gap-3 py-2.5 border-b border-[var(--color-border)] last:border-0">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{lang === 'he' ? d.product_name_he : (d.product_name_en ?? d.product_name_he)}</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">{lang === 'he' ? d.chain_name_he : d.chain_name_en}</p>
+                </div>
+                <div className="flex items-center gap-1.5 text-[var(--color-success)] text-sm font-semibold shrink-0">
+                  <ArrowDown className="w-4 h-4" />
+                  <span className="text-[var(--color-text-muted)] font-normal line-through">₪{d.old_price.toFixed(2)}</span>
+                  ₪{d.new_price.toFixed(2)}
+                  <span>(-{d.pct_drop}%)</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* D: most compared products */}
+      <div className={cardClass}>
+        <h3 className="font-semibold text-[var(--color-text-primary)] mb-2">{t.analyticsTopProductsTitle}</h3>
+        {topProductsLoading ? (
+          <SkeletonBlock height={160} />
+        ) : topProducts.length === 0 ? (
+          <AnalyticsEmptyState text={t.analyticsEmptyTopProducts} />
+        ) : (
+          <div className="flex flex-col">
+            {topProducts.map((p) => (
+              <div key={p.product_id} className="flex items-center justify-between gap-3 py-2.5 border-b border-[var(--color-border)] last:border-0">
+                <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{lang === 'he' ? p.name_he : (p.name_en ?? p.name_he)}</p>
+                <p className="text-xs text-[var(--color-text-muted)] shrink-0">{p.times_added} {t.analyticsTimesAdded} · {p.min_price != null ? `₪${p.min_price.toFixed(2)}` : '—'}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* E: price trend for a searched product */}
+      <div className={cardClass}>
+        <h3 className="font-semibold text-[var(--color-text-primary)] mb-4">{t.analyticsTrendTitle}</h3>
+        <div className="relative">
+          <Search className="w-4 h-4 absolute top-1/2 -translate-y-1/2 start-3 text-[var(--color-text-muted)]" />
+          <input
+            type="text" value={trendQuery} onChange={(e) => { setTrendQuery(e.target.value); setTrendSelected(null); }}
+            placeholder={t.analyticsTrendSearchPlaceholder} dir="auto"
+            className="w-full bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-xl ps-9 pe-4 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] transition-colors"
+          />
+          {trendResults.length > 0 && (
+            <div className="absolute z-10 mt-1 w-full bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-xl shadow-xl overflow-hidden">
+              {trendResults.map((p) => (
+                <button
+                  key={p.id} onClick={() => handleSelectTrendProduct(p)}
+                  className="w-full text-start px-4 py-2.5 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                >
+                  {lang === 'he' ? p.name_he : (p.name_en ?? p.name_he)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {trendSelected && (
+          <div className="mt-4">
+            <p className="text-sm font-medium text-[var(--color-text-primary)] mb-3">{lang === 'he' ? trendSelected.name_he : (trendSelected.name_en ?? trendSelected.name_he)}</p>
+            {trendLoading ? (
+              <SkeletonBlock height={220} />
+            ) : !trendHasEnough ? (
+              <AnalyticsEmptyState text={t.analyticsNotEnoughHistory} />
+            ) : (
+              <div style={{ width: '100%', height: 260 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={trendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} width={40} />
+                    <Tooltip />
+                    <Legend />
+                    {trendChainsPresent.map((c) => (
+                      <Line key={c.id} type="monotone" dataKey={c.id} name={lang === 'he' ? c.name_he : c.name_en} stroke={c.color_hex} strokeWidth={2} dot={false} connectNulls />
+                    ))}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </motion.div>
   );
 }
 
@@ -2444,18 +2749,23 @@ export default function SmartGroceryDashboard() {
         )}
 
         {/* ═══ PLACEHOLDER VIEWS ═══ */}
-        {(currentView === 'PRICE_UPDATES' || currentView === 'COMMUNITY') && (
+        {currentView === 'COMMUNITY' && (
           <motion.div key={currentView} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}
             className="flex-1 flex flex-col items-center justify-center min-h-[50vh] bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl border border-[var(--color-border)] shadow-xl p-8 text-center">
             <div className="w-20 h-20 bg-[var(--color-bg-subtle)]/50 rounded-2xl flex items-center justify-center mb-6 border border-[var(--color-border)]/50 text-[var(--color-accent)]">
-              {currentView === 'PRICE_UPDATES' ? <TrendingDown className="w-10 h-10" /> : <Users className="w-10 h-10" />}
+              <Users className="w-10 h-10" />
             </div>
-            <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">{currentView === 'PRICE_UPDATES' ? t.navPriceUpdates : t.navCommunity}</h2>
+            <h2 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">{t.navCommunity}</h2>
             <p className="text-[var(--color-text-muted)]">{t.placeholderDesc}</p>
             <button onClick={() => setCurrentView('HOME')} className="mt-8 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] px-6 py-2 rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-[var(--color-accent)]/20">
               {t.backToHome}
             </button>
           </motion.div>
+        )}
+
+        {/* ═══ ANALYTICS ═══ */}
+        {currentView === 'ANALYTICS' && (
+          <AnalyticsView t={t} lang={lang} currentUserId={currentUser?.id ?? null} />
         )}
 
         {/* ═══ SCAN ═══ */}
@@ -2738,7 +3048,7 @@ export default function SmartGroceryDashboard() {
                 <DrawerItem view="PROFILE"       currentView={currentView} setCurrentView={setCurrentView} icon={User}         label={t.navProfile}      close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="SAVED_LISTS"   currentView={currentView} setCurrentView={setCurrentView} icon={List}         label={t.navSavedLists}   close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="CHAT"          currentView={currentView} setCurrentView={setCurrentView} icon={MessageSquare} label={t.navChat}         close={() => setIsDrawerOpen(false)} />
-                <DrawerItem view="PRICE_UPDATES" currentView={currentView} setCurrentView={setCurrentView} icon={TrendingDown} label={t.navPriceUpdates} close={() => setIsDrawerOpen(false)} />
+                <DrawerItem view="ANALYTICS" currentView={currentView} setCurrentView={setCurrentView} icon={TrendingDown} label={t.navAnalytics} close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="COMMUNITY"     currentView={currentView} setCurrentView={setCurrentView} icon={Users}        label={t.navCommunity}    close={() => setIsDrawerOpen(false)} />
                 <button onClick={() => { setIsDrawerOpen(false); setIsSupportOpen(true); }}
                   className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] transition-colors">
