@@ -156,6 +156,8 @@ const DICTIONARY = {
     navHome: 'ראשי', navProfile: 'הגדרות פרופיל',
     navSavedLists: 'רשימות שמורות', navPriceUpdates: 'עדכוני מחירים',
     navCommunity: 'קהילת צרכנים', navChat: 'צ׳אט משפחתי',
+    chatSearchPlaceholder: 'חפש בהודעות...',
+    chatNoResults: 'לא נמצאו הודעות תואמות',
     location: 'מיקום',
     currentGpsLocation: 'מיקום נוכחי (GPS)',
     nearbySupermarkets: 'סופרמרקטים בסביבה',
@@ -279,6 +281,8 @@ const DICTIONARY = {
     navHome: 'Home', navProfile: 'Profile Settings',
     navSavedLists: 'Saved Lists', navPriceUpdates: 'Price Updates',
     navCommunity: 'Community', navChat: 'Household Chat',
+    chatSearchPlaceholder: 'Search messages...',
+    chatNoResults: 'No matching messages found',
     location: 'Location',
     currentGpsLocation: 'Current GPS Location',
     nearbySupermarkets: 'Nearby Supermarkets',
@@ -463,6 +467,60 @@ function formatMessageTimestamp(iso: string, lang: Lang): string {
   if (isToday) return timeStr;
   const dateStr = date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit' });
   return `${dateStr} ${timeStr}`;
+}
+
+// "היום"/"Today", "אתמול"/"Yesterday", or a DD/MM/YYYY date — used for the
+// centered date-separator pill between chat message groups.
+function formatDateSeparator(iso: string, lang: Lang): string {
+  const date = new Date(iso);
+  const now = new Date();
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
+  if (diffDays === 0) return lang === 'he' ? 'היום' : 'Today';
+  if (diffDays === 1) return lang === 'he' ? 'אתמול' : 'Yesterday';
+  const locale = lang === 'he' ? 'he-IL' : 'en-US';
+  return date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+type ChatTimelineEntry =
+  | { type: 'separator'; key: string; label: string }
+  | { type: 'message'; key: string; msg: ChatMessage };
+
+// Groups chat messages into a flat render list with a date-separator entry
+// inserted whenever the calendar date changes between consecutive messages.
+function buildChatTimeline(messages: ChatMessage[], lang: Lang): ChatTimelineEntry[] {
+  const entries: ChatTimelineEntry[] = [];
+  let lastDateKey: string | null = null;
+  for (const msg of messages) {
+    const dateKey = new Date(msg.created_at).toDateString();
+    if (dateKey !== lastDateKey) {
+      entries.push({ type: 'separator', key: `sep-${dateKey}`, label: formatDateSeparator(msg.created_at, lang) });
+      lastDateKey = dateKey;
+    }
+    entries.push({ type: 'message', key: msg.id, msg });
+  }
+  return entries;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Wraps every case-insensitive match of `query` inside `text` in a <mark>.
+// Renders `text` untouched when query is blank.
+function HighlightMatch({ text, query }: { text: string; query: string }) {
+  const q = query.trim();
+  if (!q) return <>{text}</>;
+  const parts = text.split(new RegExp(`(${escapeRegExp(q)})`, 'gi'));
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === q.toLowerCase()
+          ? <mark key={i} className="bg-[var(--color-accent)]/40 text-inherit rounded-sm">{part}</mark>
+          : <React.Fragment key={i}>{part}</React.Fragment>
+      )}
+    </>
+  );
 }
 
 // Great-circle distance between two lat/lng points, in kilometers.
@@ -888,6 +946,8 @@ export default function SmartGroceryDashboard() {
     { id: '2', user_id: 'mom', nickname: 'Mom', content: 'Added to the list ✓', created_at: new Date().toISOString() },
   ]);
   const [chatInput, setChatInput] = useState('');
+  const [isChatSearchOpen, setIsChatSearchOpen] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
 
   const t = DICTIONARY[lang];
 
@@ -2307,19 +2367,67 @@ export default function SmartGroceryDashboard() {
         {/* ═══ CHAT ═══ */}
         {currentView === 'CHAT' && (
           <motion.div key="CHAT" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1 max-w-4xl mx-auto w-full flex flex-col gap-6 text-start mt-6">
-            <h2 className="text-3xl font-bold text-[var(--color-text-primary)]">{t.navChat}</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-3xl font-bold text-[var(--color-text-primary)]">{t.navChat}</h2>
+              <button
+                onClick={() => { setIsChatSearchOpen((v) => !v); if (isChatSearchOpen) setChatSearchQuery(''); }}
+                aria-label={t.chatSearchPlaceholder}
+                className="w-11 h-11 flex items-center justify-center rounded-xl text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+              >
+                {isChatSearchOpen ? <X className="w-5 h-5" /> : <Search className="w-5 h-5" />}
+              </button>
+            </div>
             <div className="bg-[var(--color-bg-panel)]/60 backdrop-blur-xl border border-[var(--color-border)] rounded-3xl p-6 shadow-xl flex flex-col" style={{ height: '60vh' }}>
-              <div className="flex-1 overflow-y-auto space-y-3 mb-4 pe-2">
-                {chatMessages.map((msg) => (
-                  <div key={msg.id} className={`flex flex-col ${msg.user_id === currentUser?.id ? 'items-end' : 'items-start'}`}>
-                    <div className={`px-4 py-2 rounded-2xl max-w-[80%] text-sm ${msg.user_id === currentUser?.id ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)]' : 'bg-[var(--color-bg-subtle)] text-[var(--color-text-primary)]'}`}>
-                      {msg.content}
+              <AnimatePresence>
+                {isChatSearchOpen && (
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                    <div className="relative mb-4">
+                      <Search className="w-4 h-4 absolute top-1/2 -translate-y-1/2 start-3 text-[var(--color-text-muted)]" />
+                      <input
+                        type="text" value={chatSearchQuery} onChange={(e) => setChatSearchQuery(e.target.value)}
+                        placeholder={t.chatSearchPlaceholder} autoFocus dir="auto"
+                        className="w-full bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-xl ps-9 pe-9 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] transition-colors"
+                      />
+                      {chatSearchQuery && (
+                        <button onClick={() => setChatSearchQuery('')} className="absolute top-1/2 -translate-y-1/2 end-2 w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
-                    <span className="text-[10px] text-[var(--color-text-muted)] mt-1">
-                      {msg.nickname} · {formatMessageTimestamp(msg.created_at, lang)}
-                    </span>
-                  </div>
-                ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              <div className="flex-1 overflow-y-auto space-y-3 mb-4 pe-2">
+                {(() => {
+                  const visibleMessages = chatSearchQuery.trim()
+                    ? chatMessages.filter((m) => m.content.toLowerCase().includes(chatSearchQuery.trim().toLowerCase()))
+                    : chatMessages;
+                  if (chatSearchQuery.trim() && visibleMessages.length === 0) {
+                    return <p className="text-center text-sm text-[var(--color-text-muted)] py-6">{t.chatNoResults}</p>;
+                  }
+                  return buildChatTimeline(visibleMessages, lang).map((entry) => {
+                    if (entry.type === 'separator') {
+                      return (
+                        <div key={entry.key} className="flex justify-center py-1">
+                          <span className="text-[11px] font-medium text-[var(--color-text-muted)] bg-[var(--color-bg-subtle)] rounded-full px-3 py-1">
+                            {entry.label}
+                          </span>
+                        </div>
+                      );
+                    }
+                    const msg = entry.msg;
+                    return (
+                      <div key={entry.key} className={`flex flex-col ${msg.user_id === currentUser?.id ? 'items-end' : 'items-start'}`}>
+                        <div className={`px-4 py-2 rounded-2xl max-w-[80%] text-sm ${msg.user_id === currentUser?.id ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)]' : 'bg-[var(--color-bg-subtle)] text-[var(--color-text-primary)]'}`}>
+                          <HighlightMatch text={msg.content} query={chatSearchQuery} />
+                        </div>
+                        <span className="text-[10px] text-[var(--color-text-muted)] mt-1">
+                          {msg.nickname} · {formatMessageTimestamp(msg.created_at, lang)}
+                        </span>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
               <form onSubmit={handleSendMessage} className="flex gap-3">
                 <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
