@@ -7,7 +7,7 @@ import {
   MapPin, Navigation, ChevronDown,
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   ArrowDown, Loader2, Bell, Copy, UserPlus, Sun, Moon,
-  ScanBarcode, Camera, Ticket, Check, Mail, Barcode, VideoOff, Truck,
+  ScanBarcode, Camera, Ticket, Check, Mail, Barcode, VideoOff, Truck, Trash2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
@@ -218,6 +218,12 @@ const DICTIONARY = {
     clearList: 'רוקן רשימה',
     saveListPrompt: 'שם לרשימה השמורה:',
     clearListConfirm: 'לרוקן את הסל? הפעולה בלתי הפיכה.',
+    listSavedToast: 'הרשימה נשמרה',
+    listLoadedToast: 'הרשימה נטענה',
+    listDeletedToast: 'הרשימה נמחקה',
+    deleteListConfirm: 'למחוק רשימה זו?',
+    deleteAction: 'מחק',
+    cancelAction: 'ביטול',
     myLocation: 'המיקום שלי',
     locationDenied: 'הגישה למיקום נדחתה',
     distanceFilter: 'טווח מרחק',
@@ -334,6 +340,12 @@ const DICTIONARY = {
     clearList: 'Clear List',
     saveListPrompt: 'Name for the saved list:',
     clearListConfirm: 'Clear the basket? This cannot be undone.',
+    listSavedToast: 'List saved',
+    listLoadedToast: 'List loaded',
+    listDeletedToast: 'List deleted',
+    deleteListConfirm: 'Delete this list?',
+    deleteAction: 'Delete',
+    cancelAction: 'Cancel',
     myLocation: 'My Location',
     locationDenied: 'Location access denied',
     distanceFilter: 'Distance',
@@ -791,6 +803,7 @@ export default function SmartGroceryDashboard() {
   const [verificationFlash, setVerificationFlash] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Household invite state
   const [household, setHousehold] = useState<{ id: string; name: string; invite_code: string | null } | null>(null);
@@ -1213,6 +1226,7 @@ export default function SmartGroceryDashboard() {
     const { data: newBasket } = await supabase.from('baskets').insert({
       user_id: currentUser.id,
       name: name.trim(),
+      is_archived: true,
     }).select().single();
 
     if (newBasket) {
@@ -1226,10 +1240,103 @@ export default function SmartGroceryDashboard() {
       );
     }
 
-    if (activeBasketId) {
-      await supabase.from('basket_items').delete().eq('basket_id', activeBasketId);
+    showToast(t.listSavedToast);
+  };
+
+  // Loads a saved (is_archived=true) basket into the working view: rebuilds
+  // full BasketItem rows (current prices, not the prices at save time) from
+  // its basket_items, same reconstruction the login-time rehydration effect
+  // does for the active basket. Items missing product_id (legacy rows) are
+  // matched by product_name instead.
+  const handleLoadSavedList = async (sb: SavedBasket) => {
+    if (!supabase) return;
+    const items = sb.basket_items ?? [];
+    if (items.length === 0) {
+      setActiveBasketId(sb.id);
+      setBasket([]);
+      setCurrentView('HOME');
+      showToast(t.listLoadedToast);
+      return;
     }
-    setBasket([]);
+
+    const withProductId = items.filter((i) => i.product_id);
+    const withoutProductId = items.filter((i) => !i.product_id);
+
+    const [{ data: products }, { data: prices }] = await Promise.all([
+      withProductId.length > 0
+        ? supabase.from('products').select('id, name_he, name_en, category, barcode').in('id', withProductId.map((i) => i.product_id as string))
+        : Promise.resolve({ data: [] as Array<{ id: string; name_he: string; name_en: string | null; category: string | null; barcode: string | null }> }),
+      withProductId.length > 0
+        ? supabase.from('latest_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', withProductId.map((i) => i.product_id as string))
+        : Promise.resolve({ data: [] as Array<{ product_id: string } & ChainPrice> }),
+    ]);
+
+    const pricesByProduct: Record<string, Record<string, ChainPrice>> = {};
+    for (const p of prices ?? []) {
+      if (!pricesByProduct[p.product_id]) pricesByProduct[p.product_id] = {};
+      pricesByProduct[p.product_id][p.chain_id] = p as ChainPrice;
+    }
+
+    const rehydrated: BasketItem[] = withProductId.map((i) => {
+      const product = products?.find((p) => p.id === i.product_id);
+      const productPrices = pricesByProduct[i.product_id as string] ?? {};
+      const priceValues = Object.values(productPrices).map((p) => p.price);
+      return {
+        id: i.product_id as string,
+        dbId: i.id,
+        name_he: product?.name_he ?? i.product_name,
+        name_en: product?.name_en ?? null,
+        category: product?.category ?? null,
+        barcode: product?.barcode ?? null,
+        prices: productPrices,
+        min_price: priceValues.length > 0 ? Math.min(...priceValues) : null,
+        quantity: i.quantity_value ?? 1,
+      };
+    });
+
+    // Legacy rows with no product_id: look each one up by name so it still
+    // shows real current prices instead of nothing.
+    for (const i of withoutProductId) {
+      const { data: match } = await supabase
+        .from('products')
+        .select('id, name_he, name_en, category, barcode')
+        .ilike('name_he', i.product_name)
+        .limit(1)
+        .maybeSingle();
+      if (!match) continue;
+      const { data: matchPrices } = await supabase
+        .from('latest_prices')
+        .select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at')
+        .eq('product_id', match.id);
+      const productPrices: Record<string, ChainPrice> = {};
+      for (const p of matchPrices ?? []) productPrices[p.chain_id] = p as ChainPrice;
+      const priceValues = Object.values(productPrices).map((p) => p.price);
+      rehydrated.push({
+        id: match.id,
+        dbId: i.id,
+        name_he: match.name_he,
+        name_en: match.name_en,
+        category: match.category,
+        barcode: match.barcode,
+        prices: productPrices,
+        min_price: priceValues.length > 0 ? Math.min(...priceValues) : null,
+        quantity: i.quantity_value ?? 1,
+      });
+    }
+
+    setActiveBasketId(sb.id);
+    setBasket(rehydrated);
+    setCurrentView('HOME');
+    showToast(t.listLoadedToast);
+  };
+
+  const handleDeleteSavedList = async (basketId: string) => {
+    setDeleteConfirmId(null);
+    setSavedBaskets((prev) => prev.filter((b) => b.id !== basketId));
+    if (supabase && currentUser?.id) {
+      await supabase.from('baskets').delete().eq('id', basketId).eq('user_id', currentUser.id);
+    }
+    showToast(t.listDeletedToast);
   };
 
   const handleClearList = async () => {
@@ -2049,8 +2156,15 @@ export default function SmartGroceryDashboard() {
             ) : savedBaskets.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {savedBaskets.map((sb) => (
-                  <div key={sb.id} className="bg-[var(--color-bg-panel)]/60 backdrop-blur-xl border border-[var(--color-border)] rounded-3xl p-6 shadow-xl hover:bg-[var(--color-bg-panel)] transition-colors cursor-pointer group">
-                    <div className="flex items-center gap-4 mb-4">
+                  <div key={sb.id} className="relative bg-[var(--color-bg-panel)]/60 backdrop-blur-xl border border-[var(--color-border)] rounded-3xl p-6 shadow-xl hover:bg-[var(--color-bg-panel)] transition-colors cursor-pointer group">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(sb.id); }}
+                      aria-label={t.deleteAction}
+                      className="absolute top-4 end-4 w-11 h-11 flex items-center justify-center rounded-xl text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger-bg)] transition-colors"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                    <div className="flex items-center gap-4 mb-4 pe-10">
                       <div className="w-12 h-12 bg-[var(--color-bg-subtle)] rounded-2xl flex items-center justify-center text-[var(--color-accent)]"><List className="w-6 h-6" /></div>
                       <div>
                         <h3 className="font-bold text-[var(--color-text-primary)]">{sb.name}</h3>
@@ -2058,7 +2172,7 @@ export default function SmartGroceryDashboard() {
                       </div>
                     </div>
                     <p className="text-xs text-[var(--color-text-muted)]">{sb.basket_items?.length ?? 0} {lang === 'he' ? 'פריטים' : 'items'}</p>
-                    <button onClick={() => { setActiveBasketId(sb.id); setCurrentView('HOME'); }}
+                    <button onClick={() => handleLoadSavedList(sb)}
                       className="w-full mt-4 bg-[var(--color-accent)]/10 hover:bg-[var(--color-accent)]/20 text-[var(--color-accent)] py-2 rounded-xl text-sm font-semibold transition-colors border border-[var(--color-accent)]/20">
                       {t.viewDetails}
                     </button>
@@ -2587,6 +2701,36 @@ export default function SmartGroceryDashboard() {
                 >
                   {t.close}
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Delete saved-list confirmation ── */}
+      <AnimatePresence>
+        {deleteConfirmId && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setDeleteConfirmId(null)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative bg-[var(--color-bg-panel)] border border-[var(--color-border)] shadow-2xl rounded-3xl w-full max-w-sm overflow-hidden">
+              <div className="p-6 flex flex-col gap-5">
+                <p className="text-center font-semibold text-[var(--color-text-primary)]">{t.deleteListConfirm}</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setDeleteConfirmId(null)}
+                    className="flex-1 min-h-[44px] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] border border-[var(--color-border)] rounded-xl font-semibold transition-colors"
+                  >
+                    {t.cancelAction}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteSavedList(deleteConfirmId)}
+                    className="flex-1 min-h-[44px] bg-[var(--color-danger)] hover:opacity-90 text-white rounded-xl font-semibold transition-colors"
+                  >
+                    {t.deleteAction}
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
