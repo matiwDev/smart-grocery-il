@@ -1,6 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabaseServer';
 
+// PostgREST silently caps any response at its configured max-rows (1000 on
+// this project, confirmed live: a plain `latest_prices` select with no range
+// returned exactly 1000 rows total across chains, undercounting every chain
+// past the cutoff and skipping two entirely). `.limit(N)` on the client side
+// does NOT override that server-side cap. Queries below that can plausibly
+// exceed 1000 rows (the full latest_prices table, multi-day price_history
+// windows) page through with `.range()` instead of trusting a single select.
+async function fetchAllPages<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  pageSize = 1000,
+  maxRows = 20000
+): Promise<T[]> {
+  const all: T[] = [];
+  let from = 0;
+  while (from < maxRows) {
+    const { data, error } = await page(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    const rows = data ?? [];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 // GET /api/analytics?type=savings|chain_ranking|price_drops|top_products|price_trend
 // Backs the Analytics view (app/page.tsx). Each `type` is an independent
 // query — kept in one route since they're all read-only reporting queries
@@ -72,13 +97,14 @@ export async function GET(req: NextRequest) {
           .select('id, name_he, name_en, color_hex');
         if (chainsErr) throw chainsErr;
 
-        const { data: prices, error: pricesErr } = await supabase
-          .from('latest_prices')
-          .select('chain_id, price');
-        if (pricesErr) throw pricesErr;
+        const prices = await fetchAllPages<{ chain_id: string; price: number }>(
+          (from, to) => supabase.from('latest_prices').select('chain_id, price').range(from, to),
+          1000,
+          60000
+        );
 
         const sums: Record<string, { sum: number; count: number }> = {};
-        for (const p of prices ?? []) {
+        for (const p of prices) {
           if (!sums[p.chain_id]) sums[p.chain_id] = { sum: 0, count: 0 };
           sums[p.chain_id].sum += p.price;
           sums[p.chain_id].count += 1;
@@ -103,22 +129,19 @@ export async function GET(req: NextRequest) {
         const days = Math.max(1, Math.min(90, parseInt(searchParams.get('days') ?? '7')));
         const cutoffIso = new Date(Date.now() - days * 86400000).toISOString();
 
-        const [{ data: recent, error: recentErr }, { data: older, error: olderErr }] = await Promise.all([
-          supabase
-            .from('price_history')
-            .select('product_id, chain_id, price, captured_at')
-            .gte('captured_at', cutoffIso)
-            .order('captured_at', { ascending: false })
-            .limit(5000),
-          supabase
-            .from('price_history')
-            .select('product_id, chain_id, price, captured_at')
-            .lt('captured_at', cutoffIso)
-            .order('captured_at', { ascending: false })
-            .limit(5000),
+        type PriceHistoryRow = { product_id: string; chain_id: string; price: number; captured_at: string };
+        const [recent, older] = await Promise.all([
+          fetchAllPages<PriceHistoryRow>(
+            (from, to) => supabase.from('price_history').select('product_id, chain_id, price, captured_at')
+              .gte('captured_at', cutoffIso).order('captured_at', { ascending: false }).range(from, to),
+            1000, 5000
+          ),
+          fetchAllPages<PriceHistoryRow>(
+            (from, to) => supabase.from('price_history').select('product_id, chain_id, price, captured_at')
+              .lt('captured_at', cutoffIso).order('captured_at', { ascending: false }).range(from, to),
+            1000, 5000
+          ),
         ]);
-        if (recentErr) throw recentErr;
-        if (olderErr) throw olderErr;
 
         // Latest row per (product_id, chain_id) in each window — both result
         // sets are already ordered newest-first, so the first time a key is
@@ -132,8 +155,8 @@ export async function GET(req: NextRequest) {
           return map;
         };
 
-        const newPrices = latestInWindow(recent ?? []);
-        const oldPrices = latestInWindow(older ?? []);
+        const newPrices = latestInWindow(recent);
+        const oldPrices = latestInWindow(older);
 
         const drops: Array<{ product_id: string; chain_id: string; old_price: number; new_price: number; pct_drop: number }> = [];
         for (const [key, newPrice] of newPrices) {
@@ -237,22 +260,19 @@ export async function GET(req: NextRequest) {
         const days = Math.max(1, Math.min(365, parseInt(searchParams.get('days') ?? '30')));
         const cutoffIso = new Date(Date.now() - days * 86400000).toISOString();
 
-        const { data: history, error } = await supabase
-          .from('price_history')
-          .select('chain_id, price, captured_at')
-          .eq('product_id', productId)
-          .gte('captured_at', cutoffIso)
-          .order('captured_at', { ascending: true })
-          .limit(2000);
-        if (error) throw error;
+        const history = await fetchAllPages<{ chain_id: string; price: number; captured_at: string }>(
+          (from, to) => supabase.from('price_history').select('chain_id, price, captured_at')
+            .eq('product_id', productId).gte('captured_at', cutoffIso).order('captured_at', { ascending: true }).range(from, to),
+          1000, 2000
+        );
 
         const { data: chains } = await supabase.from('chains').select('id, name_he, name_en, color_hex');
 
         const pointsPerChain: Record<string, number> = {};
-        for (const h of history ?? []) pointsPerChain[h.chain_id] = (pointsPerChain[h.chain_id] ?? 0) + 1;
+        for (const h of history) pointsPerChain[h.chain_id] = (pointsPerChain[h.chain_id] ?? 0) + 1;
 
         return NextResponse.json({
-          history: history ?? [],
+          history,
           chains: chains ?? [],
           has_enough_history: Object.values(pointsPerChain).some((c) => c >= 2),
         });
