@@ -162,10 +162,17 @@ supabase/
                                    # CONFIRMED APPLIED (same verification pass) — ingest-prices.ts
                                    # successfully writes rows to it now.
     005_waitlist.sql               # waitlist table (Phase 11 step 7 / Phase 12, see "Phase 12"
-                                   # below). Written this session — checked live via PostgREST
-                                   # (`waitlist?select=id` → PGRST205) and confirmed NOT YET
-                                   # APPLIED. Needs to be pasted into the Supabase SQL Editor by
-                                   # hand before the Coupons view's waitlist signup will work.
+                                   # below). CONFIRMED APPLIED — re-checked live via PostgREST in
+                                   # Phase 14 (`waitlist?select=id` → `200 []`, not PGRST205). This
+                                   # file previously said NOT YET APPLIED; that was stale (applied
+                                   # 2026-07-27, evidently before the Phase 14 session started) —
+                                   # see "Applying migrations" below for the correction.
+    006_online_branches.sql        # branches.is_online column + Shufersal/Rami Levy Online seed
+                                   # rows (Phase 14, see below). Written this session — checked live
+                                   # via PostgREST (`branches?select=is_online` → `42703 column does
+                                   # not exist`) and confirmed NOT YET APPLIED. Needs to be pasted
+                                   # into the Supabase SQL Editor by hand before the Location view's
+                                   # "כולל משלוח"/"Include delivery" toggle will show anything.
 ```
 
 ## Environment variables
@@ -1139,9 +1146,15 @@ whichever ones actually work.
   is actually **CONFIRMED APPLIED** (this doc previously said NOT YET APPLIED; that was
   stale, not re-verified since Phase 12). See "Applying migrations" above for the full
   correction and how this table works.
-- Not done this session (deferred, needs explicit user go-ahead first): Step 7's
-  `schema_migrations` INSERT for `006_online_branches` (correctly withheld — its DDL
-  hasn't actually run yet, see Step 4 above) and Step 9's `git push`/`vercel --prod`.
+- [x] **Step 9 — build and deploy.** `npx tsc --noEmit`, `npm run lint` (pre-existing
+      warnings only, same two files as always), and `npm run build` all clean. Pushed to
+      `main` and deployed via `vercel --prod`; re-verified live at
+      `https://smart-grocery-il.vercel.app` (chain selector dots now reflect the expanded
+      7-chain list, basket/price-comparison flow works end to end, no console errors).
+- **Not done this session** (correctly withheld — needs `006_online_branches.sql` to
+  actually be applied by hand first, see Step 4 above): Step 7's `schema_migrations`
+  INSERT for `006_online_branches`. Adding that row before the migration's own DDL has
+  run would make the tracking table lie about what's actually applied.
 
 ## Coding conventions
 - All components: functional, TypeScript strict
