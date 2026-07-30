@@ -26,7 +26,41 @@ async function fetchAllPages<T>(
   return all;
 }
 
-// GET /api/analytics?type=savings|chain_ranking|price_drops|top_products|price_trend
+// ISO year-week key (e.g. "2026-W05") for a date, used to count distinct
+// active weeks for the weekly-average calculation in spending_overview.
+function isoWeekKey(d: Date): string {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+// Cheapest-price cost of a set of (product_id, quantity) pairs: fetches
+// latest_prices for the involved products once and takes the per-product
+// minimum, since there's no "price actually paid" data in this app — every
+// basket_items row is a planned purchase, not a receipt line. Shared by
+// spending_overview, monthly_basket, and personal_chain_ranking below.
+async function minPriceByProduct(
+  supabase: ReturnType<typeof createServerClient>,
+  productIds: string[]
+): Promise<Record<string, number>> {
+  if (productIds.length === 0) return {};
+  const { data, error } = await supabase
+    .from('latest_prices')
+    .select('product_id, price')
+    .in('product_id', productIds);
+  if (error) throw error;
+  const out: Record<string, number> = {};
+  for (const p of data ?? []) {
+    out[p.product_id] = out[p.product_id] == null ? p.price : Math.min(out[p.product_id], p.price);
+  }
+  return out;
+}
+
+// GET /api/analytics?type=savings|chain_ranking|price_trend|spending_overview|
+//                         personal_chain_ranking|monthly_basket|custom_markets
 // Backs the Analytics view (app/page.tsx). Each `type` is an independent
 // query — kept in one route since they're all read-only reporting queries
 // over the same tables, not because they share request/response shape.
@@ -278,8 +312,271 @@ export async function GET(req: NextRequest) {
         });
       }
 
+      case 'spending_overview': {
+        const userId = searchParams.get('user_id');
+        if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+
+        const { data: baskets, error: basketsErr } = await supabase
+          .from('baskets')
+          .select('id, created_at')
+          .eq('user_id', userId);
+        if (basketsErr) throw basketsErr;
+
+        if (!baskets || baskets.length === 0) {
+          return NextResponse.json({ not_enough_data: true });
+        }
+
+        const earliestCreatedAt = baskets.reduce((min, b) => (b.created_at < min ? b.created_at : min), baskets[0].created_at);
+        const daysActive = (Date.now() - new Date(earliestCreatedAt).getTime()) / 86400000;
+        if (daysActive < 7) {
+          return NextResponse.json({ not_enough_data: true });
+        }
+
+        const basketIds = baskets.map((b) => b.id);
+        const basketDateById: Record<string, string> = {};
+        for (const b of baskets) basketDateById[b.id] = b.created_at;
+
+        const { data: items, error: itemsErr } = await supabase
+          .from('basket_items')
+          .select('basket_id, product_id, quantity_value')
+          .in('basket_id', basketIds)
+          .not('product_id', 'is', null);
+        if (itemsErr) throw itemsErr;
+
+        const productIds = [...new Set((items ?? []).map((i) => i.product_id as string))];
+        const minPrices = await minPriceByProduct(supabase, productIds);
+
+        // Cost per basket ("trip"), dated by that basket's created_at — this
+        // app has no separate purchase-timestamp, so a saved/active basket
+        // IS the unit of a "trip".
+        const costByBasket: Record<string, number> = {};
+        for (const i of items ?? []) {
+          const price = minPrices[i.product_id as string];
+          if (price == null) continue;
+          costByBasket[i.basket_id] = (costByBasket[i.basket_id] ?? 0) + price * (i.quantity_value ?? 1);
+        }
+
+        const now = new Date();
+        const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const currentMonthKey = monthKey(now);
+        const currentYear = now.getFullYear();
+
+        let monthTotal = 0;
+        let annualTotalToDate = 0;
+        let allTimeTotal = 0;
+        const weeksWithTrip = new Set<string>();
+        const monthlyTotals: Record<string, { total: number; trips: number; weeks: Set<string> }> = {};
+
+        for (const [basketId, cost] of Object.entries(costByBasket)) {
+          const d = new Date(basketDateById[basketId]);
+          allTimeTotal += cost;
+          if (d.getFullYear() === currentYear) annualTotalToDate += cost;
+          if (monthKey(d) === currentMonthKey) monthTotal += cost;
+
+          const weekKey = isoWeekKey(d);
+          weeksWithTrip.add(weekKey);
+
+          const mk = monthKey(d);
+          if (!monthlyTotals[mk]) monthlyTotals[mk] = { total: 0, trips: 0, weeks: new Set() };
+          monthlyTotals[mk].total += cost;
+          monthlyTotals[mk].trips += 1;
+          monthlyTotals[mk].weeks.add(weekKey);
+        }
+
+        const weeksActive = Math.max(1, weeksWithTrip.size);
+        const weeklyAverage = allTimeTotal / weeksActive;
+
+        // Last 6 calendar months (including current), oldest first.
+        const monthlyBreakdown: Array<{ month: string; total: number; avg_per_week: number; trips: number }> = [];
+        for (let i = 5; i >= 0; i--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const mk = monthKey(d);
+          const m = monthlyTotals[mk];
+          monthlyBreakdown.push({
+            month: mk,
+            total: Math.round((m?.total ?? 0) * 100) / 100,
+            avg_per_week: m && m.weeks.size > 0 ? Math.round((m.total / m.weeks.size) * 100) / 100 : 0,
+            trips: m?.trips ?? 0,
+          });
+        }
+
+        const monthsWithData = Object.keys(monthlyTotals).length;
+        const monthlyAverage = monthsWithData > 0 ? allTimeTotal / monthsWithData : 0;
+        const annualProjection = monthlyAverage * 12;
+
+        return NextResponse.json({
+          not_enough_data: false,
+          weekly_average: Math.round(weeklyAverage * 100) / 100,
+          month_total: Math.round(monthTotal * 100) / 100,
+          monthly_breakdown: monthlyBreakdown,
+          annual_projection: Math.round(annualProjection * 100) / 100,
+          annual_total_to_date: Math.round(annualTotalToDate * 100) / 100,
+        });
+      }
+
+      case 'personal_chain_ranking': {
+        const userId = searchParams.get('user_id');
+        if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+
+        const { data: baskets, error: basketsErr } = await supabase.from('baskets').select('id').eq('user_id', userId);
+        if (basketsErr) throw basketsErr;
+        const basketIds = (baskets ?? []).map((b) => b.id);
+        if (basketIds.length === 0) return NextResponse.json({ ranking: [] });
+
+        const { data: items, error: itemsErr } = await supabase
+          .from('basket_items')
+          .select('product_id, quantity_value')
+          .in('basket_id', basketIds)
+          .not('product_id', 'is', null);
+        if (itemsErr) throw itemsErr;
+
+        const productIds = [...new Set((items ?? []).map((i) => i.product_id as string))];
+        if (productIds.length === 0) return NextResponse.json({ ranking: [] });
+
+        const [{ data: prices, error: pricesErr }, { data: chains, error: chainsErr }] = await Promise.all([
+          supabase.from('latest_prices').select('product_id, chain_id, price').in('product_id', productIds),
+          supabase.from('chains').select('id, name_he, name_en, color_hex'),
+        ]);
+        if (pricesErr) throw pricesErr;
+        if (chainsErr) throw chainsErr;
+
+        const priceMap: Record<string, Record<string, number>> = {};
+        for (const p of prices ?? []) {
+          if (!priceMap[p.product_id]) priceMap[p.product_id] = {};
+          priceMap[p.product_id][p.chain_id] = p.price;
+        }
+
+        // Total cost of the user's actual historical items, per chain — not
+        // an average price like the general ranking, since this answers
+        // "which chain would have been cheapest for what you actually buy".
+        const totals: Record<string, { sum: number; count: number }> = {};
+        for (const item of items ?? []) {
+          const perChain = priceMap[item.product_id as string] ?? {};
+          for (const [chainId, price] of Object.entries(perChain)) {
+            if (!totals[chainId]) totals[chainId] = { sum: 0, count: 0 };
+            totals[chainId].sum += price * (item.quantity_value ?? 1);
+            totals[chainId].count += 1;
+          }
+        }
+
+        const ranking = (chains ?? [])
+          .filter((c) => totals[c.id] && totals[c.id].count > 0)
+          .map((c) => ({
+            chain_id: c.id,
+            name_he: c.name_he,
+            name_en: c.name_en,
+            color_hex: c.color_hex,
+            total_cost: Math.round(totals[c.id].sum * 100) / 100,
+            items_covered: totals[c.id].count,
+          }))
+          .sort((a, b) => a.total_cost - b.total_cost);
+
+        return NextResponse.json({ ranking });
+      }
+
+      case 'monthly_basket': {
+        const userId = searchParams.get('user_id');
+        if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+
+        const now = new Date();
+        const monthParam = searchParams.get('month'); // YYYY-MM, defaults to current month
+        const [year, month] = (monthParam ?? `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
+          .split('-').map(Number);
+        const monthStart = new Date(Date.UTC(year, month - 1, 1));
+        const monthEnd = new Date(Date.UTC(year, month, 1));
+
+        const { data: baskets, error: basketsErr } = await supabase
+          .from('baskets')
+          .select('id')
+          .eq('user_id', userId)
+          .gte('created_at', monthStart.toISOString())
+          .lt('created_at', monthEnd.toISOString());
+        if (basketsErr) throw basketsErr;
+        const basketIds = (baskets ?? []).map((b) => b.id);
+        if (basketIds.length === 0) return NextResponse.json({ products: [], total_items: 0 });
+
+        const { data: items, error: itemsErr } = await supabase
+          .from('basket_items')
+          .select('product_id, quantity_value')
+          .in('basket_id', basketIds)
+          .not('product_id', 'is', null);
+        if (itemsErr) throw itemsErr;
+
+        const qtyByProduct: Record<string, number> = {};
+        for (const i of items ?? []) {
+          const pid = i.product_id as string;
+          qtyByProduct[pid] = (qtyByProduct[pid] ?? 0) + (i.quantity_value ?? 1);
+        }
+
+        const productIds = Object.keys(qtyByProduct);
+        if (productIds.length === 0) return NextResponse.json({ products: [], total_items: 0 });
+
+        const [{ data: products, error: productsErr }, minPrices] = await Promise.all([
+          supabase.from('products').select('id, name_he, name_en, category').in('id', productIds),
+          minPriceByProduct(supabase, productIds),
+        ]);
+        if (productsErr) throw productsErr;
+
+        const result = productIds
+          .map((id) => {
+            const p = products?.find((row) => row.id === id);
+            return {
+              product_id: id,
+              name_he: p?.name_he ?? id,
+              name_en: p?.name_en ?? null,
+              category: p?.category ?? 'other',
+              total_qty: qtyByProduct[id],
+              cheapest_price: minPrices[id] ?? null,
+            };
+          })
+          .sort((a, b) => b.total_qty - a.total_qty);
+
+        const totalItems = Object.values(qtyByProduct).reduce((s, q) => s + q, 0);
+
+        return NextResponse.json({ products: result, total_items: totalItems });
+      }
+
+      case 'custom_markets': {
+        const userId = searchParams.get('user_id');
+        if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+
+        const { data: markets, error: marketsErr } = await supabase
+          .from('custom_markets')
+          .select('id, name, created_at')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: true });
+
+        if (marketsErr) {
+          // Table doesn't exist yet if migration 009 hasn't been applied —
+          // degrade to an empty list rather than a 500, same pattern as
+          // is_online (migration 006) before that migration landed.
+          if (marketsErr.code === 'PGRST205') return NextResponse.json({ markets: [] });
+          throw marketsErr;
+        }
+
+        const marketIds = (markets ?? []).map((m) => m.id);
+        const { data: entries, error: entriesErr } = marketIds.length > 0
+          ? await supabase.from('custom_market_entries').select('id, market_id, amount, note, spent_at')
+              .in('market_id', marketIds).order('spent_at', { ascending: false })
+          : { data: [] as Array<{ id: string; market_id: string; amount: number; note: string | null; spent_at: string }>, error: null };
+        if (entriesErr) throw entriesErr;
+
+        const result = (markets ?? []).map((m) => {
+          const marketEntries = (entries ?? []).filter((e) => e.market_id === m.id);
+          const total = marketEntries.reduce((s, e) => s + Number(e.amount), 0);
+          return {
+            id: m.id,
+            name: m.name,
+            total_spent: Math.round(total * 100) / 100,
+            recent_entries: marketEntries.slice(0, 5),
+          };
+        });
+
+        return NextResponse.json({ markets: result });
+      }
+
       default:
-        return NextResponse.json({ error: 'Unknown or missing type. Use one of: savings, chain_ranking, price_drops, top_products, price_trend' }, { status: 400 });
+        return NextResponse.json({ error: 'Unknown or missing type. Use one of: savings, chain_ranking, price_drops, top_products, price_trend, spending_overview, personal_chain_ranking, monthly_basket, custom_markets' }, { status: 400 });
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Analytics query failed';
