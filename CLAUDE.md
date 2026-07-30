@@ -51,14 +51,18 @@ app/
                                    # sheet; handleSaveList no longer clears the active basket; CHAT
                                    # view groups messages under date-separator pills and gained a
                                    # client-side search (buildChatTimeline/HighlightMatch); new
-                                   # AnalyticsView component (savings/chain-ranking/price-drops/
-                                   # top-products/price-trend, recharts) renders the ANALYTICS view.
+                                   # AnalyticsView component (Phase 16: spending-overview/
+                                   # chain-ranking(personal+general)/monthly-basket-summary/
+                                   # custom-markets/price-trend, recharts) renders the ANALYTICS
+                                   # view — see "Phase 16" below, replaced the original 5 sections.
   layout.tsx                      # Root layout, RTL support, pre-hydration theme-init script (see
                                    # "Theme system" below)
   api/
     analytics/route.ts            # Phase 15 — GET ?type=savings|chain_ranking|price_drops|
-                                   # top_products|price_trend, backs AnalyticsView. See "Phase 15"
-                                   # below for what each type computes.
+                                   # top_products|price_trend, plus Phase 16's spending_overview|
+                                   # personal_chain_ranking|monthly_basket|custom_markets — backs
+                                   # AnalyticsView. See "Phase 15"/"Phase 16" below for what each
+                                   # type computes.
     products/search/route.ts      # GET ?q=<query> — returns products + latest prices per chain.
                                    # Phase 11: the `.or(...)` filter also matches `barcode.eq.<q>`
                                    # (exact match), so the Scan view's manual barcode entry works
@@ -66,6 +70,12 @@ app/
     prices/compare/route.ts       # POST {items:[{product_id,quantity}], chain_ids?:[...]} — returns
                                    # cost per chain, optionally narrowed to chain_ids (Phase 11 chain
                                    # selector strip; client omits it until the user deselects a chain)
+    baskets/[id]/items/route.ts   # Phase 16 — GET ?user_id=<uid>, service-role, verifies the basket
+                                   # belongs to user_id (service-role bypasses RLS). Joins
+                                   # basket_items -> products -> latest_prices server-side (two
+                                   # parallel queries + JS merge, not a single embedded select —
+                                   # basket_items.product_id has no real FK to products.id) so the
+                                   # login-time basket-rehydration effect in page.tsx is one fetch.
     baskets/sync/route.ts         # Basket UPSERT/sync — NOT called from the frontend (dead code);
                                    # page.tsx writes to basket_items directly via the anon client
     dev/login/route.ts            # Dev-only: get-or-creates a fixed pre-confirmed test user via
@@ -122,6 +132,14 @@ scripts/
                                    # 007_branches_external_id.sql, see "Phase 15" below) via a real
                                    # PostgREST upsert. See "Phase 8" below for the City-field caveat.
                                    # Run with `npm run seed:branches`.
+  geocode-branch-cities.ts        # Phase 16 — none of the government feeds publish lat/lng (see
+                                   # above), so branches beyond the original 8 had none. Resolves
+                                   # each branch's numeric settlement code (city_he) to a real name
+                                   # via data.gov.il's official settlements dataset, geocodes each
+                                   # unique city once via Nominatim (1 req/sec), and backfills
+                                   # city-center (not address-level) lat/lng onto every branch still
+                                   # missing them. Re-runnable — resumes from
+                                   # scripts/.geocode-cache.json. Run with `npm run geocode:branches`.
   enrich-product-names.ts         # Phase 5 — batches products missing name_en 50 at a time and
                                    # asks claude-haiku-4-5 to translate name_he to English. Run
                                    # with `npm run enrich:names`. Needs ANTHROPIC_API_KEY in
@@ -195,12 +213,19 @@ supabase/
                                    # index (Phase 15, see below) — lets seed-branches.ts dedupe
                                    # branches from chains with no name/address feed. NOT a partial
                                    # index (deliberately — see the file's own comment for why a
-                                   # partial index would break PostgREST's on_conflict upsert). NOT
-                                   # YET APPLIED (confirmed: `branches?select=external_id` → `42703`).
+                                   # partial index would break PostgREST's on_conflict upsert).
+                                   # CONFIRMED APPLIED (Phase 16 re-check — see "Applying
+                                   # migrations" below; this line previously said NOT YET APPLIED).
     008_analytics_indexes.sql      # ph_captured_chain (price_history(chain_id, captured_at DESC)) +
                                    # bi_product (basket_items(product_id)) — speed up the Phase 15
                                    # analytics queries. Performance only, not correctness — the
                                    # analytics route works without them. NOT YET APPLIED.
+    009_custom_markets.sql         # custom_markets + custom_market_entries tables (Phase 16, local/
+                                   # independent market spending tracker) — written and RLS-gated
+                                   # directly for client-side inserts, same pattern as baskets/
+                                   # basket_items. NOT YET APPLIED — the Custom Markets analytics
+                                   # section degrades to an empty state until this is pasted into
+                                   # the Supabase Dashboard SQL Editor.
 ```
 
 ## Environment variables
@@ -1326,6 +1351,113 @@ here to stay sequential, same renumbering reasoning as Phases 11-14 above.)
       + highlight, and all 5 Analytics sections (including the product-search-driven price
       trend chart) all confirmed working end-to-end with real data before either deploy.
 
+## Phase 16 — location fix, basket persistence, duplicate-list handling, Analytics overhaul, custom markets
+(2026-07-30; the user's own session prompt called this "Phase 13", already used above for the
+2026-07-27 production-bug-fix session — numbered 16 here to stay sequential, same renumbering
+reasoning as Phases 11-15 above.)
+
+- [x] **Step 1 — Location map showing only ~8 pins, root cause was NOT a query limit.**
+      Two real bugs, not one: (1) `app/page.tsx`'s branches fetch (`supabase.from('branches')
+      .select('*').eq('is_active', true)`) had no `.range()` pagination, so once branches
+      passed 1,000 rows it silently truncated at PostgREST's project-wide max-rows cap — same
+      bug class as the Phase 15 analytics fix, just not yet applied to this query. Fixed with
+      a `.range()`-paginated loop. (2) **The actual reason only ~8 pins ever showed**: 1,037 of
+      1,045 branches — everything seeded from government feeds beyond the original 8 — never
+      had `lat`/`lng` at all, because none of those feeds publish coordinates (already
+      documented in Phase 8/15 above). Backfilled 830 of them via a new script,
+      `scripts/geocode-branch-cities.ts` (`npm run geocode:branches`): resolves each branch's
+      numeric settlement code (`city_he`) to a real city name via data.gov.il's official
+      "רשימת ישובים בישראל" dataset (CKAN `datastore_search` API), then geocodes each of the
+      ~105 unique city names once via Nominatim (OpenStreetMap), respecting its 1 req/sec
+      usage policy — caches results in `scripts/.geocode-cache.json` so a re-run doesn't re-hit
+      the API. This is **city-center, not address-level** geocoding (multiple branches in the
+      same city share one point) — a deliberate tradeoff, since address-level geocoding of
+      ~1,000 rows against Nominatim's public instance isn't practical or policy-compliant.
+      **838/1,045 branches now have coordinates** (up from 8); the remaining 207 (no city code
+      in their feed at all, or a code with no name in the settlements dataset — mostly the
+      Cerberus-FTP-chain branches, see Phase 15) are surfaced as a plain "סניפים ללא מיקום
+      מדויק"/"branches without exact location" count above the map instead of silently
+      vanishing, computed alongside the existing distance/city/chain filter pipeline. The
+      existing Haversine implementation (`haversineKm` in `page.tsx`) was already correct and
+      untouched. **Verified: 203 branches within 10km of Tel Aviv** (direct calculation
+      against live data, well past the 100+ target) and confirmed visually in a real browser.
+- [x] **Step 2 — Basket persistence on refresh.** The client-side rehydration effect already
+      existed (`app/page.tsx`, the "Basket load on login" effect) and, per this session's own
+      testing, already worked correctly — a hard reload, including immediately after adding an
+      item, always restored the basket. Per the task's specific ask, moved the products +
+      latest_prices lookup into a new endpoint,
+      [app/api/baskets/[id]/items/route.ts](app/api/baskets/[id]/items/route.ts)
+      (`GET /api/baskets/{basketId}/items?user_id=<uid>`), so the client does one fetch instead
+      of two; the route uses the service-role client and verifies the basket belongs to the
+      requesting `user_id` itself, since service-role bypasses RLS. **Real bug found along the
+      way**: `basket_items.product_id` has no actual FK constraint to `products.id` in the live
+      schema (confirmed via a live `PGRST200` on an embedded PostgREST select) — despite being
+      used as one semantically everywhere else in this codebase. Fixed by having the route run
+      the products + latest_prices queries in parallel and merge in JS, same pattern the old
+      client-side code already used, rather than a single embedded select. Shows a "הסל שלך
+      שוחזר"/"Your basket restored" toast when a non-empty basket is restored.
+- [x] **Step 3 — Duplicate saved-list name handling.** `handleSaveList` now checks for an
+      existing `is_archived=true` basket with the exact same name for the user before
+      inserting; if found, a styled confirm sheet (same visual pattern as the existing
+      delete-list confirmation) offers **Replace** (deletes and re-inserts that basket's items,
+      touches `updated_at`) / **Save as new** (the original insert-a-new-row behavior) /
+      **Cancel** (re-opens the name prompt). Verified against the live DB: replacing left
+      exactly one basket row with that name and its items correctly swapped, not duplicated.
+- [x] **Step 4/6 — Analytics view redesign + API.** Replaced the old 5 sections (savings
+      summary / chain ranking / price drops / most-compared products / price trend) with the
+      new spec — see [app/api/analytics/route.ts](app/api/analytics/route.ts) and the
+      `AnalyticsView` component in `app/page.tsx`:
+      - **A — Spending overview**: weekly average + this-month total always visible
+        (`?type=spending_overview`), computed from every `basket_items` row across all of a
+        user's baskets, priced at each product's **cheapest chain** (there's no "price
+        actually paid" data in this app — every basket is a planned purchase, not a receipt).
+        Each basket's `created_at` stands in for a "trip" date, since there's no separate
+        purchase timestamp. Expands to a 6-month total/avg-per-week/trips table, an annual
+        projection (monthly average × 12), and annual total to date. Returns
+        `not_enough_data: true` when the user's earliest basket is under 7 days old. Adds a
+        local-markets spending line once any custom market has a logged expense.
+      - **B — Cheapest chain**: kept the existing global-average bar chart, added a
+        "עבורך"/"For you" (personal, default tab) vs "כללי"/"General" toggle.
+        `?type=personal_chain_ranking` computes **total cost of the user's own historical
+        basket_items** per chain (not an average price) — answers "which chain would've been
+        cheapest for what you actually buy", a genuinely different question from the general
+        ranking.
+      - **C — Monthly basket summary**: `?type=monthly_basket&month=YYYY-MM` (defaults to the
+        current month) — unique products + total quantities across all baskets created that
+        month, grouped by category (new `CATEGORY_LABELS` map: dairy/bread/meat/beverage/
+        produce/other) when expanded, with a clipboard-export button (plain-text bullet list,
+        `navigator.clipboard.writeText`).
+      - **D — Custom markets** (new feature, see migration below): add a market (name only),
+        log expenses against it (amount/date/note), see the last 5 entries with tap-to-delete.
+        Written **directly from the client** via the anon key (`supabase.from('custom_markets')
+        ...`), same RLS-gated pattern already used for baskets/basket_items/price_alerts
+        elsewhere in this app — there's no service-role write route for it, only the
+        `?type=custom_markets` read endpoint. Degrades to an empty list (not a 500) on
+        `PGRST205` if migration 009 hasn't been applied yet, same pattern as `is_online`
+        (migration 006) before it landed — **verified live this session**, since 009 is
+        genuinely not applied (see below): the add-market form opens and submits without any
+        console error, just silently doesn't persist.
+      - **E — Price trend**: unchanged, per the task's own instruction.
+      - The old `PriceDropEntry`/`TopProductEntry` frontend types and their UI sections were
+        removed as fully unused after this replacement. Their backend `case 'price_drops'`/
+        `case 'top_products'` handlers in the analytics route were deliberately **left in
+        place** rather than deleted — removing previously-shipped, working backend logic
+        wasn't asked for, even though nothing calls it anymore.
+      - Verified end-to-end in a real browser: spending overview expand shows real 6-month
+        numbers and a correct annual projection; monthly basket expand shows category-grouped
+        items with a working export (no console errors); personal/general ranking tabs both
+        render; custom markets add-market form behaves exactly as designed pending the
+        migration.
+- [x] **Step 5 — `supabase/migrations/009_custom_markets.sql` written**, not yet applied (same
+      no-DB-CLI-access limitation as every prior migration — confirmed live via PostgREST
+      before writing any code against it, per this repo's established convention). Paste into
+      the Supabase Dashboard SQL Editor before the Custom Markets feature will actually persist
+      data — the app already degrades gracefully without it (see Step 4/6 above).
+- [x] **Step 7 — build and deploy.** `npx tsc --noEmit` (both the root config and
+      `scripts/tsconfig.json`), `npm run lint` (pre-existing warnings only, same two files as
+      always), and `npm run build` all clean. See "Applying migrations" below for `009`'s
+      status.
+
 ## Coding conventions
 - All components: functional, TypeScript strict
 - API routes: always use `lib/supabaseServer.ts` (service role), never the anon client
@@ -1345,6 +1477,7 @@ npm run seed:products  # Seed real products + prices from the Shufersal feed (Ph
 npm run seed:branches  # Seed real branches from the Shufersal Stores feed (Phase 8)
 npm run enrich:names   # Translate name_he -> name_en via claude-haiku-4-5 (needs ANTHROPIC_API_KEY)
 npm run probe:chains   # Probe candidate chain feed URLs, report status per chain (Phase 11)
+npm run geocode:branches # Backfill city-center lat/lng for branches missing coordinates (Phase 16)
 ```
 
 ## How to reset the database
@@ -1400,6 +1533,19 @@ a session — always re-check via PostgREST rather than trusting this doc.
 `branches?select=external_id` returns `42703 column does not exist`) — paste
 both into the Supabase Dashboard SQL Editor before `npm run seed:branches`
 or the analytics indexes take effect.
+
+**Phase 16 correction:** `007_branches_external_id.sql` — previously
+documented directly above as NOT YET APPLIED — is actually **CONFIRMED
+APPLIED** (`branches?select=external_id` now returns `200` with real values,
+not `42703`). Same lesson as every prior correction in this section: re-check
+via PostgREST, don't trust this doc's snapshot. `008_analytics_indexes.sql`'s
+status wasn't re-checked this session (it only adds indexes, no new columns
+to probe via a simple PostgREST select — there's no cheap way to verify it
+live short of an actual slow-query comparison). `009_custom_markets.sql`
+(Phase 16, see above) is a new migration this session and is genuinely NOT
+YET APPLIED (confirmed: `custom_markets?select=id` returns `PGRST205`) —
+paste it into the Supabase Dashboard SQL Editor before the Custom Markets
+analytics section will persist any data.
 
 ## Scheduling the ingestion pipeline
 **Option A is now wired up (Phase 6, 2026-07-21)** —
