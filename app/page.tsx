@@ -239,6 +239,7 @@ const DICTIONARY = {
     clearListConfirm: 'לרוקן את הסל? הפעולה בלתי הפיכה.',
     listSavedToast: 'הרשימה נשמרה',
     listLoadedToast: 'הרשימה נטענה',
+    basketRestoredToast: 'הסל שלך שוחזר',
     listDeletedToast: 'הרשימה נמחקה',
     deleteListConfirm: 'למחוק רשימה זו?',
     deleteAction: 'מחק',
@@ -376,6 +377,7 @@ const DICTIONARY = {
     clearListConfirm: 'Clear the basket? This cannot be undone.',
     listSavedToast: 'List saved',
     listLoadedToast: 'List loaded',
+    basketRestoredToast: 'Your basket restored',
     listDeletedToast: 'List deleted',
     deleteListConfirm: 'Delete this list?',
     deleteAction: 'Delete',
@@ -1367,7 +1369,7 @@ export default function SmartGroceryDashboard() {
     if (!supabase) return;
 
     supabase.from('baskets')
-      .select('*, basket_items(*)')
+      .select('id')
       .eq('user_id', currentUser.id)
       .eq('is_archived', false)
       .order('created_at', { ascending: false })
@@ -1377,42 +1379,38 @@ export default function SmartGroceryDashboard() {
         if (bData) {
           setActiveBasketId(bData.id);
 
-          const items = (bData.basket_items ?? []) as Array<{
-            id: string; product_id: string | null; product_name: string; quantity_value: number;
-          }>;
-          const productIds = items.map((i) => i.product_id).filter((id): id is string => !!id);
+          // Single round trip: the API route joins basket_items -> products ->
+          // latest_prices server-side instead of the client doing it in two
+          // separate queries.
+          const res = await fetch(`/api/baskets/${bData.id}/items?user_id=${currentUser.id}`);
+          if (!res.ok) return;
+          const { items } = await res.json() as {
+            items: Array<{
+              db_id: string; product_id: string; quantity_value: number;
+              name_he: string; name_en: string | null; category: string | null; barcode: string | null;
+              prices: Array<{ chain_id: string; price: number; unit_qty: number | null; unit_type: string | null; is_sale: boolean }>;
+            }>;
+          };
 
-          if (productIds.length > 0) {
-            const [{ data: products }, { data: prices }] = await Promise.all([
-              supabase.from('products').select('id, name_he, name_en, category, barcode').in('id', productIds),
-              supabase.from('latest_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', productIds),
-            ]);
-
-            const pricesByProduct: Record<string, Record<string, ChainPrice>> = {};
-            for (const p of prices ?? []) {
-              if (!pricesByProduct[p.product_id]) pricesByProduct[p.product_id] = {};
-              pricesByProduct[p.product_id][p.chain_id] = p as ChainPrice;
-            }
-
-            const rehydrated: BasketItem[] = items
-              .filter((i) => i.product_id)
-              .map((i) => {
-                const product = products?.find((p) => p.id === i.product_id);
-                const productPrices = pricesByProduct[i.product_id!] ?? {};
-                const priceValues = Object.values(productPrices).map((p) => p.price);
-                return {
-                  id: i.product_id!,
-                  dbId: i.id,
-                  name_he: product?.name_he ?? i.product_name,
-                  name_en: product?.name_en ?? null,
-                  category: product?.category ?? null,
-                  barcode: product?.barcode ?? null,
-                  prices: productPrices,
-                  min_price: priceValues.length > 0 ? Math.min(...priceValues) : null,
-                  quantity: i.quantity_value ?? 1,
-                };
-              });
+          if (items.length > 0) {
+            const rehydrated: BasketItem[] = items.map((i) => {
+              const productPrices: Record<string, ChainPrice> = {};
+              for (const p of i.prices) productPrices[p.chain_id] = p;
+              const priceValues = i.prices.map((p) => p.price);
+              return {
+                id: i.product_id,
+                dbId: i.db_id,
+                name_he: i.name_he,
+                name_en: i.name_en,
+                category: i.category,
+                barcode: i.barcode,
+                prices: productPrices,
+                min_price: priceValues.length > 0 ? Math.min(...priceValues) : null,
+                quantity: i.quantity_value ?? 1,
+              };
+            });
             setBasket(rehydrated);
+            showToast(t.basketRestoredToast);
           }
         } else {
           const { data: newB } = await supabase.from('baskets').insert({
