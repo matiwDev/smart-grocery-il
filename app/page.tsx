@@ -170,18 +170,40 @@ const DICTIONARY = {
     viewDetails: 'צפה בפרטים',
     backToHome: 'חזרה לראשי',
     placeholderDesc: 'העמוד הזה נמצא כעת בפיתוח.',
-    analyticsSavingsTitle: 'חסכתם עד כה',
-    analyticsSavingsSubtitle: 'בהשוואה לרשת היקרה ביותר',
-    analyticsChainRankingTitle: 'הרשת הזולה השבוע',
-    analyticsPriceDropsTitle: 'הירידות הגדולות השבוע',
-    analyticsTopProductsTitle: 'המוצרים שהכי השווית',
+    analyticsChainRankingTitle: 'הרשת הזולה עבורכם',
     analyticsTrendTitle: 'מגמת מחיר למוצר',
     analyticsTrendSearchPlaceholder: 'הקלד שם מוצר...',
     analyticsNotEnoughHistory: 'אין מספיק היסטוריה עדיין — בדקו שוב מחר',
-    analyticsEmptyDrops: 'אין ירידות מחיר משמעותיות כרגע',
     analyticsEmptyRanking: 'אין עדיין נתוני מחירים',
-    analyticsEmptyTopProducts: 'עדיין לא הוספתם מספיק מוצרים',
-    analyticsTimesAdded: 'פעמים',
+    analyticsSpendingOverviewTitle: 'סקירת הוצאות',
+    analyticsWeeklyAverage: 'ממוצע שבועי',
+    analyticsMonthTotal: 'סה״כ החודש',
+    analyticsNotEnoughSpendingData: 'עדיין אין מספיק נתונים — המשיכו לקנות כדי לראות את המגמות שלכם!',
+    analyticsMonthlyBreakdownTitle: 'פירוט חודשי אחרון',
+    analyticsColMonth: 'חודש',
+    analyticsColTotal: 'סה״כ',
+    analyticsColAvgWeek: 'ממוצע לשבוע',
+    analyticsColTrips: 'קניות',
+    analyticsAnnualProjection: 'תחזית שנתית',
+    analyticsAnnualToDate: 'סה״כ שנתי עד כה',
+    analyticsCustomMarketsLine: 'שווקים מקומיים',
+    analyticsChainRankingForYou: 'עבורך',
+    analyticsChainRankingGeneral: 'כללי',
+    analyticsMonthlyBasketTitle: 'סיכום סל חודשי',
+    analyticsMonthlyBasketProductsLabel: 'מוצרים החודש',
+    analyticsMonthlyBasketItemsLabel: 'פריטים',
+    analyticsEmptyMonthlyBasket: 'עדיין לא נוספו מוצרים החודש',
+    analyticsExportList: 'ייצוא רשימה',
+    analyticsExportCopiedToast: 'הרשימה הועתקה',
+    analyticsExportHeader: 'רשימת קניות',
+    analyticsCustomMarketsTitle: 'שווקים מקומיים',
+    analyticsAddMarket: 'הוסף שוק',
+    analyticsMarketNamePlaceholder: 'שם השוק',
+    analyticsAddExpense: 'הוסף הוצאה',
+    analyticsExpenseAmountPlaceholder: 'סכום (₪)',
+    analyticsExpenseNotePlaceholder: 'הערה (לא חובה)',
+    analyticsNoMarketsYet: 'עדיין לא הוספתם שווקים',
+    saveAction: 'שמור',
     devOptionsLocked: 'בקרת מפתחים (Locked)',
     profileDataTitle: 'פרטים אישיים',
     avatarPickerTitle: 'בחר דמות',
@@ -312,18 +334,40 @@ const DICTIONARY = {
     viewDetails: 'View Details',
     backToHome: 'Back to Home',
     placeholderDesc: 'This page is currently in development.',
-    analyticsSavingsTitle: 'Total saved so far',
-    analyticsSavingsSubtitle: 'vs. most expensive chain',
-    analyticsChainRankingTitle: 'Cheapest chain this week',
-    analyticsPriceDropsTitle: 'Biggest price drops this week',
-    analyticsTopProductsTitle: 'Your most compared products',
+    analyticsChainRankingTitle: 'Cheapest chain for you',
     analyticsTrendTitle: 'Price trend for a product',
     analyticsTrendSearchPlaceholder: 'Type a product name...',
     analyticsNotEnoughHistory: 'Not enough history yet — check back tomorrow',
-    analyticsEmptyDrops: 'No significant price drops right now',
     analyticsEmptyRanking: 'No price data yet',
-    analyticsEmptyTopProducts: "You haven't added enough products yet",
-    analyticsTimesAdded: 'times',
+    analyticsSpendingOverviewTitle: 'Spending Overview',
+    analyticsWeeklyAverage: 'Weekly average',
+    analyticsMonthTotal: 'This month',
+    analyticsNotEnoughSpendingData: 'Not enough data yet — keep shopping to see your trends!',
+    analyticsMonthlyBreakdownTitle: 'Recent monthly breakdown',
+    analyticsColMonth: 'Month',
+    analyticsColTotal: 'Total',
+    analyticsColAvgWeek: 'Avg per week',
+    analyticsColTrips: 'Trips',
+    analyticsAnnualProjection: 'Annual projection',
+    analyticsAnnualToDate: 'Annual total to date',
+    analyticsCustomMarketsLine: 'Local markets',
+    analyticsChainRankingForYou: 'For you',
+    analyticsChainRankingGeneral: 'General',
+    analyticsMonthlyBasketTitle: 'Monthly Basket Summary',
+    analyticsMonthlyBasketProductsLabel: 'products this month',
+    analyticsMonthlyBasketItemsLabel: 'items',
+    analyticsEmptyMonthlyBasket: 'No products added yet this month',
+    analyticsExportList: 'Export list',
+    analyticsExportCopiedToast: 'List copied',
+    analyticsExportHeader: 'Shopping list',
+    analyticsCustomMarketsTitle: 'Local Markets',
+    analyticsAddMarket: 'Add market',
+    analyticsMarketNamePlaceholder: 'Market name',
+    analyticsAddExpense: 'Add expense',
+    analyticsExpenseAmountPlaceholder: 'Amount (₪)',
+    analyticsExpenseNotePlaceholder: 'Note (optional)',
+    analyticsNoMarketsYet: "You haven't added any markets yet",
+    saveAction: 'Save',
     devOptionsLocked: 'Developer Options (Locked)',
     profileDataTitle: 'Personal Information',
     avatarPickerTitle: 'Choose Avatar',
@@ -896,24 +940,66 @@ interface ChainRankingEntry {
   product_count: number;
 }
 
-interface PriceDropEntry {
-  product_id: string;
+interface PersonalChainRankingEntry {
   chain_id: string;
-  old_price: number;
-  new_price: number;
-  pct_drop: number;
-  product_name_he: string;
-  product_name_en: string | null;
-  chain_name_he: string;
-  chain_name_en: string;
+  name_he: string;
+  name_en: string;
+  color_hex: string;
+  total_cost: number;
+  items_covered: number;
 }
 
-interface TopProductEntry {
+interface MonthlyBreakdownEntry {
+  month: string; // YYYY-MM
+  total: number;
+  avg_per_week: number;
+  trips: number;
+}
+
+interface SpendingOverview {
+  not_enough_data: boolean;
+  weekly_average?: number;
+  month_total?: number;
+  monthly_breakdown?: MonthlyBreakdownEntry[];
+  annual_projection?: number;
+  annual_total_to_date?: number;
+}
+
+interface MonthlyBasketProduct {
   product_id: string;
   name_he: string;
   name_en: string | null;
-  times_added: number;
-  min_price: number | null;
+  category: string | null;
+  total_qty: number;
+  cheapest_price: number | null;
+}
+
+interface CustomMarketEntry {
+  id: string;
+  amount: number;
+  note: string | null;
+  spent_at: string;
+}
+
+interface CustomMarket {
+  id: string;
+  name: string;
+  total_spent: number;
+  recent_entries: CustomMarketEntry[];
+}
+
+const CATEGORY_LABELS: Record<string, { he: string; en: string }> = {
+  dairy: { he: 'מוצרי חלב', en: 'Dairy' },
+  bread: { he: 'לחם ומאפים', en: 'Bread & Bakery' },
+  meat: { he: 'בשר ודגים', en: 'Meat & Fish' },
+  beverage: { he: 'משקאות', en: 'Beverages' },
+  produce: { he: 'פירות וירקות', en: 'Produce' },
+  other: { he: 'אחר', en: 'Other' },
+};
+
+function categoryLabel(category: string | null, lang: Lang): string {
+  const c = category && CATEGORY_LABELS[category] ? category : 'other';
+  return CATEGORY_LABELS[c][lang];
 }
 
 interface TrendSearchResult {
@@ -949,18 +1035,34 @@ function AnalyticsEmptyState({ text }: { text: string }) {
   return <p className="text-sm text-[var(--color-text-muted)] text-center py-6">{text}</p>;
 }
 
-function AnalyticsView({ t, lang, currentUserId }: { t: Dictionary; lang: Lang; currentUserId: string | null }) {
-  const [savings, setSavings] = useState<number | null>(null);
-  const [savingsLoading, setSavingsLoading] = useState(true);
+function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; lang: Lang; currentUserId: string | null; showToast: (msg: string) => void }) {
+  // Section A — spending overview
+  const [spending, setSpending] = useState<SpendingOverview | null>(null);
+  const [spendingLoading, setSpendingLoading] = useState(true);
+  const [spendingExpanded, setSpendingExpanded] = useState(false);
 
+  // Section B — chain ranking (general vs. personal)
+  const [rankingTab, setRankingTab] = useState<'personal' | 'general'>('personal');
   const [ranking, setRanking] = useState<ChainRankingEntry[]>([]);
   const [rankingLoading, setRankingLoading] = useState(true);
+  const [personalRanking, setPersonalRanking] = useState<PersonalChainRankingEntry[]>([]);
+  const [personalRankingLoading, setPersonalRankingLoading] = useState(true);
 
-  const [drops, setDrops] = useState<PriceDropEntry[]>([]);
-  const [dropsLoading, setDropsLoading] = useState(true);
+  // Section C — monthly basket summary
+  const [monthlyBasket, setMonthlyBasket] = useState<MonthlyBasketProduct[]>([]);
+  const [monthlyBasketTotalItems, setMonthlyBasketTotalItems] = useState(0);
+  const [monthlyBasketLoading, setMonthlyBasketLoading] = useState(true);
+  const [monthlyBasketExpanded, setMonthlyBasketExpanded] = useState(false);
 
-  const [topProducts, setTopProducts] = useState<TopProductEntry[]>([]);
-  const [topProductsLoading, setTopProductsLoading] = useState(true);
+  // Section D — custom markets
+  const [markets, setMarkets] = useState<CustomMarket[]>([]);
+  const [marketsLoading, setMarketsLoading] = useState(true);
+  const [isAddingMarket, setIsAddingMarket] = useState(false);
+  const [newMarketName, setNewMarketName] = useState('');
+  const [expenseFormMarketId, setExpenseFormMarketId] = useState<string | null>(null);
+  const [expenseAmount, setExpenseAmount] = useState('');
+  const [expenseDate, setExpenseDate] = useState('');
+  const [expenseNote, setExpenseNote] = useState('');
 
   const [trendQuery, setTrendQuery] = useState('');
   const [trendResults, setTrendResults] = useState<TrendSearchResult[]>([]);
@@ -970,28 +1072,101 @@ function AnalyticsView({ t, lang, currentUserId }: { t: Dictionary; lang: Lang; 
   const [trendLoading, setTrendLoading] = useState(false);
   const [trendHasEnough, setTrendHasEnough] = useState(true);
 
-  useEffect(() => {
-    if (!currentUserId) { setSavingsLoading(false); setTopProductsLoading(false); return; }
-    setSavingsLoading(true);
-    fetch(`/api/analytics?type=savings&user_id=${currentUserId}`)
-      .then((r) => r.json()).then((d) => setSavings(d.total_saved ?? 0))
-      .finally(() => setSavingsLoading(false));
-    setTopProductsLoading(true);
-    fetch(`/api/analytics?type=top_products&user_id=${currentUserId}`)
-      .then((r) => r.json()).then((d) => setTopProducts(d.products ?? []))
-      .finally(() => setTopProductsLoading(false));
+  const customMarketsTotal = markets.reduce((s, m) => s + m.total_spent, 0);
+
+  const loadMarkets = useCallback(() => {
+    if (!currentUserId) { setMarketsLoading(false); return; }
+    setMarketsLoading(true);
+    fetch(`/api/analytics?type=custom_markets&user_id=${currentUserId}`)
+      .then((r) => r.json()).then((d) => setMarkets(d.markets ?? []))
+      .finally(() => setMarketsLoading(false));
   }, [currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId) {
+      setSpendingLoading(false);
+      setPersonalRankingLoading(false);
+      setMonthlyBasketLoading(false);
+      return;
+    }
+    setSpendingLoading(true);
+    fetch(`/api/analytics?type=spending_overview&user_id=${currentUserId}`)
+      .then((r) => r.json()).then((d) => setSpending(d))
+      .finally(() => setSpendingLoading(false));
+
+    setPersonalRankingLoading(true);
+    fetch(`/api/analytics?type=personal_chain_ranking&user_id=${currentUserId}`)
+      .then((r) => r.json()).then((d) => setPersonalRanking(d.ranking ?? []))
+      .finally(() => setPersonalRankingLoading(false));
+
+    setMonthlyBasketLoading(true);
+    fetch(`/api/analytics?type=monthly_basket&user_id=${currentUserId}`)
+      .then((r) => r.json()).then((d) => { setMonthlyBasket(d.products ?? []); setMonthlyBasketTotalItems(d.total_items ?? 0); })
+      .finally(() => setMonthlyBasketLoading(false));
+
+    loadMarkets();
+  }, [currentUserId, loadMarkets]);
 
   useEffect(() => {
     setRankingLoading(true);
     fetch('/api/analytics?type=chain_ranking')
       .then((r) => r.json()).then((d) => setRanking(d.ranking ?? []))
       .finally(() => setRankingLoading(false));
-    setDropsLoading(true);
-    fetch('/api/analytics?type=price_drops&days=7')
-      .then((r) => r.json()).then((d) => setDrops(d.drops ?? []))
-      .finally(() => setDropsLoading(false));
   }, []);
+
+  const handleAddMarket = async () => {
+    if (!supabase || !currentUserId || !newMarketName.trim()) return;
+    const { error } = await supabase.from('custom_markets').insert({ user_id: currentUserId, name: newMarketName.trim() });
+    if (!error) {
+      setNewMarketName('');
+      setIsAddingMarket(false);
+      loadMarkets();
+    }
+  };
+
+  const handleOpenExpenseForm = (marketId: string) => {
+    setExpenseFormMarketId(marketId);
+    setExpenseAmount('');
+    setExpenseNote('');
+    setExpenseDate(new Date().toISOString().slice(0, 10));
+  };
+
+  const handleAddExpense = async () => {
+    if (!supabase || !expenseFormMarketId) return;
+    const amount = parseFloat(expenseAmount);
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    const { error } = await supabase.from('custom_market_entries').insert({
+      market_id: expenseFormMarketId,
+      amount,
+      note: expenseNote.trim() || null,
+      spent_at: expenseDate || new Date().toISOString().slice(0, 10),
+    });
+    if (!error) {
+      setExpenseFormMarketId(null);
+      loadMarkets();
+    }
+  };
+
+  const handleDeleteExpense = async (entryId: string) => {
+    if (!supabase) return;
+    setMarkets((prev) => prev.map((m) => ({ ...m, recent_entries: m.recent_entries.filter((e) => e.id !== entryId) })));
+    await supabase.from('custom_market_entries').delete().eq('id', entryId);
+    loadMarkets();
+  };
+
+  const handleExportMonthlyBasket = async () => {
+    const now = new Date();
+    const monthLabel = now.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'long', year: 'numeric' });
+    const lines = [`${t.analyticsExportHeader} ${monthLabel}`];
+    for (const p of monthlyBasket) {
+      const name = lang === 'he' ? p.name_he : (p.name_en ?? p.name_he);
+      lines.push(`• ${name} x${p.total_qty}`);
+    }
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      showToast(t.analyticsExportCopiedToast);
+    } catch {}
+  };
 
   useEffect(() => {
     if (!trendQuery.trim()) { setTrendResults([]); return; }
@@ -1028,21 +1203,122 @@ function AnalyticsView({ t, lang, currentUserId }: { t: Dictionary; lang: Lang; 
       className="flex-1 max-w-4xl mx-auto w-full flex flex-col gap-6 text-start mt-6">
       <h2 className="text-3xl font-bold text-[var(--color-text-primary)]">{t.navAnalytics}</h2>
 
-      {/* A: savings summary */}
+      {/* A: spending overview */}
       <div className={cardClass}>
-        <p className="text-sm text-[var(--color-text-muted)] mb-1">{t.analyticsSavingsTitle}</p>
-        {savingsLoading ? (
-          <SkeletonBlock height={44} />
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-[var(--color-text-primary)]">{t.analyticsSpendingOverviewTitle}</h3>
+          {spending && !spending.not_enough_data && (
+            <button
+              onClick={() => setSpendingExpanded((v) => !v)}
+              className="w-9 h-9 flex items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            >
+              <ChevronDown className={`w-4 h-4 transition-transform ${spendingExpanded ? 'rotate-180' : ''}`} />
+            </button>
+          )}
+        </div>
+        {spendingLoading ? (
+          <SkeletonBlock height={80} />
+        ) : !spending || spending.not_enough_data ? (
+          <AnalyticsEmptyState text={t.analyticsNotEnoughSpendingData} />
         ) : (
-          <p className="text-4xl font-bold text-[var(--color-success)]">₪{(savings ?? 0).toFixed(2)}</p>
+          <>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsWeeklyAverage}</p>
+                <p className="text-2xl font-bold text-[var(--color-text-primary)]">₪{(spending.weekly_average ?? 0).toFixed(2)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsMonthTotal}</p>
+                <p className="text-2xl font-bold text-[var(--color-text-primary)]">₪{(spending.month_total ?? 0).toFixed(2)}</p>
+              </div>
+            </div>
+            {customMarketsTotal > 0 && (
+              <p className="text-xs text-[var(--color-text-muted)] mt-3">{t.analyticsCustomMarketsLine}: ₪{customMarketsTotal.toFixed(2)}</p>
+            )}
+            <AnimatePresence>
+              {spendingExpanded && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                  <div className="mt-5 pt-5 border-t border-[var(--color-border)]">
+                    <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-2">{t.analyticsMonthlyBreakdownTitle}</p>
+                    <div className="overflow-x-auto -mx-1">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-[var(--color-text-muted)] text-start">
+                            <th className="font-medium text-start px-1 pb-2">{t.analyticsColMonth}</th>
+                            <th className="font-medium text-start px-1 pb-2">{t.analyticsColTotal}</th>
+                            <th className="font-medium text-start px-1 pb-2">{t.analyticsColAvgWeek}</th>
+                            <th className="font-medium text-start px-1 pb-2">{t.analyticsColTrips}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(spending.monthly_breakdown ?? []).map((m) => (
+                            <tr key={m.month} className="border-t border-[var(--color-border)]">
+                              <td className="px-1 py-2 text-[var(--color-text-primary)]">{m.month}</td>
+                              <td className="px-1 py-2 text-[var(--color-text-primary)]">₪{m.total.toFixed(2)}</td>
+                              <td className="px-1 py-2 text-[var(--color-text-muted)]">₪{m.avg_per_week.toFixed(2)}</td>
+                              <td className="px-1 py-2 text-[var(--color-text-muted)]">{m.trips}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 mt-4">
+                      <div>
+                        <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsAnnualProjection}</p>
+                        <p className="text-lg font-bold text-[var(--color-text-primary)]">₪{(spending.annual_projection ?? 0).toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsAnnualToDate}</p>
+                        <p className="text-lg font-bold text-[var(--color-text-primary)]">₪{(spending.annual_total_to_date ?? 0).toFixed(2)}</p>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
         )}
-        <p className="text-xs text-[var(--color-text-muted)] mt-1">{t.analyticsSavingsSubtitle}</p>
       </div>
 
-      {/* B: cheapest chain ranking */}
+      {/* B: cheapest chain ranking — personal vs. general */}
       <div className={cardClass}>
-        <h3 className="font-semibold text-[var(--color-text-primary)] mb-4">{t.analyticsChainRankingTitle}</h3>
-        {rankingLoading ? (
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-[var(--color-text-primary)]">{t.analyticsChainRankingTitle}</h3>
+          <div className="flex items-center gap-1 bg-[var(--color-bg-subtle)] rounded-lg p-1">
+            <button
+              onClick={() => setRankingTab('personal')}
+              className={`px-3 h-7 rounded-md text-xs font-medium transition-colors ${rankingTab === 'personal' ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)]' : 'text-[var(--color-text-muted)]'}`}
+            >
+              {t.analyticsChainRankingForYou}
+            </button>
+            <button
+              onClick={() => setRankingTab('general')}
+              className={`px-3 h-7 rounded-md text-xs font-medium transition-colors ${rankingTab === 'general' ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)]' : 'text-[var(--color-text-muted)]'}`}
+            >
+              {t.analyticsChainRankingGeneral}
+            </button>
+          </div>
+        </div>
+        {rankingTab === 'personal' ? (
+          personalRankingLoading ? (
+            <SkeletonBlock height={180} />
+          ) : personalRanking.length === 0 ? (
+            <AnalyticsEmptyState text={t.analyticsEmptyRanking} />
+          ) : (
+            <div style={{ width: '100%', height: Math.max(120, personalRanking.length * 48) }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={personalRanking} layout="vertical" margin={{ top: 4, right: 24, bottom: 4, left: 4 }}>
+                  <XAxis type="number" hide />
+                  <YAxis type="category" dataKey={lang === 'he' ? 'name_he' : 'name_en'} width={90} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <Tooltip formatter={(value) => [`₪${value}`, '']} />
+                  <Bar dataKey="total_cost" radius={[0, 8, 8, 0]} barSize={22}>
+                    {personalRanking.map((r) => <Cell key={r.chain_id} fill={r.color_hex} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )
+        ) : rankingLoading ? (
           <SkeletonBlock height={180} />
         ) : ranking.length === 0 ? (
           <AnalyticsEmptyState text={t.analyticsEmptyRanking} />
@@ -1062,46 +1338,151 @@ function AnalyticsView({ t, lang, currentUserId }: { t: Dictionary; lang: Lang; 
         )}
       </div>
 
-      {/* C: biggest price drops */}
+      {/* C: monthly basket summary */}
       <div className={cardClass}>
-        <h3 className="font-semibold text-[var(--color-text-primary)] mb-2">{t.analyticsPriceDropsTitle}</h3>
-        {dropsLoading ? (
-          <SkeletonBlock height={160} />
-        ) : drops.length === 0 ? (
-          <AnalyticsEmptyState text={t.analyticsEmptyDrops} />
-        ) : (
-          <div className="flex flex-col">
-            {drops.map((d) => (
-              <div key={`${d.product_id}-${d.chain_id}`} className="flex items-center justify-between gap-3 py-2.5 border-b border-[var(--color-border)] last:border-0">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{lang === 'he' ? d.product_name_he : (d.product_name_en ?? d.product_name_he)}</p>
-                  <p className="text-xs text-[var(--color-text-muted)]">{lang === 'he' ? d.chain_name_he : d.chain_name_en}</p>
-                </div>
-                <div className="flex items-center gap-1.5 text-[var(--color-success)] text-sm font-semibold shrink-0">
-                  <ArrowDown className="w-4 h-4" />
-                  <span className="text-[var(--color-text-muted)] font-normal line-through">₪{d.old_price.toFixed(2)}</span>
-                  ₪{d.new_price.toFixed(2)}
-                  <span>(-{d.pct_drop}%)</span>
-                </div>
-              </div>
-            ))}
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <h3 className="font-semibold text-[var(--color-text-primary)]">{t.analyticsMonthlyBasketTitle}</h3>
+            {!monthlyBasketLoading && (
+              <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                {monthlyBasket.length} {t.analyticsMonthlyBasketProductsLabel}, {t.analyticsColTotal} {monthlyBasketTotalItems} {t.analyticsMonthlyBasketItemsLabel}
+              </p>
+            )}
           </div>
+          {monthlyBasket.length > 0 && (
+            <button
+              onClick={() => setMonthlyBasketExpanded((v) => !v)}
+              className="w-9 h-9 flex items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
+            >
+              <ChevronDown className={`w-4 h-4 transition-transform ${monthlyBasketExpanded ? 'rotate-180' : ''}`} />
+            </button>
+          )}
+        </div>
+        {monthlyBasketLoading ? (
+          <SkeletonBlock height={60} />
+        ) : monthlyBasket.length === 0 ? (
+          <AnalyticsEmptyState text={t.analyticsEmptyMonthlyBasket} />
+        ) : (
+          <AnimatePresence>
+            {monthlyBasketExpanded && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
+                  {Object.entries(
+                    monthlyBasket.reduce<Record<string, MonthlyBasketProduct[]>>((acc, p) => {
+                      const cat = p.category ?? 'other';
+                      (acc[cat] ??= []).push(p);
+                      return acc;
+                    }, {})
+                  ).map(([cat, products]) => (
+                    <div key={cat} className="mb-4 last:mb-0">
+                      <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-1.5">{categoryLabel(cat, lang)}</p>
+                      {products.map((p) => (
+                        <div key={p.product_id} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+                          <span className="text-[var(--color-text-primary)] truncate">{lang === 'he' ? p.name_he : (p.name_en ?? p.name_he)}</span>
+                          <span className="text-[var(--color-text-muted)] shrink-0">×{p.total_qty} {p.cheapest_price != null ? `· ₪${p.cheapest_price.toFixed(2)}` : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                  <button
+                    onClick={handleExportMonthlyBasket}
+                    className="w-full mt-2 min-h-[40px] bg-[var(--color-accent)]/10 hover:bg-[var(--color-accent)]/20 text-[var(--color-accent)] rounded-xl text-sm font-semibold transition-colors"
+                  >
+                    {t.analyticsExportList}
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         )}
       </div>
 
-      {/* D: most compared products */}
+      {/* D: custom markets */}
       <div className={cardClass}>
-        <h3 className="font-semibold text-[var(--color-text-primary)] mb-2">{t.analyticsTopProductsTitle}</h3>
-        {topProductsLoading ? (
-          <SkeletonBlock height={160} />
-        ) : topProducts.length === 0 ? (
-          <AnalyticsEmptyState text={t.analyticsEmptyTopProducts} />
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-[var(--color-text-primary)]">{t.analyticsCustomMarketsTitle}</h3>
+          <button
+            onClick={() => setIsAddingMarket((v) => !v)}
+            className="w-9 h-9 flex items-center justify-center rounded-lg text-[var(--color-accent)] hover:bg-[var(--color-accent)]/10 transition-colors"
+          >
+            <span className="text-xl leading-none">+</span>
+          </button>
+        </div>
+
+        {isAddingMarket && (
+          <div className="flex items-center gap-2 mb-4">
+            <input
+              type="text" value={newMarketName} onChange={(e) => setNewMarketName(e.target.value)}
+              placeholder={t.analyticsMarketNamePlaceholder} dir="auto"
+              className="flex-1 bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-xl px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
+            />
+            <button onClick={handleAddMarket} className="min-h-[40px] px-4 bg-[var(--color-accent)] text-[var(--color-accent-text)] rounded-xl text-sm font-semibold">
+              {t.saveAction}
+            </button>
+          </div>
+        )}
+
+        {marketsLoading ? (
+          <SkeletonBlock height={100} />
+        ) : markets.length === 0 ? (
+          <AnalyticsEmptyState text={t.analyticsNoMarketsYet} />
         ) : (
-          <div className="flex flex-col">
-            {topProducts.map((p) => (
-              <div key={p.product_id} className="flex items-center justify-between gap-3 py-2.5 border-b border-[var(--color-border)] last:border-0">
-                <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">{lang === 'he' ? p.name_he : (p.name_en ?? p.name_he)}</p>
-                <p className="text-xs text-[var(--color-text-muted)] shrink-0">{p.times_added} {t.analyticsTimesAdded} · {p.min_price != null ? `₪${p.min_price.toFixed(2)}` : '—'}</p>
+          <div className="flex flex-col gap-3">
+            {markets.map((m) => (
+              <div key={m.id} className="bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-2xl p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="font-medium text-[var(--color-text-primary)]">{m.name}</p>
+                  <p className="text-sm font-bold text-[var(--color-text-primary)]">₪{m.total_spent.toFixed(2)}</p>
+                </div>
+
+                {expenseFormMarketId === m.id ? (
+                  <div className="flex flex-col gap-2 mt-2">
+                    <input
+                      type="number" step="0.01" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)}
+                      placeholder={t.analyticsExpenseAmountPlaceholder}
+                      className="bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
+                    />
+                    <input
+                      type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)}
+                      className="bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
+                    />
+                    <input
+                      type="text" value={expenseNote} onChange={(e) => setExpenseNote(e.target.value)}
+                      placeholder={t.analyticsExpenseNotePlaceholder} dir="auto"
+                      className="bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
+                    />
+                    <div className="flex gap-2">
+                      <button onClick={() => setExpenseFormMarketId(null)} className="flex-1 min-h-[40px] bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-xl text-sm font-semibold text-[var(--color-text-primary)]">
+                        {t.cancelAction}
+                      </button>
+                      <button onClick={handleAddExpense} className="flex-1 min-h-[40px] bg-[var(--color-accent)] text-[var(--color-accent-text)] rounded-xl text-sm font-semibold">
+                        {t.saveAction}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => handleOpenExpenseForm(m.id)}
+                    className="text-xs font-medium text-[var(--color-accent)] hover:underline"
+                  >
+                    + {t.analyticsAddExpense}
+                  </button>
+                )}
+
+                {m.recent_entries.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-[var(--color-border)] flex flex-col gap-1.5">
+                    {m.recent_entries.map((e) => (
+                      <button
+                        key={e.id}
+                        onClick={() => handleDeleteExpense(e.id)}
+                        className="flex items-center justify-between gap-2 text-xs text-start hover:bg-[var(--color-bg-hover)] rounded-lg px-1.5 py-1 transition-colors"
+                      >
+                        <span className="text-[var(--color-text-muted)]">{e.spent_at}{e.note ? ` · ${e.note}` : ''}</span>
+                        <span className="text-[var(--color-text-primary)] font-medium shrink-0">₪{Number(e.amount).toFixed(2)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -2866,7 +3247,7 @@ export default function SmartGroceryDashboard() {
 
         {/* ═══ ANALYTICS ═══ */}
         {currentView === 'ANALYTICS' && (
-          <AnalyticsView t={t} lang={lang} currentUserId={currentUser?.id ?? null} />
+          <AnalyticsView t={t} lang={lang} currentUserId={currentUser?.id ?? null} showToast={showToast} />
         )}
 
         {/* ═══ SCAN ═══ */}
