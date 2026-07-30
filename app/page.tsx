@@ -244,6 +244,9 @@ const DICTIONARY = {
     deleteListConfirm: 'למחוק רשימה זו?',
     deleteAction: 'מחק',
     cancelAction: 'ביטול',
+    duplicateListConfirm: 'רשימה בשם זה כבר קיימת. להחליף אותה?',
+    replaceAction: 'החלף',
+    saveAsNewAction: 'שמור כחדש',
     myLocation: 'המיקום שלי',
     locationDenied: 'הגישה למיקום נדחתה',
     distanceFilter: 'טווח מרחק',
@@ -382,6 +385,9 @@ const DICTIONARY = {
     deleteListConfirm: 'Delete this list?',
     deleteAction: 'Delete',
     cancelAction: 'Cancel',
+    duplicateListConfirm: 'A list with this name already exists. Replace it?',
+    replaceAction: 'Replace',
+    saveAsNewAction: 'Save as new',
     myLocation: 'My Location',
     locationDenied: 'Location access denied',
     distanceFilter: 'Distance',
@@ -1171,6 +1177,7 @@ export default function SmartGroceryDashboard() {
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [duplicateListPrompt, setDuplicateListPrompt] = useState<{ name: string; existingId: string } | null>(null);
 
   // Household invite state
   const [household, setHousehold] = useState<{ id: string; name: string; invite_code: string | null } | null>(null);
@@ -1587,10 +1594,29 @@ export default function SmartGroceryDashboard() {
     const defaultName = new Date().toLocaleDateString('he-IL');
     const name = window.prompt(t.saveListPrompt, defaultName);
     if (!name || !name.trim()) return;
+    const trimmed = name.trim();
 
+    const { data: existing } = await supabase
+      .from('baskets')
+      .select('id')
+      .eq('user_id', currentUser.id)
+      .eq('name', trimmed)
+      .eq('is_archived', true)
+      .maybeSingle();
+
+    if (existing) {
+      setDuplicateListPrompt({ name: trimmed, existingId: existing.id });
+      return;
+    }
+
+    await saveNewList(trimmed);
+  };
+
+  const saveNewList = async (name: string) => {
+    if (!supabase || !currentUser?.id) return;
     const { data: newBasket } = await supabase.from('baskets').insert({
       user_id: currentUser.id,
-      name: name.trim(),
+      name,
       is_archived: true,
     }).select().single();
 
@@ -1606,6 +1632,42 @@ export default function SmartGroceryDashboard() {
     }
 
     showToast(t.listSavedToast);
+  };
+
+  // "Replace" branch of the duplicate-name confirmation: overwrites the
+  // existing saved list's items in place rather than creating a second
+  // basket row with the same name.
+  const handleReplaceSavedList = async () => {
+    if (!supabase || !duplicateListPrompt) return;
+    const { existingId } = duplicateListPrompt;
+    setDuplicateListPrompt(null);
+
+    await supabase.from('basket_items').delete().eq('basket_id', existingId);
+    await supabase.from('basket_items').insert(
+      basket.map((item) => ({
+        basket_id: existingId,
+        product_id: item.id,
+        product_name: item.name_he,
+        quantity_value: item.quantity,
+      }))
+    );
+    await supabase.from('baskets').update({ updated_at: new Date().toISOString() }).eq('id', existingId);
+
+    showToast(t.listSavedToast);
+  };
+
+  const handleSaveListAsNew = async () => {
+    if (!duplicateListPrompt) return;
+    const { name } = duplicateListPrompt;
+    setDuplicateListPrompt(null);
+    await saveNewList(name);
+  };
+
+  // "Cancel" returns to the name prompt rather than dropping the save
+  // attempt entirely, per spec.
+  const handleCancelDuplicateList = () => {
+    setDuplicateListPrompt(null);
+    handleSaveList();
   };
 
   // Loads a saved (is_archived=true) basket into the working view: rebuilds
@@ -3186,6 +3248,42 @@ export default function SmartGroceryDashboard() {
                     className="flex-1 min-h-[44px] bg-[var(--color-danger)] hover:opacity-90 text-white rounded-xl font-semibold transition-colors"
                   >
                     {t.deleteAction}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Duplicate saved-list name confirmation ── */}
+      <AnimatePresence>
+        {duplicateListPrompt && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setDuplicateListPrompt(null)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative bg-[var(--color-bg-panel)] border border-[var(--color-border)] shadow-2xl rounded-3xl w-full max-w-sm overflow-hidden">
+              <div className="p-6 flex flex-col gap-5">
+                <p className="text-center font-semibold text-[var(--color-text-primary)]">{t.duplicateListConfirm}</p>
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={handleReplaceSavedList}
+                    className="min-h-[44px] bg-[var(--color-danger)] hover:opacity-90 text-white rounded-xl font-semibold transition-colors"
+                  >
+                    {t.replaceAction}
+                  </button>
+                  <button
+                    onClick={handleSaveListAsNew}
+                    className="min-h-[44px] bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-xl font-semibold transition-colors"
+                  >
+                    {t.saveAsNewAction}
+                  </button>
+                  <button
+                    onClick={handleCancelDuplicateList}
+                    className="min-h-[44px] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] text-[var(--color-text-primary)] border border-[var(--color-border)] rounded-xl font-semibold transition-colors"
+                  >
+                    {t.cancelAction}
                   </button>
                 </div>
               </div>
