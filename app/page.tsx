@@ -164,6 +164,7 @@ const DICTIONARY = {
     chatNoResults: 'לא נמצאו הודעות תואמות',
     location: 'מיקום',
     currentGpsLocation: 'מיקום נוכחי (GPS)',
+    branchesWithoutLocation: 'סניפים ללא מיקום מדויק',
     nearbySupermarkets: 'סופרמרקטים בסביבה',
     quickNavigate: 'ניווט מהיר',
     viewDetails: 'צפה בפרטים',
@@ -301,6 +302,7 @@ const DICTIONARY = {
     chatNoResults: 'No matching messages found',
     location: 'Location',
     currentGpsLocation: 'Current GPS Location',
+    branchesWithoutLocation: 'Branches without exact location',
     nearbySupermarkets: 'Nearby Supermarkets',
     quickNavigate: 'Quick Navigate',
     viewDetails: 'View Details',
@@ -1889,26 +1891,43 @@ export default function SmartGroceryDashboard() {
 
   useEffect(() => {
     if (currentView !== 'LOCATION' || !supabase) return;
-    supabase.from('branches').select('*').eq('is_active', true).then(({ data }) => {
-      if (data) {
-        setLiveBranches((data as BranchRow[]).map((b) => ({
-          id: b.id,
-          name: lang === 'he' ? b.name_he : (b.name_en || b.name_he),
-          desc: lang === 'he' ? b.city_he : (b.city_en || b.city_he),
-          cityHe: b.city_he,
-          cityEn: b.city_en,
-          dist: b.lat && b.lng ? '~' : '?',
-          mapsLink: b.lat && b.lng
-            ? `https://waze.com/ul?ll=${b.lat},${b.lng}&navigate=yes`
-            : 'https://waze.com/ul',
-          chain_id: b.chain_id,
-          lat: b.lat,
-          lng: b.lng,
-          color_hex: chains.find((c) => c.id === b.chain_id)?.color_hex ?? '#6366f1',
-          isOnline: b.is_online ?? false,
-        })));
+    let cancelled = false;
+    (async () => {
+      // PostgREST caps an unranged select at this project's max-rows setting
+      // (1000, see the Phase 15 analytics fix in CLAUDE.md) — branches alone
+      // is now past that, so page through with .range() instead of a single
+      // unranged select, or anything past row 1000 silently vanishes.
+      const PAGE_SIZE = 1000;
+      const rows: BranchRow[] = [];
+      for (let offset = 0; ; offset += PAGE_SIZE) {
+        const { data, error } = await supabase!
+          .from('branches')
+          .select('*')
+          .eq('is_active', true)
+          .range(offset, offset + PAGE_SIZE - 1);
+        if (error || !data) break;
+        rows.push(...(data as BranchRow[]));
+        if (data.length < PAGE_SIZE) break;
       }
-    });
+      if (cancelled) return;
+      setLiveBranches(rows.map((b) => ({
+        id: b.id,
+        name: lang === 'he' ? b.name_he : (b.name_en || b.name_he),
+        desc: lang === 'he' ? b.city_he : (b.city_en || b.city_he),
+        cityHe: b.city_he,
+        cityEn: b.city_en,
+        dist: b.lat && b.lng ? '~' : '?',
+        mapsLink: b.lat && b.lng
+          ? `https://waze.com/ul?ll=${b.lat},${b.lng}&navigate=yes`
+          : 'https://waze.com/ul',
+        chain_id: b.chain_id,
+        lat: b.lat,
+        lng: b.lng,
+        color_hex: chains.find((c) => c.id === b.chain_id)?.color_hex ?? '#6366f1',
+        isOnline: b.is_online ?? false,
+      })));
+    })();
+    return () => { cancelled = true; };
   }, [currentView, lang, chains]);
 
   // ── GPS geolocation request ──────────────────────────────────────────────────
@@ -1993,6 +2012,18 @@ export default function SmartGroceryDashboard() {
     if (selectedChains.length === 0) return filteredBranches;
     return filteredBranches.filter((b) => selectedChains.includes(b.chain_id));
   }, [filteredBranches, selectedChains]);
+
+  // Physical branches with no lat/lng at all — never map pins, regardless of
+  // GPS/distance/city filtering (those filters already drop them). Surfaced
+  // as a plain count instead, so the user knows they exist rather than just
+  // silently vanishing.
+  const branchesWithoutLocationCount = React.useMemo(() => {
+    return liveBranches.filter((b) =>
+      !b.isOnline &&
+      !(b.lat && b.lng) &&
+      (selectedChains.length === 0 || selectedChains.includes(b.chain_id))
+    ).length;
+  }, [liveBranches, selectedChains]);
 
   // Online (delivery) branches — shown as a fixed chip row above the map
   // instead of as map pins, gated behind the "כולל משלוח"/"Include delivery"
@@ -2450,6 +2481,16 @@ export default function SmartGroceryDashboard() {
                 {lang === 'he' ? 'כולל משלוח' : 'Include delivery'}
               </button>
             </div>
+
+            {/* Branches with no lat/lng (mostly chains whose feed publishes no
+                store-metadata at all — see CLAUDE.md "Phase 15/16") never get a
+                map pin; surfaced here as a plain count instead of silently
+                vanishing. */}
+            {branchesWithoutLocationCount > 0 && (
+              <div className="shrink-0 -mx-4 md:-mx-6 lg:-mx-8 px-4 md:px-6 lg:px-8 py-1.5 text-xs text-[var(--color-text-muted)] bg-[var(--color-bg-subtle)] border-b border-[var(--color-border)]">
+                {t.branchesWithoutLocation}: {branchesWithoutLocationCount}
+              </div>
+            )}
 
             {/* Online (delivery) branches — fixed row above the map, not map pins */}
             {includeDelivery && onlineBranches.length > 0 && (
