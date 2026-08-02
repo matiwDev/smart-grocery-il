@@ -177,7 +177,9 @@ const DICTIONARY = {
     analyticsEmptyRanking: 'אין עדיין נתוני מחירים',
     analyticsSpendingOverviewTitle: 'סקירת הוצאות',
     analyticsWeeklyAverage: 'ממוצע שבועי',
-    analyticsMonthTotal: 'סה״כ החודש',
+    analyticsMonthTotal: 'סה״כ הוצאות החודש',
+    analyticsChainsSpendingLine: 'רשתות שיווק',
+    analyticsOtherExpenses: 'הוצאות נוספות',
     analyticsNotEnoughSpendingData: 'עדיין אין מספיק נתונים — המשיכו לקנות כדי לראות את המגמות שלכם!',
     analyticsMonthlyBreakdownTitle: 'פירוט חודשי אחרון',
     analyticsColMonth: 'חודש',
@@ -341,7 +343,9 @@ const DICTIONARY = {
     analyticsEmptyRanking: 'No price data yet',
     analyticsSpendingOverviewTitle: 'Spending Overview',
     analyticsWeeklyAverage: 'Weekly average',
-    analyticsMonthTotal: 'This month',
+    analyticsMonthTotal: 'Total expenses this month',
+    analyticsChainsSpendingLine: 'Supermarket chains',
+    analyticsOtherExpenses: 'Other expenses',
     analyticsNotEnoughSpendingData: 'Not enough data yet — keep shopping to see your trends!',
     analyticsMonthlyBreakdownTitle: 'Recent monthly breakdown',
     analyticsColMonth: 'Month',
@@ -958,8 +962,10 @@ interface MonthlyBreakdownEntry {
 
 interface SpendingOverview {
   not_enough_data: boolean;
-  weekly_average?: number;
-  month_total?: number;
+  basket_total?: number;
+  custom_total?: number;
+  combined_total?: number;
+  weekly_avg?: number;
   monthly_breakdown?: MonthlyBreakdownEntry[];
   annual_projection?: number;
   annual_total_to_date?: number;
@@ -976,6 +982,13 @@ interface MonthlyBasketProduct {
 
 interface CustomMarketEntry {
   id: string;
+  amount: number;
+  note: string | null;
+  spent_at: string;
+}
+
+interface MonthlyCustomEntry {
+  market_name: string;
   amount: number;
   note: string | null;
   spent_at: string;
@@ -1063,6 +1076,8 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
   // Section C — monthly basket summary
   const [monthlyBasket, setMonthlyBasket] = useState<MonthlyBasketProduct[]>([]);
   const [monthlyBasketTotalItems, setMonthlyBasketTotalItems] = useState(0);
+  const [monthlyCustomEntries, setMonthlyCustomEntries] = useState<MonthlyCustomEntry[]>([]);
+  const [monthlyCustomTotal, setMonthlyCustomTotal] = useState(0);
   const [monthlyBasketLoading, setMonthlyBasketLoading] = useState(true);
   const [monthlyBasketExpanded, setMonthlyBasketExpanded] = useState(false);
 
@@ -1083,8 +1098,6 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
   const [trendChainsPresent, setTrendChainsPresent] = useState<ChainMeta[]>([]);
   const [trendLoading, setTrendLoading] = useState(false);
   const [trendHasEnough, setTrendHasEnough] = useState(true);
-
-  const customMarketsTotal = markets.reduce((s, m) => s + m.total_spent, 0);
 
   const loadMarkets = useCallback(() => {
     if (!currentUserId) { setMarketsLoading(false); return; }
@@ -1113,7 +1126,12 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
 
     setMonthlyBasketLoading(true);
     fetch(`/api/analytics?type=monthly_basket&user_id=${currentUserId}`)
-      .then((r) => r.json()).then((d) => { setMonthlyBasket(d.products ?? []); setMonthlyBasketTotalItems(d.total_items ?? 0); })
+      .then((r) => r.json()).then((d) => {
+        setMonthlyBasket(d.products ?? []);
+        setMonthlyBasketTotalItems(d.total_items ?? 0);
+        setMonthlyCustomEntries(d.custom_entries ?? []);
+        setMonthlyCustomTotal(d.custom_total ?? 0);
+      })
       .finally(() => setMonthlyBasketLoading(false));
 
     loadMarkets();
@@ -1234,23 +1252,41 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
           <AnalyticsEmptyState text={t.analyticsNotEnoughSpendingData} />
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsWeeklyAverage}</p>
-                <p className="text-2xl font-bold text-[var(--color-text-primary)]">₪{(spending.weekly_average ?? 0).toFixed(2)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsMonthTotal}</p>
-                <p className="text-2xl font-bold text-[var(--color-text-primary)]">₪{(spending.month_total ?? 0).toFixed(2)}</p>
-              </div>
+            {/* Collapsed: one combined number — basket spending (cheapest chain
+                prices) + custom market entries, this month. */}
+            <div>
+              <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsMonthTotal}</p>
+              <p className="text-3xl font-bold text-[var(--color-text-primary)]">₪{(spending.combined_total ?? 0).toFixed(2)}</p>
             </div>
-            {customMarketsTotal > 0 && (
-              <p className="text-xs text-[var(--color-text-muted)] mt-3">{t.analyticsCustomMarketsLine}: ₪{customMarketsTotal.toFixed(2)}</p>
-            )}
             <AnimatePresence>
               {spendingExpanded && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
                   <div className="mt-5 pt-5 border-t border-[var(--color-border)]">
+                    {/* Breakdown: chains vs. local markets vs. total, this month */}
+                    <div className="flex flex-col gap-2 mb-5">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-[var(--color-text-muted)]">{t.analyticsChainsSpendingLine}</span>
+                        <span className="text-[var(--color-text-primary)] font-medium">₪{(spending.basket_total ?? 0).toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-[var(--color-text-muted)]">{t.analyticsCustomMarketsLine}</span>
+                        <span className="text-[var(--color-text-primary)] font-medium">₪{(spending.custom_total ?? 0).toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-center justify-between pt-2 border-t border-[var(--color-border)]">
+                        <span className="text-[var(--color-text-primary)] font-semibold">{t.analyticsColTotal}</span>
+                        <span className="text-[var(--color-text-primary)] font-bold text-lg">₪{(spending.combined_total ?? 0).toFixed(2)}</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 mb-5">
+                      <div>
+                        <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsWeeklyAverage}</p>
+                        <p className="text-lg font-bold text-[var(--color-text-primary)]">₪{(spending.weekly_avg ?? 0).toFixed(2)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsAnnualProjection}</p>
+                        <p className="text-lg font-bold text-[var(--color-text-primary)]">₪{(spending.annual_projection ?? 0).toFixed(2)}</p>
+                      </div>
+                    </div>
                     <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-2">{t.analyticsMonthlyBreakdownTitle}</p>
                     <div className="overflow-x-auto -mx-1">
                       <table className="w-full text-xs">
@@ -1274,15 +1310,9 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
                         </tbody>
                       </table>
                     </div>
-                    <div className="grid grid-cols-2 gap-4 mt-4">
-                      <div>
-                        <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsAnnualProjection}</p>
-                        <p className="text-lg font-bold text-[var(--color-text-primary)]">₪{(spending.annual_projection ?? 0).toFixed(2)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsAnnualToDate}</p>
-                        <p className="text-lg font-bold text-[var(--color-text-primary)]">₪{(spending.annual_total_to_date ?? 0).toFixed(2)}</p>
-                      </div>
+                    <div className="mt-4">
+                      <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsAnnualToDate}</p>
+                      <p className="text-lg font-bold text-[var(--color-text-primary)]">₪{(spending.annual_total_to_date ?? 0).toFixed(2)}</p>
                     </div>
                   </div>
                 </motion.div>
@@ -1361,7 +1391,7 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
               </p>
             )}
           </div>
-          {monthlyBasket.length > 0 && (
+          {(monthlyBasket.length > 0 || monthlyCustomEntries.length > 0) && (
             <button
               onClick={() => setMonthlyBasketExpanded((v) => !v)}
               className="w-9 h-9 flex items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
@@ -1372,7 +1402,7 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
         </div>
         {monthlyBasketLoading ? (
           <SkeletonBlock height={60} />
-        ) : monthlyBasket.length === 0 ? (
+        ) : monthlyBasket.length === 0 && monthlyCustomEntries.length === 0 ? (
           <AnalyticsEmptyState text={t.analyticsEmptyMonthlyBasket} />
         ) : (
           <AnimatePresence>
@@ -1396,12 +1426,33 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
                       ))}
                     </div>
                   ))}
-                  <button
-                    onClick={handleExportMonthlyBasket}
-                    className="w-full mt-2 min-h-[40px] bg-[var(--color-accent)]/10 hover:bg-[var(--color-accent)]/20 text-[var(--color-accent)] rounded-xl text-sm font-semibold transition-colors"
-                  >
-                    {t.analyticsExportList}
-                  </button>
+
+                  {monthlyBasket.length > 0 && (
+                    <button
+                      onClick={handleExportMonthlyBasket}
+                      className="w-full mt-2 min-h-[40px] bg-[var(--color-accent)]/10 hover:bg-[var(--color-accent)]/20 text-[var(--color-accent)] rounded-xl text-sm font-semibold transition-colors"
+                    >
+                      {t.analyticsExportList}
+                    </button>
+                  )}
+
+                  {monthlyCustomEntries.length > 0 && (
+                    <div className={monthlyBasket.length > 0 ? 'mt-4 pt-4 border-t border-[var(--color-border)]' : ''}>
+                      <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-1.5">{t.analyticsOtherExpenses}</p>
+                      {monthlyCustomEntries.map((e, idx) => (
+                        <div key={idx} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+                          <span className="text-[var(--color-text-primary)] truncate">
+                            {e.market_name} — {e.spent_at}{e.note ? ` — ${e.note}` : ''}
+                          </span>
+                          <span className="text-[var(--color-text-muted)] shrink-0">₪{Number(e.amount).toFixed(2)}</span>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between gap-3 pt-2 mt-1 border-t border-[var(--color-border)] text-sm font-semibold">
+                        <span className="text-[var(--color-text-primary)]">{t.analyticsColTotal}</span>
+                        <span className="text-[var(--color-text-primary)]">₪{monthlyCustomTotal.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}

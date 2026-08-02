@@ -59,6 +59,36 @@ async function minPriceByProduct(
   return out;
 }
 
+// Every custom-market expense entry for a user, across all of their markets.
+// Degrades to an empty list (not a 500) when migration 009 hasn't been
+// applied yet — same PGRST205 pattern as the `custom_markets` case below.
+// Shared by spending_overview and monthly_basket.
+async function fetchUserCustomMarketEntries(
+  supabase: ReturnType<typeof createServerClient>,
+  userId: string
+): Promise<Array<{ market_id: string; market_name: string; amount: number; note: string | null; spent_at: string }>> {
+  const { data: markets, error: marketsErr } = await supabase
+    .from('custom_markets')
+    .select('id, name')
+    .eq('user_id', userId);
+  if (marketsErr) {
+    if (marketsErr.code === 'PGRST205') return [];
+    throw marketsErr;
+  }
+  const marketIds = (markets ?? []).map((m) => m.id);
+  if (marketIds.length === 0) return [];
+
+  const { data: entries, error: entriesErr } = await supabase
+    .from('custom_market_entries')
+    .select('market_id, amount, note, spent_at')
+    .in('market_id', marketIds);
+  if (entriesErr) throw entriesErr;
+
+  const nameById: Record<string, string> = {};
+  for (const m of markets ?? []) nameById[m.id] = m.name;
+  return (entries ?? []).map((e) => ({ ...e, market_name: nameById[e.market_id] ?? '' }));
+}
+
 // GET /api/analytics?type=savings|chain_ranking|price_trend|spending_overview|
 //                         personal_chain_ranking|monthly_basket|custom_markets
 // Backs the Analytics view (app/page.tsx). Each `type` is an independent
@@ -356,35 +386,55 @@ export async function GET(req: NextRequest) {
           costByBasket[i.basket_id] = (costByBasket[i.basket_id] ?? 0) + price * (i.quantity_value ?? 1);
         }
 
+        const customEntries = await fetchUserCustomMarketEntries(supabase, userId);
+
         const now = new Date();
         const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
         const currentMonthKey = monthKey(now);
         const currentYear = now.getFullYear();
 
-        let monthTotal = 0;
-        let annualTotalToDate = 0;
-        let allTimeTotal = 0;
-        const weeksWithTrip = new Set<string>();
-        const monthlyTotals: Record<string, { total: number; trips: number; weeks: Set<string> }> = {};
+        // Combined (supermarket-chain basket + local custom-market) totals per
+        // month — the unified spending picture this fix asked for, instead of
+        // two separate figures the frontend had to reconcile itself.
+        const monthlyTotals: Record<string, { basketTotal: number; customTotal: number; trips: number; weeks: Set<string> }> = {};
+        const ensureMonth = (mk: string) => (monthlyTotals[mk] ??= { basketTotal: 0, customTotal: 0, trips: 0, weeks: new Set() });
+        const weeksWithActivity = new Set<string>();
 
+        let basketAllTimeTotal = 0;
         for (const [basketId, cost] of Object.entries(costByBasket)) {
           const d = new Date(basketDateById[basketId]);
-          allTimeTotal += cost;
-          if (d.getFullYear() === currentYear) annualTotalToDate += cost;
-          if (monthKey(d) === currentMonthKey) monthTotal += cost;
-
+          basketAllTimeTotal += cost;
           const weekKey = isoWeekKey(d);
-          weeksWithTrip.add(weekKey);
+          weeksWithActivity.add(weekKey);
 
-          const mk = monthKey(d);
-          if (!monthlyTotals[mk]) monthlyTotals[mk] = { total: 0, trips: 0, weeks: new Set() };
-          monthlyTotals[mk].total += cost;
-          monthlyTotals[mk].trips += 1;
-          monthlyTotals[mk].weeks.add(weekKey);
+          const agg = ensureMonth(monthKey(d));
+          agg.basketTotal += cost;
+          agg.trips += 1;
+          agg.weeks.add(weekKey);
         }
 
-        const weeksActive = Math.max(1, weeksWithTrip.size);
-        const weeklyAverage = allTimeTotal / weeksActive;
+        let customAllTimeTotal = 0;
+        for (const e of customEntries) {
+          const d = new Date(e.spent_at);
+          const amount = Number(e.amount);
+          customAllTimeTotal += amount;
+          const weekKey = isoWeekKey(d);
+          weeksWithActivity.add(weekKey);
+
+          const agg = ensureMonth(monthKey(d));
+          agg.customTotal += amount;
+          agg.weeks.add(weekKey);
+        }
+
+        const combinedAllTimeTotal = basketAllTimeTotal + customAllTimeTotal;
+
+        let annualTotalToDate = 0;
+        for (const [mk, agg] of Object.entries(monthlyTotals)) {
+          if (mk.startsWith(`${currentYear}-`)) annualTotalToDate += agg.basketTotal + agg.customTotal;
+        }
+
+        const weeksActive = Math.max(1, weeksWithActivity.size);
+        const weeklyAvg = combinedAllTimeTotal / weeksActive;
 
         // Last 6 calendar months (including current), oldest first.
         const monthlyBreakdown: Array<{ month: string; total: number; avg_per_week: number; trips: number }> = [];
@@ -392,22 +442,29 @@ export async function GET(req: NextRequest) {
           const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
           const mk = monthKey(d);
           const m = monthlyTotals[mk];
+          const total = (m?.basketTotal ?? 0) + (m?.customTotal ?? 0);
           monthlyBreakdown.push({
             month: mk,
-            total: Math.round((m?.total ?? 0) * 100) / 100,
-            avg_per_week: m && m.weeks.size > 0 ? Math.round((m.total / m.weeks.size) * 100) / 100 : 0,
+            total: Math.round(total * 100) / 100,
+            avg_per_week: m && m.weeks.size > 0 ? Math.round((total / m.weeks.size) * 100) / 100 : 0,
             trips: m?.trips ?? 0,
           });
         }
 
         const monthsWithData = Object.keys(monthlyTotals).length;
-        const monthlyAverage = monthsWithData > 0 ? allTimeTotal / monthsWithData : 0;
+        const monthlyAverage = monthsWithData > 0 ? combinedAllTimeTotal / monthsWithData : 0;
         const annualProjection = monthlyAverage * 12;
+
+        const currentMonth = monthlyTotals[currentMonthKey];
+        const basketTotalThisMonth = currentMonth?.basketTotal ?? 0;
+        const customTotalThisMonth = currentMonth?.customTotal ?? 0;
 
         return NextResponse.json({
           not_enough_data: false,
-          weekly_average: Math.round(weeklyAverage * 100) / 100,
-          month_total: Math.round(monthTotal * 100) / 100,
+          basket_total: Math.round(basketTotalThisMonth * 100) / 100,
+          custom_total: Math.round(customTotalThisMonth * 100) / 100,
+          combined_total: Math.round((basketTotalThisMonth + customTotalThisMonth) * 100) / 100,
+          weekly_avg: Math.round(weeklyAvg * 100) / 100,
           monthly_breakdown: monthlyBreakdown,
           annual_projection: Math.round(annualProjection * 100) / 100,
           annual_total_to_date: Math.round(annualTotalToDate * 100) / 100,
@@ -485,6 +542,15 @@ export async function GET(req: NextRequest) {
         const monthStart = new Date(Date.UTC(year, month - 1, 1));
         const monthEnd = new Date(Date.UTC(year, month, 1));
 
+        const allCustomEntries = await fetchUserCustomMarketEntries(supabase, userId);
+        const customEntriesThisMonth = allCustomEntries
+          .filter((e) => {
+            const d = new Date(e.spent_at);
+            return d >= monthStart && d < monthEnd;
+          })
+          .sort((a, b) => b.spent_at.localeCompare(a.spent_at));
+        const customTotalThisMonth = Math.round(customEntriesThisMonth.reduce((s, e) => s + Number(e.amount), 0) * 100) / 100;
+
         const { data: baskets, error: basketsErr } = await supabase
           .from('baskets')
           .select('id')
@@ -493,7 +559,9 @@ export async function GET(req: NextRequest) {
           .lt('created_at', monthEnd.toISOString());
         if (basketsErr) throw basketsErr;
         const basketIds = (baskets ?? []).map((b) => b.id);
-        if (basketIds.length === 0) return NextResponse.json({ products: [], total_items: 0 });
+        if (basketIds.length === 0) {
+          return NextResponse.json({ products: [], total_items: 0, custom_entries: customEntriesThisMonth, custom_total: customTotalThisMonth });
+        }
 
         const { data: items, error: itemsErr } = await supabase
           .from('basket_items')
@@ -509,7 +577,9 @@ export async function GET(req: NextRequest) {
         }
 
         const productIds = Object.keys(qtyByProduct);
-        if (productIds.length === 0) return NextResponse.json({ products: [], total_items: 0 });
+        if (productIds.length === 0) {
+          return NextResponse.json({ products: [], total_items: 0, custom_entries: customEntriesThisMonth, custom_total: customTotalThisMonth });
+        }
 
         const [{ data: products, error: productsErr }, minPrices] = await Promise.all([
           supabase.from('products').select('id, name_he, name_en, category').in('id', productIds),
@@ -533,7 +603,12 @@ export async function GET(req: NextRequest) {
 
         const totalItems = Object.values(qtyByProduct).reduce((s, q) => s + q, 0);
 
-        return NextResponse.json({ products: result, total_items: totalItems });
+        return NextResponse.json({
+          products: result,
+          total_items: totalItems,
+          custom_entries: customEntriesThisMonth,
+          custom_total: customTotalThisMonth,
+        });
       }
 
       case 'custom_markets': {
