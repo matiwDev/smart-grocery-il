@@ -1031,6 +1031,18 @@ function SkeletonBlock({ height = 120 }: { height?: number }) {
   return <div className="w-full bg-[var(--color-bg-subtle)] rounded-xl animate-pulse" style={{ height }} />;
 }
 
+// Shown in the basket panel while the login-time rehydration fetch is in
+// flight, so a reload never flashes an empty basket before the real one loads.
+function BasketSkeleton() {
+  return (
+    <div className="space-y-3">
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="w-full h-14 rounded-xl bg-[var(--color-bg-subtle)] animate-[pulse_1.5s_ease-in-out_infinite]" />
+      ))}
+    </div>
+  );
+}
+
 function AnalyticsEmptyState({ text }: { text: string }) {
   return <p className="text-sm text-[var(--color-text-muted)] text-center py-6">{text}</p>;
 }
@@ -1607,6 +1619,7 @@ export default function SmartGroceryDashboard() {
   // Basket state
   const [basket, setBasket] = useState<BasketItem[]>([]);
   const [activeBasketId, setActiveBasketId] = useState<string | null>(null);
+  const [isBasketLoading, setIsBasketLoading] = useState(true);
 
   // Price comparison state
   const [comparison, setComparison] = useState<ComparisonResult[]>([]);
@@ -1751,19 +1764,23 @@ export default function SmartGroceryDashboard() {
   // ── Basket load on login ─────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!currentUser?.id || currentUser.id === '00000000-0000-0000-0000-000000000000') {
+    if (!currentUser?.id || currentUser.id === '00000000-0000-0000-0000-000000000000' || !supabase) {
+      // No rehydration needed (not logged in) — nothing to wait for.
+      setIsBasketLoading(false);
       return;
     }
-    if (!supabase) return;
 
-    supabase.from('baskets')
-      .select('id')
-      .eq('user_id', currentUser.id)
-      .eq('is_archived', false)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
-      .then(async ({ data: bData }) => {
+    setIsBasketLoading(true);
+    (async () => {
+      try {
+        const { data: bData } = await supabase.from('baskets')
+          .select('id')
+          .eq('user_id', currentUser.id)
+          .eq('is_archived', false)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
         if (bData) {
           setActiveBasketId(bData.id);
 
@@ -1771,7 +1788,7 @@ export default function SmartGroceryDashboard() {
           // latest_prices server-side instead of the client doing it in two
           // separate queries.
           const res = await fetch(`/api/baskets/${bData.id}/items?user_id=${currentUser.id}`);
-          if (!res.ok) return;
+          if (!res.ok) { setBasket([]); return; }
           const { items } = await res.json() as {
             items: Array<{
               db_id: string; product_id: string; quantity_value: number;
@@ -1807,7 +1824,12 @@ export default function SmartGroceryDashboard() {
           }).select().single();
           if (newB) setActiveBasketId(newB.id);
         }
-      });
+      } catch {
+        setBasket([]);
+      } finally {
+        setIsBasketLoading(false);
+      }
+    })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
@@ -2790,7 +2812,9 @@ export default function SmartGroceryDashboard() {
 
               {/* Basket list */}
               <div className="flex-1 bg-[var(--color-bg-panel)]/40 backdrop-blur-sm border border-[var(--color-border)]/80 rounded-3xl p-4 sm:p-6 overflow-y-auto min-h-[300px]">
-                {basket.length === 0 ? (
+                {isBasketLoading ? (
+                  <BasketSkeleton />
+                ) : basket.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-[var(--color-text-muted)] min-h-[200px]">
                     <ShoppingCart className="w-12 h-12 mb-4 opacity-40" />
                     <p className="text-sm">{t.emptyList}</p>
