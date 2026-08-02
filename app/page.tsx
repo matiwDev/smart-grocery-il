@@ -2454,6 +2454,25 @@ export default function SmartGroceryDashboard() {
     return filteredBranches.filter((b) => selectedChains.includes(b.chain_id));
   }, [filteredBranches, selectedChains]);
 
+  // Chains actually rendering a map pin right now (only branches with lat/lng
+  // do) — drives the legend shown below the distance slider.
+  const visibleMapChains = React.useMemo(() => {
+    const seen = new Set<string>();
+    const result: ChainMeta[] = [];
+    for (const b of visibleBranches) {
+      if (!(b.lat && b.lng) || seen.has(b.chain_id)) continue;
+      seen.add(b.chain_id);
+      const meta = chains.find((c) => c.id === b.chain_id);
+      result.push({
+        id: b.chain_id,
+        name_he: meta?.name_he ?? b.chain_id,
+        name_en: meta?.name_en ?? b.chain_id,
+        color_hex: meta?.color_hex ?? b.color_hex,
+      });
+    }
+    return result;
+  }, [visibleBranches, chains]);
+
   // Physical branches with no lat/lng at all — never map pins, regardless of
   // GPS/distance/city filtering (those filters already drop them). Surfaced
   // as a plain count instead, so the user knows they exist rather than just
@@ -2922,6 +2941,18 @@ export default function SmartGroceryDashboard() {
                 {lang === 'he' ? 'כולל משלוח' : 'Include delivery'}
               </button>
             </div>
+
+            {/* Chain legend — only chains with at least one visible pin right now */}
+            {visibleMapChains.length > 0 && (
+              <div className="shrink-0 -mx-4 md:-mx-6 lg:-mx-8 px-4 md:px-6 lg:px-8 py-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 bg-[var(--color-bg-base)] border-b border-[var(--color-border)]">
+                {visibleMapChains.map((c) => (
+                  <div key={c.id} className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: c.color_hex }} />
+                    <span className="text-[11px] text-[var(--color-text-muted)]">{lang === 'he' ? c.name_he : c.name_en}</span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Branches with no lat/lng (mostly chains whose feed publishes no
                 store-metadata at all — see CLAUDE.md "Phase 15/16") never get a

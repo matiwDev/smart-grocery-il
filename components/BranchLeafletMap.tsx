@@ -110,13 +110,17 @@ export function BranchLeafletMap({ branches, activeMapPin, setActiveMapPin, them
         </Marker>
       )}
       {withCoords.map((b) => {
+        // Pin color always identifies the chain (b.color_hex) — never overridden
+        // by cost ranking, which used to make every branch of the cheapest chain
+        // render identically regardless of which chain it actually was. The
+        // basket-cost ranking is still shown as colored text inside the popup.
         const costColor = costColorByChain?.[b.chain_id];
         const basketTotal = costTotalByChain?.[b.chain_id];
         return (
           <Marker
             key={b.id}
             position={[b.lat as number, b.lng as number]}
-            icon={chainIcon(costColor ?? b.color_hex, b.id === activeMapPin)}
+            icon={chainIcon(b.color_hex, b.id === activeMapPin)}
             eventHandlers={{ click: () => setActiveMapPin(b.id) }}
           >
             <Popup>
