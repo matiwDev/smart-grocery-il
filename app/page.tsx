@@ -8,6 +8,7 @@ import {
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   ArrowDown, Loader2, Bell, Copy, UserPlus, Sun, Moon,
   ScanBarcode, Camera, Ticket, Check, Mail, Barcode, VideoOff, Truck, Trash2,
+  Store, Bookmark,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -181,6 +182,10 @@ const DICTIONARY = {
     analyticsChainsSpendingLine: 'רשתות שיווק',
     analyticsOtherExpenses: 'הוצאות נוספות',
     analyticsNotEnoughSpendingData: 'עדיין אין מספיק נתונים — המשיכו לקנות כדי לראות את המגמות שלכם!',
+    analyticsNoPurchasesYetTitle: 'עוד לא ביצעתם קניות',
+    analyticsNoPurchasesYetSubtitle: 'הוסיפו מוצרים לסל והשוו מחירים כדי לראות את הסטטיסטיקות שלכם',
+    savedListsEmptyTitle: 'אין רשימות שמורות',
+    savedListsEmptySubtitle: 'שמרו רשימת קניות מהמסך הראשי',
     analyticsMonthlyBreakdownTitle: 'פירוט חודשי אחרון',
     analyticsColMonth: 'חודש',
     analyticsColTotal: 'סה״כ',
@@ -204,7 +209,8 @@ const DICTIONARY = {
     analyticsAddExpense: 'הוסף הוצאה',
     analyticsExpenseAmountPlaceholder: 'סכום (₪)',
     analyticsExpenseNotePlaceholder: 'הערה (לא חובה)',
-    analyticsNoMarketsYet: 'עדיין לא הוספתם שווקים',
+    analyticsNoMarketsYet: 'טרם הוספתם שווקים מקומיים',
+    analyticsNoMarketsYetSubtitle: 'הוסיפו שוק או חנות מקומית למעקב הוצאות',
     saveAction: 'שמור',
     devOptionsLocked: 'בקרת מפתחים (Locked)',
     profileDataTitle: 'פרטים אישיים',
@@ -347,6 +353,10 @@ const DICTIONARY = {
     analyticsChainsSpendingLine: 'Supermarket chains',
     analyticsOtherExpenses: 'Other expenses',
     analyticsNotEnoughSpendingData: 'Not enough data yet — keep shopping to see your trends!',
+    analyticsNoPurchasesYetTitle: 'No purchases yet',
+    analyticsNoPurchasesYetSubtitle: 'Add products to your basket and compare prices to see your statistics',
+    savedListsEmptyTitle: 'No saved lists yet',
+    savedListsEmptySubtitle: 'Save a shopping list from the home screen',
     analyticsMonthlyBreakdownTitle: 'Recent monthly breakdown',
     analyticsColMonth: 'Month',
     analyticsColTotal: 'Total',
@@ -370,7 +380,8 @@ const DICTIONARY = {
     analyticsAddExpense: 'Add expense',
     analyticsExpenseAmountPlaceholder: 'Amount (₪)',
     analyticsExpenseNotePlaceholder: 'Note (optional)',
-    analyticsNoMarketsYet: "You haven't added any markets yet",
+    analyticsNoMarketsYet: 'No local markets added yet',
+    analyticsNoMarketsYetSubtitle: 'Add a local market or shop to track spending',
     saveAction: 'Save',
     devOptionsLocked: 'Developer Options (Locked)',
     profileDataTitle: 'Personal Information',
@@ -1060,6 +1071,19 @@ function AnalyticsEmptyState({ text }: { text: string }) {
   return <p className="text-sm text-[var(--color-text-muted)] text-center py-6">{text}</p>;
 }
 
+// Icon + title + subtext empty state, used where a bare line of muted text
+// isn't enough context on its own (analytics with no history, no local
+// markets, no saved lists).
+function IconEmptyState({ icon: Icon, title, subtitle }: { icon: React.ComponentType<{ className?: string }>; title: string; subtitle: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center text-center py-8 px-4">
+      <Icon className="w-10 h-10 mb-3 text-[var(--color-text-muted)] opacity-40" />
+      <p className="text-sm font-medium text-[var(--color-text-primary)]">{title}</p>
+      <p className="text-xs text-[var(--color-text-muted)] mt-1.5 max-w-xs">{subtitle}</p>
+    </div>
+  );
+}
+
 function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; lang: Lang; currentUserId: string | null; showToast: (msg: string) => void }) {
   // Section A — spending overview
   const [spending, setSpending] = useState<SpendingOverview | null>(null);
@@ -1249,7 +1273,7 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
         {spendingLoading ? (
           <SkeletonBlock height={80} />
         ) : !spending || spending.not_enough_data ? (
-          <AnalyticsEmptyState text={t.analyticsNotEnoughSpendingData} />
+          <IconEmptyState icon={ShoppingCart} title={t.analyticsNoPurchasesYetTitle} subtitle={t.analyticsNoPurchasesYetSubtitle} />
         ) : (
           <>
             {/* Collapsed: one combined number — basket spending (cheapest chain
@@ -1488,7 +1512,7 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
         {marketsLoading ? (
           <SkeletonBlock height={100} />
         ) : markets.length === 0 ? (
-          <AnalyticsEmptyState text={t.analyticsNoMarketsYet} />
+          <IconEmptyState icon={Store} title={t.analyticsNoMarketsYet} subtitle={t.analyticsNoMarketsYetSubtitle} />
         ) : (
           <div className="flex flex-col gap-3">
             {markets.map((m) => (
@@ -3133,8 +3157,8 @@ export default function SmartGroceryDashboard() {
                 ))}
               </div>
             ) : (
-              <div className="bg-[var(--color-bg-panel)]/60 rounded-3xl p-8 border border-[var(--color-border)] text-center">
-                <p className="text-[var(--color-text-muted)]">{t.emptyList}</p>
+              <div className="bg-[var(--color-bg-panel)]/60 rounded-3xl p-8 border border-[var(--color-border)]">
+                <IconEmptyState icon={Bookmark} title={t.savedListsEmptyTitle} subtitle={t.savedListsEmptySubtitle} />
               </div>
             )}
           </motion.div>
