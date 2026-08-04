@@ -15,7 +15,7 @@
  *     cron target, Phase 6) — a process.exit() here would kill the whole
  *     serverless function, not just fail one request
  */
-import { restFetch, fetchWithRetry, chunk, refreshLatestPrices } from './supabase-rest';
+import { restFetch, chunk, refreshLatestPrices } from './supabase-rest';
 import { fetchShufersalFileLinks, fetchAndParseShufersalFile } from './shufersal-feed';
 import { ParsedProduct } from './parsers/types';
 import { fetchAndParse as fetchAndParseVictory } from './parsers/victory';
@@ -23,17 +23,12 @@ import { fetchAndParse as fetchAndParseMahsaneiHashuk } from './parsers/mahsanei
 import { fetchAndParse as fetchAndParseYohananof } from './parsers/yohananof';
 import { fetchAndParse as fetchAndParseOsherAd } from './parsers/osher-ad';
 import { fetchAndParse as fetchAndParseKeshetTeamim } from './parsers/keshet-teamim';
+import { fetchAndParse as fetchAndParseRamiLevy } from './parsers/rami-levy';
 
 // How many per-branch Shufersal files to download and parse in one run.
 // The public listing has one PriceFull file per branch (hundreds of them);
 // pulling all of them isn't necessary to prove the pipeline works end to end.
 const SHUFERSAL_STORE_LIMIT = Number(process.env.SHUFERSAL_STORE_LIMIT || 3);
-
-// Note: this URL resolves (unlike the earlier url.rami-levy.co.il host) but
-// currently 404s (verified via curl as of this writing) — see CLAUDE.md
-// "Price ingestion pipeline" for details. Kept as the documented correct
-// endpoint; the script logs and continues per-chain on failure either way.
-const RAMI_LEVY_URL = 'https://www.rami-levy.co.il/api/delivery/prices';
 
 // ─── Shared types ───────────────────────────────────────────────────────────
 
@@ -176,84 +171,19 @@ async function ingestShufersal(): Promise<IngestResult> {
   return result;
 }
 
-// ─── Rami Levy (JSON) ───────────────────────────────────────────────────────
-
-function extractRamiLevyItems(payload: unknown): FeedItem[] {
-  // Expected shape per the current integration spec: {data: [{id, name, price}]}
-  // (id = barcode). Also accepts a few other plausible shapes in case the API
-  // evolves, and otherwise fails loudly rather than guessing silently.
-  const candidateArray: unknown = Array.isArray(payload)
-    ? payload
-    : (payload as Record<string, unknown> | null)?.data ??
-      (payload as Record<string, unknown> | null)?.items ??
-      (payload as Record<string, unknown> | null)?.products;
-
-  if (!Array.isArray(candidateArray)) {
-    throw new Error('Unrecognized Rami Levy JSON response shape (expected an array, or {data:[]}/{items:[]}/{products:[]})');
-  }
-
-  return candidateArray
-    .map((raw): FeedItem | null => {
-      const r = raw as Record<string, unknown>;
-      const barcode = String(r.id ?? r.barcode ?? r.itemCode ?? r.ItemCode ?? '').trim();
-      const price = Number(r.price ?? r.itemPrice ?? r.ItemPrice);
-      if (!barcode || !Number.isFinite(price)) return null;
-      return {
-        barcode,
-        price,
-        unitQty: Number(r.quantity ?? r.unitQty) || 1,
-        unitType: String(r.unitOfMeasure ?? r.unit ?? 'unit'),
-        isSale: false,
-      };
-    })
-    .filter((item): item is FeedItem => item !== null);
-}
-
-async function ingestRamiLevy(): Promise<IngestResult> {
-  const startedAt = new Date().toISOString();
-  const chainId = 'rami_levy';
-  let fetched = 0;
-  let matched = 0;
-  let inserted = 0;
-  let errorText: string | null = null;
-
-  try {
-    console.log(`\n[rami_levy] Fetching ${RAMI_LEVY_URL}...`);
-    const res = await fetchWithRetry(RAMI_LEVY_URL);
-    if (!res.ok) throw new Error(`Rami Levy feed fetch failed: HTTP ${res.status}`);
-    const payload = await res.json();
-    const items = extractRamiLevyItems(payload);
-    fetched = items.length;
-
-    console.log(`[rami_levy] Matching ${fetched} fetched items against products.barcode...`);
-    const result = await matchAndInsert(chainId, items);
-    matched = result.matched;
-    inserted = result.inserted;
-
-    console.log(`[rami_levy] Refreshing latest_prices...`);
-    await refreshLatestPrices();
-  } catch (err) {
-    errorText = err instanceof Error ? err.message : String(err);
-    console.error(`[rami_levy] ERROR: ${errorText}`);
-  }
-
-  const result: IngestResult = { chainId, fetched, matched, inserted, errorText };
-  await writeIngestLog(result, startedAt);
-  return result;
-}
-
-// ─── Phase 11 chains (Victory, Mahsanei Hashuk, Yohananof, Osher Ad, Keshet
-// Teamim) ────────────────────────────────────────────────────────────────
-// All five publish the same Food Act XML schema as Shufersal (confirmed by
-// probing each live feed — see CLAUDE.md "Phase 11"), so their parsers
-// (scripts/parsers/*.ts) all reduce to one fetchAndParse(): ParsedProduct[]
-// shape and share this single ingest wrapper instead of five near-duplicates
-// of ingestShufersal(). Note: Yohananof, Osher Ad, and Keshet Teamim fetch
-// over real FTP (not HTTPS) — this works from the GitHub Actions daily
-// workflow and from local runs, but outbound FTP is not reliably available
-// from Vercel's serverless functions, so these three will likely fail (and
-// log to ingest_log, without blocking the other chains) if ever triggered
-// through the GET /api/prices/ingest cron route instead of `npm run ingest`.
+// ─── Phase 11/15 chains (Victory, Mahsanei Hashuk, Yohananof, Osher Ad,
+// Keshet Teamim, Rami Levy) ─────────────────────────────────────────────
+// All six publish the same Food Act XML schema as Shufersal (confirmed by
+// probing each live feed — see CLAUDE.md "Phase 11"/"Phase 15"), so their
+// parsers (scripts/parsers/*.ts) all reduce to one fetchAndParse():
+// ParsedProduct[] shape and share this single ingest wrapper instead of six
+// near-duplicates of ingestShufersal(). Note: Yohananof, Osher Ad, Keshet
+// Teamim, and Rami Levy all fetch over real FTP (not HTTPS, same Cerberus
+// platform) — this works from the GitHub Actions daily workflow and from
+// local runs, but outbound FTP is not reliably available from Vercel's
+// serverless functions, so these four will likely fail (and log to
+// ingest_log, without blocking the other chains) if ever triggered through
+// the GET /api/prices/ingest cron route instead of `npm run ingest`.
 
 async function ingestFromParser(chainId: string, fetchAndParse: () => Promise<ParsedProduct[]>): Promise<IngestResult> {
   const startedAt = new Date().toISOString();
@@ -300,7 +230,7 @@ async function ingestFromParser(chainId: string, fetchAndParse: () => Promise<Pa
 export async function runIngestion(): Promise<IngestResult[]> {
   const results: IngestResult[] = [];
   results.push(await ingestShufersal());
-  results.push(await ingestRamiLevy());
+  results.push(await ingestFromParser('rami_levy', fetchAndParseRamiLevy));
   results.push(await ingestFromParser('victory', fetchAndParseVictory));
   results.push(await ingestFromParser('mahsanei_hashuk', fetchAndParseMahsaneiHashuk));
   results.push(await ingestFromParser('yohananof', fetchAndParseYohananof));
