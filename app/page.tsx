@@ -8,7 +8,7 @@ import {
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   ArrowDown, Loader2, Bell, Copy, UserPlus, Sun, Moon,
   ScanBarcode, Camera, Ticket, Check, Mail, Barcode, VideoOff, Truck, Trash2,
-  Store, Bookmark,
+  Store, Bookmark, Sparkles, Columns2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -317,6 +317,9 @@ const DICTIONARY = {
     theme: 'ערכת נושא', language: 'שפה',
     lightMode: 'בהיר', darkMode: 'כהה',
     more: 'עוד',
+    // Phase 15 — basket view modes
+    basketModeSmart: 'חכם', basketModeChain: 'רשת', basketModeCompare: 'השוואה',
+    notAvailable: 'לא זמין',
   },
   en: {
     appTitle: 'Smart Grocery IL',
@@ -487,6 +490,9 @@ const DICTIONARY = {
     theme: 'Theme', language: 'Language',
     lightMode: 'Light', darkMode: 'Dark',
     more: 'More',
+    // Phase 15 — basket view modes
+    basketModeSmart: 'Smart', basketModeChain: 'Chain', basketModeCompare: 'Compare',
+    notAvailable: 'N/A',
   },
 };
 
@@ -940,6 +946,162 @@ function BasketRow({ item, chains, lang, t, isExpanded, onToggleExpand, onUpdate
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// ─── Basket view modes (Phase 15) ──────────────────────────────────────────────
+// Three ways to display the basket: Smart (default — cheapest chain per item,
+// comparison panel visible, unchanged from before this phase), Chain (every
+// item priced at one chosen chain), Compare (two chosen chains side by side).
+// Modes 2/3 never call a new API — every basket item already carries a
+// `prices` map with every chain's price, fetched when the item was added.
+
+type BasketMode = 'smart' | 'chain' | 'compare';
+const BASKET_MODE_KEY = 'sg_basket_mode';
+
+function BasketModeSelector({ mode, onChange, t }: { mode: BasketMode; onChange: (m: BasketMode) => void; t: Dictionary }) {
+  const segments: { mode: BasketMode; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+    { mode: 'smart', label: t.basketModeSmart, icon: Sparkles },
+    { mode: 'chain', label: t.basketModeChain, icon: Store },
+    { mode: 'compare', label: t.basketModeCompare, icon: Columns2 },
+  ];
+  return (
+    <div className="w-full h-10 flex bg-[var(--color-bg-subtle)] rounded-xl p-1 gap-1">
+      {segments.map((s) => {
+        const isActive = mode === s.mode;
+        const Icon = s.icon;
+        return (
+          <button
+            key={s.mode}
+            onClick={() => onChange(s.mode)}
+            className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg text-xs font-semibold transition-colors ${
+              isActive
+                ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)]'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'
+            }`}
+          >
+            <Icon className="w-3.5 h-3.5" />
+            {s.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Plain <select> restricted to the chains currently active in the chain
+// selector strip — reused for both the single-chain picker (mode 2) and the
+// two side-by-side pickers (mode 3).
+function ChainPicker({ chains, selectedChains, value, onChange, lang }: {
+  chains: ChainMeta[]; selectedChains: string[]; value: string | null; onChange: (id: string) => void; lang: Lang;
+}) {
+  const options = chains.filter((c) => selectedChains.includes(c.id));
+  return (
+    <select
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value)}
+      className="flex-1 h-11 px-3 bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-xl text-sm font-medium text-[var(--color-text-primary)] outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+    >
+      {options.map((c) => (
+        <option key={c.id} value={c.id}>{lang === 'he' ? c.name_he : c.name_en}</option>
+      ))}
+    </select>
+  );
+}
+
+// Mode 2 row: one chain's price only, "N/A" + warning icon when the product
+// isn't carried there. No fold-down (a per-chain breakdown doesn't make sense
+// when only one chain is shown).
+function SingleChainBasketRow({ item, chainId, t, onUpdateQuantity, onRemove }: {
+  item: BasketItem; chainId: string | null; t: Dictionary;
+  onUpdateQuantity: (delta: number) => void; onRemove: () => void;
+}) {
+  const cp = chainId ? item.prices[chainId] : undefined;
+  const lineTotal = cp ? cp.price * item.quantity : null;
+
+  return (
+    <div className="flex items-center gap-2 px-3 min-h-[56px] bg-[var(--color-bg-subtle)]/50 rounded-2xl border border-[var(--color-border)]/50">
+      <div className="flex-1 min-w-0 text-start">
+        <h3 className="font-semibold text-sm text-[var(--color-text-primary)] truncate">{item.name_he}</h3>
+      </div>
+
+      <div className="flex items-center bg-[var(--color-bg-panel)] rounded-lg border border-[var(--color-border)] shrink-0">
+        <button onClick={() => onUpdateQuantity(-1)} className="w-7 h-8 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors">−</button>
+        <span className="w-6 text-center font-mono text-sm font-medium text-[var(--color-text-primary)]">{item.quantity}</span>
+        <button onClick={() => onUpdateQuantity(1)} className="w-7 h-8 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors">+</button>
+      </div>
+
+      {lineTotal !== null ? (
+        <span className="font-mono font-semibold text-[var(--color-accent)] text-sm shrink-0 whitespace-nowrap w-[74px] text-end">
+          ₪{lineTotal.toFixed(2)}
+        </span>
+      ) : (
+        <span className="flex items-center justify-end gap-1 text-[var(--color-warning)] text-[11px] font-medium shrink-0 w-[74px]">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          {t.notAvailable}
+        </span>
+      )}
+
+      <button
+        onClick={onRemove}
+        aria-label={t.clearList}
+        className="w-8 h-8 shrink-0 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded-lg transition-colors"
+      >
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+// Mode 3 row: two chain price columns, cheaper highlighted green / pricier
+// red / equal neutral, "—" when unavailable. Per spec, no visible delete
+// button — a long-press reveals a small × instead, so the compact row stays
+// clean by default.
+function CompareChainBasketRow({ item, chainAId, chainBId, isDeleteRevealed, onUpdateQuantity, onLongPress, onRemove }: {
+  item: BasketItem; chainAId: string | null; chainBId: string | null; isDeleteRevealed: boolean;
+  onUpdateQuantity: (delta: number) => void; onLongPress: () => void; onRemove: () => void;
+}) {
+  const priceA = chainAId ? item.prices[chainAId]?.price ?? null : null;
+  const priceB = chainBId ? item.prices[chainBId]?.price ?? null : null;
+  const aCheaper = priceA !== null && priceB !== null && priceA < priceB;
+  const bCheaper = priceA !== null && priceB !== null && priceB < priceA;
+
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startLongPress = () => { longPressTimerRef.current = setTimeout(onLongPress, 600); };
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+  };
+
+  return (
+    <div
+      onPointerDown={startLongPress}
+      onPointerUp={cancelLongPress}
+      onPointerLeave={cancelLongPress}
+      className="relative flex items-center gap-2 px-3 min-h-[48px] bg-[var(--color-bg-subtle)]/50 rounded-2xl border border-[var(--color-border)]/50 select-none"
+    >
+      <div className="flex-1 min-w-0 text-start">
+        <h3 className="font-medium text-sm text-[var(--color-text-primary)] truncate">{item.name_he}</h3>
+      </div>
+      <span className={`w-[70px] text-end font-mono text-sm shrink-0 ${aCheaper ? 'text-[var(--color-success)]' : bCheaper ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-primary)]'}`}>
+        {priceA !== null ? `₪${priceA.toFixed(2)}` : '—'}
+      </span>
+      <span className={`w-[70px] text-end font-mono text-sm shrink-0 ${bCheaper ? 'text-[var(--color-success)]' : aCheaper ? 'text-[var(--color-danger)]' : 'text-[var(--color-text-primary)]'}`}>
+        {priceB !== null ? `₪${priceB.toFixed(2)}` : '—'}
+      </span>
+      <div className="flex items-center bg-[var(--color-bg-panel)] rounded-lg border border-[var(--color-border)] shrink-0">
+        <button onClick={() => onUpdateQuantity(-1)} className="w-6 h-7 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors text-xs">−</button>
+        <span className="w-5 text-center font-mono text-xs font-medium text-[var(--color-text-primary)]">{item.quantity}</span>
+        <button onClick={() => onUpdateQuantity(1)} className="w-6 h-7 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors text-xs">+</button>
+      </div>
+      {isDeleteRevealed && (
+        <button
+          onClick={onRemove}
+          className="absolute -top-2 -end-2 w-7 h-7 flex items-center justify-center bg-[var(--color-danger)] text-white rounded-full shadow-lg z-10"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
     </div>
   );
 }
@@ -1707,6 +1869,13 @@ export default function SmartGroceryDashboard() {
   // Per-item price breakdown: which basket item is expanded in the comparison panel
   const [expandedPriceItemId, setExpandedPriceItemId] = useState<string | null>(null);
 
+  // Basket view modes (Phase 15): smart (default) / chain / compare
+  const [basketMode, setBasketMode] = useState<BasketMode>('smart');
+  const [singleChainId, setSingleChainId] = useState<string | null>(null);
+  const [compareChainA, setCompareChainA] = useState<string | null>(null);
+  const [compareChainB, setCompareChainB] = useState<string | null>(null);
+  const [longPressRowId, setLongPressRowId] = useState<string | null>(null);
+
   // Saved lists + map
   const [savedBaskets, setSavedBaskets] = useState<SavedBasket[]>([]);
   const [isLoadingSaved, setIsLoadingSaved] = useState(false);
@@ -1796,6 +1965,69 @@ export default function SmartGroceryDashboard() {
   useEffect(() => {
     try { localStorage.setItem(INCLUDE_DELIVERY_KEY, String(includeDelivery)); } catch {}
   }, [includeDelivery]);
+
+  // ── Basket view mode: load once, then persist ────────────────────────────────
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(BASKET_MODE_KEY);
+      if (raw === 'smart' || raw === 'chain' || raw === 'compare') setBasketMode(raw);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem(BASKET_MODE_KEY, basketMode); } catch {}
+  }, [basketMode]);
+
+  // Default chain picks for modes 2/3: cheapest (then 2nd-cheapest) chain from
+  // the last comparison result, re-derived whenever the current pick becomes
+  // invalid (chain deselected in the chain selector strip) or comparison
+  // results change. Never overrides a still-valid user choice.
+  useEffect(() => {
+    if (basketMode !== 'chain') return;
+    if (singleChainId && selectedChains.includes(singleChainId)) return;
+    const cheapest = comparison
+      .slice()
+      .sort((a, b) => a.total - b.total)
+      .map((c) => c.chain_id)
+      .find((id) => selectedChains.includes(id));
+    setSingleChainId(cheapest ?? selectedChains[0] ?? null);
+  }, [basketMode, comparison, selectedChains, singleChainId]);
+
+  useEffect(() => {
+    if (basketMode !== 'compare') return;
+    const rankedIds = comparison
+      .slice()
+      .sort((a, b) => a.total - b.total)
+      .map((c) => c.chain_id)
+      .filter((id) => selectedChains.includes(id));
+    const candidates = rankedIds.length > 0 ? rankedIds : selectedChains;
+    setCompareChainA((prev) => (prev && selectedChains.includes(prev) ? prev : candidates[0] ?? null));
+    setCompareChainB((prev) =>
+      prev && selectedChains.includes(prev) && prev !== candidates[0] ? prev : candidates.find((id) => id !== candidates[0]) ?? null
+    );
+  }, [basketMode, comparison, selectedChains]);
+
+  // Long-press-to-delete (Mode 3): tapping anywhere else dismisses the
+  // revealed × button. 'mousedown' (not 'click') so the same press-and-release
+  // gesture that revealed it doesn't immediately close it again.
+  useEffect(() => {
+    if (!longPressRowId) return;
+    const handler = () => setLongPressRowId(null);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [longPressRowId]);
+
+  const chainOnlyTotal = useCallback(
+    (chainId: string | null) => {
+      if (!chainId) return 0;
+      return basket.reduce((acc, item) => {
+        const p = item.prices[chainId]?.price;
+        return p !== undefined ? acc + p * item.quantity : acc;
+      }, 0);
+    },
+    [basket]
+  );
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -2882,6 +3114,22 @@ export default function SmartGroceryDashboard() {
                 </AnimatePresence>
             </div>
 
+            {/* Basket mode selector + chain picker(s) */}
+            {!isBasketLoading && basket.length > 0 && (
+              <div className="flex flex-col gap-3">
+                <BasketModeSelector mode={basketMode} onChange={setBasketMode} t={t} />
+                {basketMode === 'chain' && (
+                  <ChainPicker chains={chains} selectedChains={selectedChains} value={singleChainId} onChange={setSingleChainId} lang={lang} />
+                )}
+                {basketMode === 'compare' && (
+                  <div className="flex gap-2">
+                    <ChainPicker chains={chains} selectedChains={selectedChains} value={compareChainA} onChange={setCompareChainA} lang={lang} />
+                    <ChainPicker chains={chains} selectedChains={selectedChains} value={compareChainB} onChange={setCompareChainB} lang={lang} />
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Basket + Price Comparison side by side on wide screens */}
             <div className="flex-1 flex flex-col lg:flex-row gap-6">
 
@@ -2896,7 +3144,7 @@ export default function SmartGroceryDashboard() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {basket.map((item) => (
+                    {basketMode === 'smart' && basket.map((item) => (
                       <BasketRow
                         key={item.id}
                         item={item}
@@ -2912,11 +3160,80 @@ export default function SmartGroceryDashboard() {
                       />
                     ))}
 
+                    {basketMode === 'chain' && basket.map((item) => (
+                      <SingleChainBasketRow
+                        key={item.id}
+                        item={item}
+                        chainId={singleChainId}
+                        t={t}
+                        onUpdateQuantity={(delta) => updateQuantity(item.id, delta)}
+                        onRemove={() => removeProduct(item.id)}
+                      />
+                    ))}
+
+                    {basketMode === 'compare' && basket.map((item) => (
+                      <CompareChainBasketRow
+                        key={item.id}
+                        item={item}
+                        chainAId={compareChainA}
+                        chainBId={compareChainB}
+                        isDeleteRevealed={longPressRowId === item.id}
+                        onUpdateQuantity={(delta) => updateQuantity(item.id, delta)}
+                        onLongPress={() => setLongPressRowId(item.id)}
+                        onRemove={() => { removeProduct(item.id); setLongPressRowId(null); }}
+                      />
+                    ))}
+
                     {/* Total */}
-                    <div className="mt-6 pt-5 border-t border-[var(--color-border)] flex justify-between items-end">
-                      <span className="text-[var(--color-text-muted)]">{t.listTotal}</span>
-                      <span className="text-3xl font-bold font-mono text-[var(--color-text-primary)]">₪{basketTotal().toFixed(2)}</span>
-                    </div>
+                    {basketMode === 'smart' && (
+                      <div className="mt-6 pt-5 border-t border-[var(--color-border)] flex justify-between items-end">
+                        <span className="text-[var(--color-text-muted)]">{t.listTotal}</span>
+                        <span className="text-3xl font-bold font-mono text-[var(--color-text-primary)]">₪{basketTotal().toFixed(2)}</span>
+                      </div>
+                    )}
+
+                    {basketMode === 'chain' && (() => {
+                      const chainName = chains.find((c) => c.id === singleChainId)?.[lang === 'he' ? 'name_he' : 'name_en'] ?? '';
+                      return (
+                        <div className="mt-6 pt-5 border-t border-[var(--color-border)] flex justify-between items-end">
+                          <span className="text-[var(--color-text-muted)]">
+                            {lang === 'he' ? `סה״כ ב${chainName}:` : `Total at ${chainName}:`}
+                          </span>
+                          <span className="text-3xl font-bold font-mono text-[var(--color-text-primary)]">₪{chainOnlyTotal(singleChainId).toFixed(2)}</span>
+                        </div>
+                      );
+                    })()}
+
+                    {basketMode === 'compare' && (() => {
+                      const chainAName = chains.find((c) => c.id === compareChainA)?.[lang === 'he' ? 'name_he' : 'name_en'] ?? '';
+                      const chainBName = chains.find((c) => c.id === compareChainB)?.[lang === 'he' ? 'name_he' : 'name_en'] ?? '';
+                      const totalA = chainOnlyTotal(compareChainA);
+                      const totalB = chainOnlyTotal(compareChainB);
+                      const aCheaper = totalA < totalB;
+                      const bCheaper = totalB < totalA;
+                      const cheaperName = aCheaper ? chainAName : chainBName;
+                      return (
+                        <div className="mt-6 pt-5 border-t border-[var(--color-border)] flex flex-col gap-3">
+                          <div className="flex gap-3">
+                            <div className={`flex-1 text-center p-3 rounded-2xl ${aCheaper ? 'bg-[var(--color-success)]/10' : ''}`}>
+                              <p className="text-xs text-[var(--color-text-muted)] mb-1 truncate">{chainAName}</p>
+                              <p className={`text-xl font-bold font-mono ${aCheaper ? 'text-[var(--color-success)]' : 'text-[var(--color-text-primary)]'}`}>₪{totalA.toFixed(2)}</p>
+                            </div>
+                            <div className={`flex-1 text-center p-3 rounded-2xl ${bCheaper ? 'bg-[var(--color-success)]/10' : ''}`}>
+                              <p className="text-xs text-[var(--color-text-muted)] mb-1 truncate">{chainBName}</p>
+                              <p className={`text-xl font-bold font-mono ${bCheaper ? 'text-[var(--color-success)]' : 'text-[var(--color-text-primary)]'}`}>₪{totalB.toFixed(2)}</p>
+                            </div>
+                          </div>
+                          {(aCheaper || bCheaper) && (
+                            <p className="text-center text-sm font-medium text-[var(--color-success)]">
+                              {lang === 'he'
+                                ? `חיסכון: ₪${Math.abs(totalA - totalB).toFixed(2)} עם ${cheaperName}`
+                                : `Savings: ₪${Math.abs(totalA - totalB).toFixed(2)} with ${cheaperName}`}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Save List / Clear List */}
                     <div className="flex gap-3">
@@ -2937,8 +3254,8 @@ export default function SmartGroceryDashboard() {
                 )}
               </div>
 
-              {/* Price comparison panel */}
-              {basket.length > 0 && (
+              {/* Price comparison panel (Smart mode only — Chain/Compare modes show their own totals below the basket instead) */}
+              {basketMode === 'smart' && basket.length > 0 && (
                 <div className="lg:w-80 bg-[var(--color-bg-panel)]/40 backdrop-blur-sm border border-[var(--color-border)]/80 rounded-3xl p-6 flex flex-col gap-4">
                   <div className="flex items-center justify-between">
                     <h2 className="font-bold text-[var(--color-text-primary)] text-sm">{t.priceComparison}</h2>
