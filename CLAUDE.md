@@ -114,9 +114,11 @@ scripts/
     cerberus.ts                    # Shared client for the Cerberus FTP Server platform at
                                    # url.retail.publishedprices.co.il (real FTP, port 21, chain-
                                    # specific username + blank password) — used by yohananof.ts,
-                                   # osher-ad.ts, keshet-teamim.ts. Uses the `basic-ftp` package.
-    victory.ts / mahsanei-hashuk.ts / yohananof.ts / osher-ad.ts / keshet-teamim.ts
-                                   # Thin per-chain wrappers over the two clients above.
+                                   # osher-ad.ts, keshet-teamim.ts, and (Phase 17) rami-levy.ts.
+                                   # Uses the `basic-ftp` package.
+    victory.ts / mahsanei-hashuk.ts / yohananof.ts / osher-ad.ts / keshet-teamim.ts / rami-levy.ts
+                                   # Thin per-chain wrappers over the two clients above. rami-levy.ts
+                                   # added Phase 17 — see "Phase 17" below; username `RamiLevi`.
     types.ts                      # Shared ParsedProduct type + a GovFeedItem -> ParsedProduct mapper.
   seed-branches.ts                # Phase 8 — pulls real store metadata (StoreID/StoreName/Address/
                                    # City) from the Shufersal "Stores" feed category (catID=5, a
@@ -140,6 +142,16 @@ scripts/
                                    # city-center (not address-level) lat/lng onto every branch still
                                    # missing them. Re-runnable — resumes from
                                    # scripts/.geocode-cache.json. Run with `npm run geocode:branches`.
+  geocode-branches.ts             # Phase 17 — address-level companion to geocode-branch-cities.ts
+                                   # above: geocodes the smaller set of branches that have a real
+                                   # street `address` (mostly Shufersal) but still no lat/lng, via
+                                   # Nominatim on "{address}, {city_he}, Israel" (1 req/sec). Only 10
+                                   # branches qualified as of Phase 17 — most address-having branches
+                                   # already got coordinates from earlier phases. Run with
+                                   # `npm run geocode:branches:address` (kept distinct from
+                                   # `geocode:branches` above, which already pointed at
+                                   # geocode-branch-cities.ts — renaming that existing script would
+                                   # have been a breaking, unrequested change).
   enrich-product-names.ts         # Phase 5 — batches products missing name_en 50 at a time and
                                    # asks claude-haiku-4-5 to translate name_he to English. Run
                                    # with `npm run enrich:names`. Needs ANTHROPIC_API_KEY in
@@ -373,7 +385,8 @@ two of them and loads it into `price_history`:
 
 ```
 Shufersal:  https://prices.shufersal.co.il/FileObject/UpdateCategory?catID=2&storeId=0
-Rami Levy:  https://www.rami-levy.co.il/api/delivery/prices
+Rami Levy:  ftp://url.retail.publishedprices.co.il (Cerberus platform, username RamiLevi,
+            blank password — see "Phase 17" below; fixed, no longer the JSON URL below)
 ```
 
 **Shufersal** — that URL is not itself an XML feed; it's an HTML page listing
@@ -388,36 +401,20 @@ assumption (see `scripts/seed-products-from-feed.ts` below). The fetch/gunzip/
 parse logic lives in `scripts/shufersal-feed.ts`, shared with the seeding
 script. Verified working end to end against the live feed.
 
-**Rami Levy** — the original `url.rami-levy.co.il` host had a DNS failure.
-`www.rami-levy.co.il/api/delivery/prices` (used above) resolves, but as of
-this writing (2026-07-19) returns **HTTP 404** rather than JSON — verified via
-a direct `curl`. The script parses a `{data: [{id, name, price}]}` shape
-(`id` = barcode) per the current integration spec, plus a couple of other
-plausible shapes, but this is still unverified against a real payload since no
-endpoint has actually returned data yet. Treat it as a starting point, not a
-tested integration, until a working URL is found.
-
-**Rami Levy — Phase 6 dead end (2026-07-21).** Tried three more variants
-against the live site, all still HTTP 404:
-- `/api/delivery/prices` with a `User-Agent: Mozilla/5.0 (compatible;
-  SmartGroceryIL/1.0)` header added
-- `/api/marketplace/v2/prices`
-- `/api/delivery/prices?storeId=331`
-
-All three returned the *identical* Nuxt.js SPA "404" HTML page (title `רמי
-לוי אונליין- 404`), not a JSON error and not even distinguishable 404 bodies
-from each other — i.e. these are wrong routes at the framework level, not a
-User-Agent block or a missing query param. This means guessing plausible REST
-paths isn't converging; finding the real endpoint needs either inspecting the
-site's actual network requests in a browser (devtools, while browsing
-rami-levy.co.il's own product pages) or Rami Levy publishing the Food-Act
-transparency feed at a documented URL (the other three chains' feeds — e.g.
-Shufersal's — are typically linked from a "מחירי שקיפות"/price-transparency
-page rather than an app-internal API). `ingestRamiLevy()` in
-`scripts/ingest-prices.ts` is left as-is: it still attempts
-`www.rami-levy.co.il/api/delivery/prices`, fails gracefully, logs the error to
-`ingest_log`, and does not block Shufersal ingestion. Skipped for Phase 6 —
-revisit with real network-traffic inspection before trying more URL guesses.
+**Rami Levy — FIXED in Phase 17 (2026-08-04), see that section below for the
+full writeup.** Everything in this paragraph and the two below it is now
+historical (kept for the record of what didn't work): the original
+`url.rami-levy.co.il` host had a DNS failure; `www.rami-levy.co.il/api/
+delivery/prices` resolves but 404s; three more URL variants tried in Phase 6
+(`/api/marketplace/v2/prices`, `/api/delivery/prices?storeId=331`, an added
+User-Agent header) all hit the identical Nuxt.js SPA 404 page. The real access
+method turned out to be a completely different platform than any of these
+guesses — the government Cerberus FTP server, same one already used for
+Yohananof/Osher Ad/Keshet Teamim — found via web research rather than more
+URL guessing. `ingestRamiLevy()`/`extractRamiLevyItems()` (the old JSON-based
+functions described below) were deleted from `scripts/ingest-prices.ts` and
+replaced with `scripts/parsers/rami-levy.ts`, which reuses the same
+`fetchCerberusItems()` client as the other three FTP chains.
 
 ## Phase 5 — real products seeded, real prices flowing
 `scripts/seed-products-from-feed.ts` (`npm run seed:products`) fixed the
@@ -1458,6 +1455,118 @@ reasoning as Phases 11-15 above.)
       always), and `npm run build` all clean. See "Applying migrations" below for `009`'s
       status.
 
+## Phase 17 — Rami Levy feed, address-level geocoding, basket view modes
+(2026-08-04; the user's own session prompt called this "Phase 15", already used above for the
+2026-07-28 branch-seeding/saved-lists/chat/Analytics-view session — numbered 17 here to stay
+sequential, same renumbering reasoning as every prior phase-number collision in this doc.)
+
+- [x] **Step 1 — Rami Levy feed: FIXED, real prices now flowing.** Research-first, per this
+      session's own instructions: none of the previously-tried or newly-suggested URL guesses
+      worked (`url.rami-levy.co.il/api/delivery/prices` — DNS dead; `prices.rami-levy.co.il` —
+      DNS dead; `www.rami-levy.co.il/api/big/2` and `/api/delivery/prices?storeId=...` — all
+      resolve but return the site's own Nuxt.js 404 SPA page, HTTP 404; the S3/GCS bucket
+      guesses — no such bucket; `matrixcatalog.co.il` — DNS dead, matching the Phase 11 finding
+      that it's gone entirely, not Victory-specific). The `OpenIsraeliSupermarkets/
+      israeli-supermarket-scarpers` GitHub repo confirms Rami Levy is a supported chain
+      (`RAMI_LEVY = all_scrappers.RamiLevy` in `scrappers_factory.py`) but its source doesn't
+      expose the URL directly from what's fetchable. The actual answer came from a web search
+      that surfaced Rami Levy's own price-transparency page,
+      [rami-levy.co.il/he/price-transparency](https://www.rami-levy.co.il/he/price-transparency),
+      which links to `https://url.retail.publishedprices.co.il/login` with username `RamiLevi`
+      and no password — **the same Cerberus FTP Server platform already integrated for
+      Yohananof/Osher Ad/Keshet Teamim** (see `scripts/parsers/cerberus.ts`, Phase 11), not a
+      new integration at all. Confirmed live via a direct FTP login + file download + gunzip:
+      real `Price7290058140886-*.gz` files, same `Root>Items>Item>ItemCode/ItemName/ItemPrice/
+      UnitOfMeasure` schema as every other Cerberus/gov-XML chain.
+      `scripts/parsers/rami-levy.ts` is a 5-line wrapper — `fetchCerberusItems('RamiLevi',
+      STORE_LIMIT)` — identical in shape to `yohananof.ts`. Wired into
+      `scripts/ingest-prices.ts`: the old JSON-based `ingestRamiLevy()`/`extractRamiLevyItems()`
+      functions (which never worked — see "Price ingestion pipeline" above for what they used to
+      attempt) were deleted outright rather than left as dead code, and `rami_levy` now runs
+      through the same `ingestFromParser()` helper as the other five gov-XML chains.
+      **`npm run ingest` end-to-end result this session:** `rami_levy fetched=17835
+      matched=9787 inserted=9787` — real product names/prices (e.g. a real 250g cottage cheese
+      at ₪29.90 was seen in the raw feed dump during verification). `latest_prices` now has
+      **3,446 distinct Rami Levy products** (up from the 18 placeholder rows that predated any
+      real feed). **All 6 working chains now have a real ingest path** — Rami Levy was the last
+      one still blocked; only Mega and Co-op remain permanently dead (see Phase 14's probe
+      table above, unchanged). Rami Levy branches were NOT re-seeded this session (out of this
+      session's scope) — the 4 original Gush-Dan-area seed branches are still what's in
+      `branches` for `chain_id=rami_levy`; extending `scripts/seed-branches.ts` to pull real
+      Rami Levy branches from the same Cerberus platform (no store-metadata feed there either,
+      same synthesized-name pattern as Yohananof/Osher Ad/Keshet Teamim) is a natural follow-up
+      but wasn't asked for here.
+- [x] **Step 2 — address-level geocoding pass.** New `scripts/geocode-branches.ts` (distinct
+      from Phase 16's `geocode-branch-cities.ts`, which does city-CENTER geocoding from a
+      settlement code for branches with no address at all) — this one only touches branches
+      where `address IS NOT NULL AND lat IS NULL`, geocoding the real street address via
+      Nominatim rather than approximating from a city. Checked live before writing any code:
+      only **10 branches** qualified (`lat=is.null&address=not.is.null` → `content-range:
+      0-0/10`) — nearly every address-having branch (overwhelmingly Shufersal) already got
+      coordinates from Phase 8's original seed or Phase 16's city-center backfill; this pass
+      only catches the remainder. Result: **6 of 10 geocoded, 4 had no Nominatim match**
+      (likely addresses too sparse/non-standard for Nominatim's free-text matching — not
+      investigated further, out of scope for a 4-row edge case). **Branch coordinate coverage:
+      838 → 844 of 1,045 total** (80.8%). Added as `npm run geocode:branches:address` rather
+      than overwriting the existing `geocode:branches` script name (which already points at
+      `geocode-branch-cities.ts`) — reusing that name would have silently broken the Phase 16
+      script's own npm entry point, an unrequested breaking change.
+- [x] **Step 3 — basket view modes (Smart / Chain / Compare).** New segmented control
+      (`BasketModeSelector`, `app/page.tsx`) directly above the basket list, persisted to
+      `localStorage` under `sg_basket_mode`. All three modes read from the `prices` map every
+      `BasketItem` already carries (populated when the item was added) — no new API call for
+      modes 2/3, per the task's own instruction.
+      - **Smart** (default): completely unchanged from before this phase — existing `BasketRow`
+        + comparison panel.
+      - **Chain**: new `SingleChainBasketRow` + a `ChainPicker` (`<select>`, options limited to
+        `selectedChains` — the chain-selector-strip picks, not every chain in the DB) shown
+        below the mode selector. Each row prices the item at only the picked chain; unavailable
+        shows "לא זמין"/"N/A" + a muted `AlertCircle` icon instead of falling back to another
+        chain's price (a real bug risk here: reusing the existing `basketTotal(chainId)` helper
+        would have silently substituted `min_price` for unavailable items, which is exactly the
+        wrong behavior the task asked to avoid — so this mode uses a new `chainOnlyTotal()`
+        helper that only sums chains where the item actually has a price). The comparison panel
+        is hidden; a single line below the list reads "סה״כ ב[chain]: ₪XXX"/"Total at [chain]:
+        ₪XXX" instead.
+      - **Compare**: new `CompareChainBasketRow`, two `ChainPicker`s side by side. Each row is a
+        compact `[name] [chain A price] [chain B price] [qty]` layout — cheaper price green,
+        pricier red, equal/either-unavailable neutral, "—" for unavailable, matching the task
+        spec exactly. **No visible delete button** (per spec) — a 600ms long-press (via
+        `onPointerDown`/`onPointerUp`/`onPointerLeave` + a `setTimeout`, works for both mouse and
+        touch) reveals a small floating × in the row's corner; tapping anywhere else (a
+        `mousedown` document listener, same pattern as `ChainSelectorStrip`'s outside-click
+        close) dismisses it again. Below the list: two totals side by side (cheaper one
+        green-highlighted) + a "חיסכון: ₪XX עם [chain]"/"Savings: ₪XX with [chain]" line, hidden
+        when the two totals are equal.
+      - **Chain/compare picker defaults**: cheapest (then 2nd-cheapest) chain from the current
+        `/api/prices/compare` result, restricted to `selectedChains` — re-derived automatically
+        whenever the existing pick becomes invalid (its chain got deselected in the chain
+        selector strip) or the comparison result changes, but never overrides a still-valid
+        user choice. Only the *mode* itself persists to `localStorage`, not the specific chain
+        picks — matches the task's literal ask ("Save selected mode to localStorage key:
+        sg_basket_mode") and re-derives sensible defaults fresh each session instead.
+      - **RTL note**: the two Compare-mode pickers/columns are rendered in DOM order
+        `[chain A, chain B]` using plain flex (no explicit `flex-row-reverse`), which — like
+        every other multi-item row in this codebase (see the chain-selector-strip dots, e.g.) —
+        places the first DOM item on the visual *right* in Hebrew's RTL layout and the visual
+        *left* in English's LTR layout. This is a deliberate, existing-convention choice
+        (logical "first slot" rather than literal "left") rather than a literal implementation
+        of the task's "left picker / right picker" wording, which was written without
+        RTL/bilingual layout in mind.
+      - Verified in a real browser (dev server), both Hebrew/RTL and English/LTR: all three
+        modes render and switch correctly; Chain mode's N/A state and total line verified
+        against real mixed-availability basket data; Compare mode's per-item green/red
+        highlighting, "—" for unavailable, and the two-totals-plus-savings line all verified
+        against real numbers (a live example: ₪5.87 Mahsanei Hashuk vs ₪5.90 Rami Levy → "חיסכון:
+        ₪0.03 עם מחסני השוק"); mode persists correctly across a full page reload, and picker
+        defaults correctly re-derive from a fresh comparison result after reload rather than
+        reusing a stale pre-reload pick. Long-press-to-delete was verified by code review (the
+        `computer` tool used for this session's browser verification can't hold a press for
+        600ms) rather than an interactive click.
+- [x] **Step 4 — this doc.** Rami Levy status, the new geocoding script, and the basket view
+      modes all documented above; branch coordinate coverage updated (838 → 844 of 1,045).
+- [x] **Step 5 — build and deploy.** `npx tsc --noEmit` and `npm run build` both clean.
+
 ## Coding conventions
 - All components: functional, TypeScript strict
 - API routes: always use `lib/supabaseServer.ts` (service role), never the anon client
@@ -1478,6 +1587,7 @@ npm run seed:branches  # Seed real branches from the Shufersal Stores feed (Phas
 npm run enrich:names   # Translate name_he -> name_en via claude-haiku-4-5 (needs ANTHROPIC_API_KEY)
 npm run probe:chains   # Probe candidate chain feed URLs, report status per chain (Phase 11)
 npm run geocode:branches # Backfill city-center lat/lng for branches missing coordinates (Phase 16)
+npm run geocode:branches:address # Backfill address-level lat/lng for branches with an address (Phase 17)
 ```
 
 ## How to reset the database
