@@ -67,9 +67,25 @@ app/
                                    # Phase 11: the `.or(...)` filter also matches `barcode.eq.<q>`
                                    # (exact match), so the Scan view's manual barcode entry works
                                    # against this same endpoint instead of needing a new one.
-    prices/compare/route.ts       # POST {items:[{product_id,quantity}], chain_ids?:[...]} — returns
-                                   # cost per chain, optionally narrowed to chain_ids (Phase 11 chain
-                                   # selector strip; client omits it until the user deselects a chain)
+                                   # Phase 18: no-GPS fallback for the main search flow — see
+                                   # products/nearby/route.ts below, which replaces it whenever the
+                                   # client has a location fix.
+    products/nearby/route.ts      # Phase 18 — GET ?lat=&lng=&radius_km=(15)&chain_ids=&q=&limit=(20).
+                                   # Location-scoped product search: nearby branches (Haversine in
+                                   # JS, see lib/geo.ts) -> latest_prices_by_branch, falling back to
+                                   # latest_prices (chain-level) per product+chain when no nearby
+                                   # branch carries it. Response field names match the pre-existing
+                                   # ProductResult shape (`id`, `best_chain`, `max_price`), not the
+                                   # task spec's own `product_id`/`best_chain_id` naming — see
+                                   # "Phase 18" below for why.
+    prices/compare/route.ts       # POST {items:[{product_id,quantity}], chain_ids?:[...], lat?,
+                                   # lng?, radius_km?} — returns cost per chain, optionally narrowed
+                                   # to chain_ids (Phase 11 chain selector strip; client omits it
+                                   # until the user deselects a chain). Phase 18: with lat/lng, each
+                                   # chain is priced at its single nearest branch (hybrid fallback
+                                   # to chain-level per missing item) instead of a chain-wide figure;
+                                   # response gains branch_id/branch_name/distance_km/location_based
+                                   # per chain entry.
     baskets/[id]/items/route.ts   # Phase 16 — GET ?user_id=<uid>, service-role, verifies the basket
                                    # belongs to user_id (service-role bypasses RLS). Joins
                                    # basket_items -> products -> latest_prices server-side (two
@@ -188,6 +204,10 @@ components/
                                    # — see "Theme system" below
 lib/
   supabaseServer.ts               # Service-role Supabase client (API routes only)
+  geo.ts                          # Phase 18 — shared haversineKm()/fetchNearbyBranches() (JS, not
+                                   # raw SQL — see "Phase 18" below) + isMissingRelation()/
+                                   # isMissingColumn() migration-011-not-applied-yet probes. Used by
+                                   # both app/api/products/nearby and app/api/prices/compare.
 utils/
   supabase.ts                     # Anon Supabase client (browser only) — always import this one;
                                    # do not call createClient() inline elsewhere (caused a
@@ -238,6 +258,14 @@ supabase/
                                    # basket_items. NOT YET APPLIED — the Custom Markets analytics
                                    # section degrades to an empty state until this is pasted into
                                    # the Supabase Dashboard SQL Editor.
+    (010_basket_items_fk.sql, 010_promotions.sql — CONFIRMED APPLIED live but no .sql file for
+                                   # either exists in this directory; discovered, not written, this
+                                   # session — see "Phase 18" and "Applying migrations" below)
+    011_branch_pricing_views.sql   # Phase 18 — drops/recreates latest_prices (chain-level, gains a
+                                   # branch_id column) + adds latest_prices_by_branch (new, primary
+                                   # source for location-scoped pricing). NOT YET APPLIED — every
+                                   # route reading latest_prices_by_branch degrades to the
+                                   # chain-level fallback instead of erroring until this lands.
 ```
 
 ## Environment variables
@@ -260,11 +288,17 @@ needed for local dev unless you're manually testing that route.
 ```sql
 chains         — id (text PK), name_he, name_en, color_hex
 products       — id (uuid), barcode (unique), name_he, name_en, category
-branches       — id, chain_id, name_he, name_en, city_he, city_en, lat, lng, is_active,
+branches       — id, chain_id, name_he, name_en, city_he, city_en, address, lat, lng, is_active,
                  is_online (migration 006, CONFIRMED APPLIED), external_id (migration 007,
-                 NOT YET APPLIED — see "Applying migrations" below)
-price_history  — id, product_id, chain_id, branch_id, price, captured_at, source
-latest_prices  — MATERIALIZED VIEW: latest price per (product_id, chain_id)
+                 CONFIRMED APPLIED — see "Applying migrations" below)
+price_history  — id, product_id, chain_id, branch_id, price, unit_qty, unit_type, is_sale,
+                 captured_at, source. branch_id is now populated on every new row as of Phase 18
+                 (2026-08-11) — see that section below; every row from before that session still
+                 has branch_id = null and always will (nothing backfills history)
+latest_prices  — MATERIALIZED VIEW: latest price per (product_id, chain_id), chain-level fallback
+latest_prices_by_branch — MATERIALIZED VIEW (migration 011, Phase 18, NOT YET APPLIED): latest
+                 price per (product_id, branch_id) WHERE branch_id IS NOT NULL — primary source
+                 for location-scoped pricing once applied
 profiles       — id (= auth.users.id), nickname, phone_number, avatar_url, selected_skin
                  (selected_skin is a leftover DB column from the old 4-skin system — see
                  "Theme system" below. Harmless if left in place; the app no longer reads
@@ -1567,6 +1601,265 @@ sequential, same renumbering reasoning as every prior phase-number collision in 
       modes all documented above; branch coordinate coverage updated (838 → 844 of 1,045).
 - [x] **Step 5 — build and deploy.** `npx tsc --noEmit` and `npm run build` both clean.
 
+## Phase 18 — branch-level pricing, location-scoped search, hybrid fallback
+(2026-08-11, "data architecture" session — no new UI features, everything below is about data
+accuracy.) Restructures the core pricing model from chain-level ("Shufersal's price for milk")
+to branch-level ("the Shufersal on Herzl Street's price for milk"), with the location-scoped
+`/api/products/nearby` and `/api/prices/compare` endpoints built on top of it. Three
+architectural decisions drove this session, given up front rather than discovered along the way:
+1. **Branch-level pricing** — `price_history.branch_id` (existed as a column, always null before
+   this session) is now populated on every new row.
+2. **Location-scoped catalog** — nearby search/compare are scoped to branches within the user's
+   radius (15km default, 5-50km range), not a national catalog.
+3. **Hybrid fallback** — if no branch-level price exists for a product+chain near the user, fall
+   back to the chain-level price with a clear source/freshness indicator, rather than hiding the
+   chain entirely.
+
+- [x] **Step 1 — ingestion populates branch_id.** Every chain parser (`scripts/parsers/gov-xml.ts`,
+      `cerberus.ts`, `laibcatalog.ts`, `scripts/shufersal-feed.ts`) now returns items grouped
+      **per branch file** instead of one flattened array — every file on every one of these
+      platforms is already exactly one physical store's price list (`<Root><ChainID>/<SubChainID>/
+      <StoreID>` at the XML root, confirmed live for both Shufersal and the Cerberus platform this
+      session), so no new fetch was needed, just carrying the store identifier through instead of
+      discarding it. `scripts/ingest-prices.ts`'s new `resolveOrCreateBranchId()` looks up
+      `(chain_id, external_id)` in `branches` (as seeded by `scripts/seed-branches.ts`) for each
+      group and stamps every `price_history` row in that group with the resolved branch UUID; if a
+      store shows up in a price feed that seeding hasn't caught yet, it creates a minimal
+      placeholder branch (name only, no address/lat/lng) rather than leaving `branch_id` null or
+      dropping the price.
+      **External ID normalization is platform-specific, not one convention** — verified live
+      against real downloaded files before writing any matching code:
+      - **Shufersal**: the PriceFull feed's `<StoreID>` is zero-padded (`"001"`), but the separate
+        Stores feed (catID=5, what `seed-branches.ts` actually seeds `external_id` from) publishes
+        it unpadded (`"1"`) — same store, two different string reprs of the same platform. Fixed
+        by normalizing via `String(parseInt(storeId, 10))` only on the Shufersal ingest path.
+      - **Cerberus** (Yohananof/Osher Ad/Keshet Teamim/Rami Levy): the price file's `<StoreID>`
+        matches its own filename's trailing segment exactly (confirmed byte-for-byte against a
+        live Yohananof file) — and `seed-branches.ts`'s Cerberus branches were already keyed off
+        that same filename segment (no separate metadata feed exists on this platform at all, see
+        Phase 15), so **no normalization** — using the raw padded value as-is is what makes ingest
+        and seeding agree.
+      - **Laibcatalog** (Victory/Mahsanei Hashuk): `getfiles`' `branchNumber` field is a plain JSON
+        number (e.g. `60`), matching `getbranches`' `number` field exactly — no padding either way.
+      **Rami Levy had zero branch coverage before this session** (its feed was only wired up in
+      Phase 17, after `seed-branches.ts` was last touched) — added to `seed-branches.ts`'s chain
+      list (same Cerberus pattern as Yohananof/Osher Ad/Keshet Teamim, username `RamiLevi`) so it
+      gets real branches instead of relying purely on ingest-time placeholders.
+      **Verified live via a bounded 3-branches-per-chain smoke test before the full run:** every
+      one of 20,033 Shufersal price rows got a real `branch_id`, correctly matched to the
+      *existing* named branches ("שלי ת"א- בן יהודה" etc.) from the Stores feed — not duplicates —
+      proving the normalization above is correct, not just plausible.
+      **Ingestion limits removed** per this session's task: every `*_STORE_LIMIT`/
+      `*_BRANCH_LIMIT` env var now defaults to `Infinity` (still overridable for a bounded test
+      run) instead of 3-20. At full scale (~750 branch files across all 7 chains) a naive
+      sequential download loop would take many hours, so `scripts/supabase-rest.ts` gained
+      `mapWithConcurrency()` — an 8-way bounded-concurrency downloader used for Shufersal's
+      PriceFull files and laibcatalog's per-branch files (both plain HTTPS, safe to parallelize).
+      The Cerberus FTP chains were deliberately left sequential (one shared `ftp.Client`
+      connection per chain already, and concurrent connections risk the platform throttling or
+      blocking the IP — not worth the risk for chains with only 2-100 branches each).
+      **Reliability bug found and fixed during this session's own full run, not anticipated going
+      in:** `writeIngestLog()` used to run *unprotected* after each chain's own try/catch — a
+      transient network blip while POSTing the log row (not even related to that chain's actual
+      ingest work) threw all the way out of `runIngestion()` and killed the entire multi-hour,
+      multi-chain CLI process, discarding every chain that hadn't run yet. Observed live: Shufersal
+      fetched+matched+inserted 2.3M items successfully, then the whole run died on a one-off DNS
+      resolution hiccup (`ENOTFOUND`) writing that chain's own success row to `ingest_log`, before
+      ever reaching Rami Levy/Victory/etc. Fixed two ways: `writeIngestLog()` now catches its own
+      fetch errors and just warns instead of throwing, and `runIngestion()` wraps each chain's
+      runner in its own try/catch as defense in depth against any other unanticipated throw. See
+      "Step 9" below for the numbers from the full run after this fix.
+- [x] **Step 2 — branch-level materialized views.**
+      [011_branch_pricing_views.sql](supabase/migrations/011_branch_pricing_views.sql) — drops and
+      recreates `latest_prices` (chain-level, unchanged shape plus a new `branch_id` column) and
+      adds `latest_prices_by_branch` (new — one row per `(product_id, branch_id)`, `WHERE
+      branch_id IS NOT NULL`, so it's empty for every price_history row that predates this
+      session). `refresh_latest_prices()` is redefined to refresh both. **Not yet applied** — same
+      manual-paste-into-Supabase-Dashboard limitation as every migration in this repo (see
+      "Applying migrations" below); every route that reads `latest_prices_by_branch` (see Step 3/4)
+      detects the missing relation and degrades to the chain-level-only fallback instead of
+      500ing, so the app works correctly before AND after this migration lands, just with better
+      data once it does.
+- [x] **Step 3 — `/api/products/nearby`.** New endpoint,
+      [app/api/products/nearby/route.ts](app/api/products/nearby/route.ts):
+      `GET ?lat=&lng=&radius_km=(default 15, max 50)&chain_ids=a,b&q=&limit=(default 20, max 50)`.
+      **No raw SQL Haversine query** — this repo has no direct Postgres/SQL execution path at all
+      (see "Applying migrations" below: PostgREST only, no `supabase` CLI, confirmed by this
+      session's own attempts), so a route literally cannot run the arbitrary trigonometric
+      `HAVING` query the task's own pseudocode assumed. Distance is computed in JS instead
+      ([lib/geo.ts](lib/geo.ts)'s `haversineKm()`/`fetchNearbyBranches()`, shared with the compare
+      route below), mirroring `app/page.tsx`'s own pre-existing client-side `haversineKm()` used
+      for the Location view's distance filter — same formula, not a second divergent one.
+      Response shape per product: `{ id, barcode, name_he, name_en, category, prices: {
+      [chain_id]: { chain_id, price, unit_qty, unit_type, is_sale, captured_at, branch_id,
+      branch_name, distance_km, chain_color, source: 'branch'|'chain_fallback' } }, min_price,
+      max_price, best_chain, best_branch_id, match_type }` — field names (`id`, `best_chain`,
+      `max_price`) deliberately match the existing `/api/products/search` response shape rather
+      than the task's own `product_id`/`best_chain_id` pseudocode naming, since `app/page.tsx`'s
+      `ProductResult` type and every consumer of it (search autocomplete, `handleAddProduct`,
+      the scan-result card) already expect those exact keys — renaming the client instead would
+      have been strictly more code for no benefit. **Hybrid fallback in practice**: for each
+      candidate product × each chain with a nearby branch, the nearest branch's
+      `latest_prices_by_branch` row wins if one exists; otherwise the chain's `latest_prices` row
+      is used with `source: 'chain_fallback'`. `branch_pricing_available: false` in the response
+      means migration 011 isn't applied yet (probed once per request, not assumed) — every price
+      in that response is a chain-level fallback until it lands. Verified live end-to-end pre- and
+      post- the migration-011-degradation path (see Step 9 for the full-data verification).
+      `/api/products/search` is unchanged and stays as the no-GPS fallback, per spec.
+- [x] **Step 4 — location-scoped `/api/prices/compare`.**
+      [app/api/prices/compare/route.ts](app/api/prices/compare/route.ts) gained optional `lat`/
+      `lng`/`radius_km` in its POST body. When given, each chain is priced at its **single nearest
+      branch** within radius (not a different nearest branch per item, and not a chain-wide
+      average) — matching the task's own framing of "the Rami Levy near me", and giving one
+      coherent `branch_id`/`branch_name`/`distance_km` per chain entry to display. An item that
+      specific nearest branch doesn't carry falls back to that chain's `latest_prices` value
+      instead of silently vanishing from the total (hybrid fallback again, this time per-item
+      within a chain — flagged via a new `source: 'branch'|'chain_fallback'` field on each
+      breakdown entry). Response gained `location_based` (top-level: whether the request itself
+      was location-aware; per-chain-entry: whether that chain's total actually used at least one
+      branch-level price) and `branch_pricing_available` (same migration-011-probe pattern as
+      Step 3). No location in the request → byte-identical behavior to before this phase.
+- [x] **Step 5 — `app/page.tsx` wired to the location-scoped endpoints.** `doSearch()` calls
+      `/api/products/nearby` when `userPosition` is set (existing GPS state from the Location
+      view, Phase 3), else falls back to `/api/products/search` — unchanged. The price-comparison
+      effect (fires on basket/selectedChains change) now also passes `lat`/`lng`/
+      `radius_km=DEFAULT_COMPARE_RADIUS_KM` (15, a separate constant from the Location view's own
+      `distanceKm` slider — deliberately decoupled, since one bounds "which map pins show" and the
+      other bounds "which branch prices this comparison" and conflating them would make the
+      comparison radius silently change whenever someone drags the unrelated map slider).
+      `handleAddProduct` needed no changes — it already copies `product.prices` verbatim into the
+      new `BasketItem`, so branch-specific prices (and their `source`/`branch_name`/`distance_km`/
+      `captured_at`) flow into the basket from the moment an item is added, satisfying "comparison
+      panel shows branch-specific prices from day one" for free. `ChainBar` (the comparison panel's
+      per-chain bar) gained an optional caption line under the bar — `"{branch_name} ({distance_km}
+      ק״מ)"` — shown only when that chain's total actually came from a nearby branch.
+- [x] **Step 6 — freshness indicators.** `formatFreshness(capturedAt, lang)` in `app/page.tsx`:
+      <6h → 🟢 "עודכן היום"/"Updated today", <24h → 🟡 "עודכן אתמול"/"Updated yesterday", <72h → 🟠
+      "לפני X ימים"/"X days ago", ≥72h → 🔴 "מחיר ישן"/"Price may be outdated". Rendered only inside
+      `ChainPriceBreakdown` (the expanded per-chain fold-down under a basket row or search result),
+      never in a collapsed row, per spec — keeps the compact list clean.
+- [x] **Step 7 — confidence/match_type indicators.** Two related but distinct signals, deliberately
+      not conflated:
+      - **Per-chain-price `source`** (`'branch' | 'chain_fallback'`, set in Step 3/4's API
+        responses) — rendered inline in `ChainPriceBreakdown`: a chain-level price shows
+        "⚠ מחיר ממוצע"/"⚠ Average price" in muted text under it, a branch-level price shows its
+        branch name + distance instead.
+      - **Per-product `match_type`** (`'exact_barcode' | 'exact_name' | 'chain_fallback' |
+        'not_local'`, computed once per product in `/api/products/nearby` from whether it has any
+        branch-level hit / any chain-level hit / neither) — rendered in the search-results
+        dropdown next to the product's headline price: `exact_barcode` shows nothing extra (the
+        default, clean case); `chain_fallback` shows the same muted "Average price" caption used
+        above instead of the usual best-chain name; `not_local` hides the price entirely and shows
+        "לא נמצא בסניפים קרובים"/"Not found at nearby branches" instead. **`exact_name` is defined
+        in the type but never actually produced** — every chain's ingestion matches purely by real
+        feed barcode (`scripts/ingest-prices.ts` has no name-matching path at all, never did), so
+        there is no code path that could set it; kept in the type rather than deleted in case a
+        future name-matching fallback is ever added, but not faked to make the 4-state spec look
+        fully exercised when it isn't.
+- [x] **Step 8 — branch geocoding improvements.** Checked the task's own premise first rather than
+      assuming it: **downloaded and inspected a live Shufersal Stores file, a live Shufersal
+      PriceFull file, and a live laibcatalog `getbranches` response this session — none of the 7
+      chains' feeds publish `GPSLat`/`GPSLon`/`Latitude`/`Longitude` anywhere**, consistent with
+      every prior phase's findings (Phase 8/15/16 all independently confirmed the same for
+      Shufersal specifically). `scripts/seed-branches.ts` still gained a defensive
+      `extractGpsFields()` (checks `GPSLat`/`GpsLat`/`Latitude`/`latitude`/`lat` and the
+      longitude equivalents) wired into all three branch-fetch paths — currently a no-op
+      everywhere, costs nothing, future-proofs against a feed adding coordinates later without
+      anyone noticing.
+      For the "more precise Nominatim query" half of this step: the task's suggested
+      `"{chain_name_en} {city_he}"` format doesn't apply to real data as-is — `city_he` is either a
+      numeric government settlement code (Shufersal, already handled by the existing
+      `geocode-branch-cities.ts`) or simply absent (every other chain — laibcatalog and Cerberus
+      publish no city field at all, confirmed live, see Phase 15). Instead, found and used a real
+      gap: **Victory and Mahsanei Hashuk branch `name_he` values are frequently themselves a real
+      place name** (a leading branch number + city/area, e.g. `"18 נוף הגליל"`, `"44 ערד"`, `"1
+      ב"ש-בית אשל"`) — something no prior phase had a path to geocode from at all (no address, no
+      city code, just a name). `geocode-branch-cities.ts` gained `geocodeFromBranchNames()`:
+      strips the leading branch number and geocodes what's left via the same Nominatim
+      client/rate-limit (1 req/sec)/pattern as the existing settlement-code pass, for any
+      `victory`/`mahsanei_hashuk` branch still missing coordinates after that pass. Best-effort,
+      not guaranteed — abbreviated names (`"ב"ש"` for Beer Sheva) or names that are really a
+      sub-area/mall rather than a city (`"סיטי אלנבי"`, `"עמק חפר"`) often don't resolve, and
+      that's fine; every attempt is logged either way, not silently swallowed.
+      **Coordinate coverage: 844/1,045 (Phase 17) → 949/1,175** (branch count also grew because
+      this session's full `seed:branches` run and full ingest run both discovered/created branches
+      the 844/1,045 baseline never had). **251 branches within 15km of Rishon LeZion (31.97,
+      34.79)** — up from 231 before this session's geocoding pass — shufersal 226, victory 18,
+      mahsanei_hashuk 3, rami_levy 2, yohananof 2 (osher_ad/keshet_teamim have none in this
+      specific radius, not a bug — both chains only have a handful of branches nationwide).
+- [x] **Step 9 — full ingest run.** `npm run seed:branches` (full) then `npm run ingest`
+      (uncapped — every `*_LIMIT` env var defaults to `Infinity`, see Step 1). **950,468 →
+      3,379,077 price_history rows** in one run (+2.4M). Two real problems hit during this run,
+      both already covered above: the `writeIngestLog()` crash-on-network-blip bug (Step 1, found
+      and fixed mid-run) and `refresh_latest_prices()` timing out (`57014 statement timeout`) even
+      after being reduced to one call at the end of the whole run — **still fails at this data
+      volume**, confirmed on the actual full run, not just the earlier smoke test. This is a
+      Postgres-side `statement_timeout` setting this environment has no way to raise (no SQL
+      execution access at all, see "Applying migrations"). `price_history` inserts are entirely
+      unaffected either way (every row lands regardless of whether the subsequent refresh
+      succeeds) — but until a refresh succeeds, `latest_prices`/`latest_prices_by_branch` won't
+      reflect this run's rows. **Needs a manual `SELECT refresh_latest_prices();` from the
+      Supabase Dashboard SQL Editor** (a Dashboard session isn't bound by the PostgREST/
+      service-role connection's timeout) before the materialized views catch up — after that,
+      every future single-chain incremental refresh (the daily GitHub Actions cron only touches
+      one day's worth of new rows at a time) should stay comfortably under the timeout again.
+      **A genuine third-party outage, not a bug**: Victory and Mahsanei Hashuk both returned 0
+      items from `laibcatalog.co.il` on this run (confirmed live via direct `curl` during the
+      session: the API was intermittently returning `HTTP 000`/connection timeouts, recovering
+      briefly, then failing again on an immediate retry) — both chains still have their
+      pre-existing ~200-240K chain-level price rows from before this session, and each also picked
+      up 3 branches' worth of real branch-level data from this session's earlier smoke test
+      (before the outage started), so neither chain is at zero. No code fix applies to a
+      third-party outage; the existing daily `npm run ingest` cron (Phase 6) will pick these back
+      up automatically once `laibcatalog.co.il` is reliably reachable again — added
+      `scripts/retry-laibcatalog.ts` (a small one-off; not part of the regular pipeline) for
+      re-running just these two chains without repeating the other five, and exported
+      `ingestFromParser` from `scripts/ingest-prices.ts` to support it.
+      **Verification queries** (computed via paginated PostgREST + JS aggregation, not literally
+      run in the Supabase SQL Editor — see Step 3's note on why):
+      ```
+      Query 1 — branch-level vs chain-level price_history rows per chain:
+        shufersal         2,374,500 branch  /   501,182 chain-only
+        rami_levy            20,675 branch  /    28,008 chain-only
+        mahsanei_hashuk       17,981 branch  /   221,245 chain-only  (3 branches' worth, see above)
+        victory               13,630 branch  /   198,173 chain-only  (3 branches' worth, see above)
+        yohananof              1,017 branch  /       407 chain-only
+        osher_ad                 550 branch  /       726 chain-only
+        keshet_teamim             256 branch  /       727 chain-only
+
+      Query 2 — distinct products/branches per chain with branch-level data:
+        shufersal          25,947 products across   277 branches
+        mahsanei_hashuk     7,902 products across     3 branches
+        victory              6,469 products across     3 branches
+        yohananof              942 products across    36 branches
+        rami_levy              586 products across    96 branches
+        osher_ad               365 products across    22 branches
+        keshet_teamim            64 products across     1 branch
+
+      Query 3 — coverage within 15km of Rishon LeZion (31.97, 34.79), 251 branches total:
+        shufersal    226 nearby branches, 20,263 available products
+        victory       18 nearby branches,  3,520 available products
+        rami_levy      2 nearby branches,      0 available products  (see note below)
+        mahsanei_hashuk 3 nearby branches,     0 available products  (see note below)
+        yohananof      2 nearby branches,      0 available products  (see note below)
+        osher_ad       0 nearby branches,      0 available products
+        keshet_teamim  0 nearby branches,      0 available products
+      ```
+      **Query 3's zeros for rami_levy/mahsanei_hashuk/yohananof are a real, pre-existing data-
+      quality gap, not a bug in this session's new code** — found via this query, not anticipated
+      going in. Each of those chains has TWO parallel sets of branch rows that were never merged:
+      a handful of legacy branches from the original Phase 1/2 seed (real lat/lng, `external_id =
+      null`) and the real branches this session's ingest resolved/created (real `external_id`, no
+      lat/lng — nothing geocodes them because `geocode-branch-cities.ts` only processes rows with
+      a `city_he` settlement code or, for Victory/Mahsanei Hashuk, a name-derived city, and these
+      particular Cerberus-chain branches have neither). The Haversine query finds the legacy
+      geocoded rows (which have zero price data — they predate real ingestion) as "nearby," while
+      the branches ingestion actually populated sit ungeocoded and invisible to any radius query.
+      **Not fixed this session** — it's a real follow-up (either merge the duplicate rows per
+      chain+physical-store, or extend geocoding to cover externally-identified Cerberus branches
+      some other way, e.g. reverse-geocoding a chain's public store-locator page), flagged here
+      rather than silently left for a future session to rediscover from scratch.
+
 ## Coding conventions
 - All components: functional, TypeScript strict
 - API routes: always use `lib/supabaseServer.ts` (service role), never the anon client
@@ -1656,6 +1949,28 @@ live short of an actual slow-query comparison). `009_custom_markets.sql`
 YET APPLIED (confirmed: `custom_markets?select=id` returns `PGRST205`) —
 paste it into the Supabase Dashboard SQL Editor before the Custom Markets
 analytics section will persist any data.
+
+**Phase 18 discovery:** `schema_migrations` now has TWO rows both versioned `010` —
+`010_basket_items_fk` (confirmed applied: `basket_items?select=id,product_id,products(id,name_he)`
+now succeeds as a real PostgREST embedded-relationship query, whereas Phase 16 explicitly found
+`basket_items.product_id` had no real FK and had to work around it — that workaround, the
+two-parallel-queries-plus-JS-merge in `app/api/baskets/[id]/items/route.ts`, could probably be
+simplified now, but that's out of scope for this session) and `010_promotions` (confirmed applied:
+`promotions?select=id` returns `200 []`, currently empty, no app code reads or writes it — not a
+Phase 18 feature). **Neither of these migrations' `.sql` files exist anywhere in
+`supabase/migrations/`** — someone applied hand-written SQL directly through the Dashboard between
+sessions without ever committing the migration file, which is exactly the kind of drift this
+section's own repeated correction pattern above warns about, just for a whole migration this time
+instead of a status flag. Not investigated further (no way to recover the original SQL text from
+`schema_migrations`, which only stores `version`/`applied_at`, not the DDL itself) — noted here so
+a future session doesn't assume `010` is free to reuse for a new migration. This session's own new
+migration is numbered `011` to avoid the collision.
+
+`011_branch_pricing_views.sql` (Phase 18, see that section above) is a new migration this session
+and is genuinely NOT YET APPLIED (confirmed: `latest_prices_by_branch?select=product_id&limit=1`
+returns `PGRST205`) — paste it into the Supabase Dashboard SQL Editor before location-scoped
+branch-level pricing (as opposed to its already-working chain-level fallback) takes effect in
+`/api/products/nearby` and `/api/prices/compare`.
 
 ## Scheduling the ingestion pipeline
 **Option A is now wired up (Phase 6, 2026-07-21)** —
