@@ -41,7 +41,21 @@ interface ChainPrice {
   is_sale?: boolean;
   unit_qty?: number | null;
   unit_type?: string | null;
+  // Phase 18 (branch-level pricing) — only present when this price came
+  // from /api/products/nearby or a location-aware /api/prices/compare call.
+  captured_at?: string;
+  branch_id?: string | null;
+  branch_name?: string | null;
+  distance_km?: number | null;
+  source?: 'branch' | 'chain_fallback';
 }
+
+// Confidence in how a product's nearby price was resolved (Phase 18) —
+// 'exact_name' isn't actually produced by this app's ingestion pipeline
+// (every chain feed matches into products.barcode by real barcode, never by
+// name — see scripts/ingest-prices.ts), kept in the type only so the UI
+// branch exists if that ever changes.
+type MatchType = 'exact_barcode' | 'exact_name' | 'chain_fallback' | 'not_local';
 
 interface ProductResult {
   id: string;
@@ -53,6 +67,7 @@ interface ProductResult {
   max_price: number | null;
   best_chain: string | null;
   prices: Record<string, ChainPrice>;
+  match_type?: MatchType;
 }
 
 interface ChainMeta {
@@ -72,6 +87,10 @@ interface BasketItem {
   prices: Record<string, ChainPrice>;
   min_price: number | null;
   quantity: number;
+  // Set only when the item was added while a nearby-search result was on
+  // screen this session (Phase 18) — not persisted to basket_items, so a
+  // reloaded basket just has no indicator rather than a stale one.
+  match_type?: MatchType;
 }
 
 interface ComparisonResult {
@@ -82,6 +101,11 @@ interface ComparisonResult {
   total: number;
   available_items: number;
   missing_items: string[];
+  // Phase 18 — present only on a location-aware /api/prices/compare call.
+  branch_id?: string | null;
+  branch_name?: string | null;
+  distance_km?: number | null;
+  location_based?: boolean;
 }
 
 interface UserProfile {
@@ -320,6 +344,9 @@ const DICTIONARY = {
     // Phase 15 — basket view modes
     basketModeSmart: 'חכם', basketModeChain: 'רשת', basketModeCompare: 'השוואה',
     notAvailable: 'לא זמין',
+    // Phase 18 — branch-level pricing confidence indicators
+    matchTypeChainFallback: '⚠ מחיר ממוצע',
+    matchTypeNotLocal: 'לא נמצא בסניפים קרובים',
   },
   en: {
     appTitle: 'Smart Grocery IL',
@@ -493,6 +520,9 @@ const DICTIONARY = {
     // Phase 15 — basket view modes
     basketModeSmart: 'Smart', basketModeChain: 'Chain', basketModeCompare: 'Compare',
     notAvailable: 'N/A',
+    // Phase 18 — branch-level pricing confidence indicators
+    matchTypeChainFallback: '⚠ Average price',
+    matchTypeNotLocal: 'Not found at nearby branches',
   },
 };
 
@@ -674,6 +704,22 @@ function formatUnitPrice(cp: ChainPrice | undefined | null, lang: Lang): string 
   return lang === 'he' ? `₪${per100.toFixed(2)} ל-${unitLabel}` : `₪${per100.toFixed(2)} per ${unitLabel}`;
 }
 
+// Freshness badge for a price's captured_at (Phase 18). Deliberately absent
+// from collapsed rows — only shown in an expanded fold-down / breakdown, per
+// spec, to keep the compact list clean.
+function formatFreshness(capturedAt: string | undefined, lang: Lang): { emoji: string; label: string } | null {
+  if (!capturedAt) return null;
+  const hoursAgo = (Date.now() - new Date(capturedAt).getTime()) / (1000 * 60 * 60);
+  if (!Number.isFinite(hoursAgo) || hoursAgo < 0) return null;
+  if (hoursAgo < 6) return { emoji: '🟢', label: lang === 'he' ? 'עודכן היום' : 'Updated today' };
+  if (hoursAgo < 24) return { emoji: '🟡', label: lang === 'he' ? 'עודכן אתמול' : 'Updated yesterday' };
+  if (hoursAgo < 72) {
+    const days = Math.floor(hoursAgo / 24);
+    return { emoji: '🟠', label: lang === 'he' ? `לפני ${days} ימים` : `${days} days ago` };
+  }
+  return { emoji: '🔴', label: lang === 'he' ? 'מחיר ישן' : 'Price may be outdated' };
+}
+
 const LOCATION_PREF_KEY = 'sg_location_pref';
 
 // Price comparison bar for a single chain
@@ -682,33 +728,49 @@ function ChainBar({ chain, total, maxTotal, isMin, lang }: {
 }) {
   const pct = maxTotal > 0 ? (total / maxTotal) * 100 : 100;
   const name = lang === 'he' ? chain.name_he : chain.name_en;
+  // Branch name + distance (Phase 18) — only meaningful once the request was
+  // location-aware AND a nearby branch actually priced this chain (not the
+  // chain-level fallback), e.g. "רמי לוי - סניף ראשון לציון (1.2 ק״מ)".
+  const branchCaption = chain.location_based && chain.branch_name && chain.distance_km != null
+    ? `${chain.branch_name} (${chain.distance_km.toFixed(1)} ${lang === 'he' ? 'ק״מ' : 'km'})`
+    : null;
   return (
-    <div className="flex items-center gap-3">
-      <span className="w-20 text-xs text-[var(--color-text-muted)] text-end shrink-0">{name}</span>
-      <div className="flex-1 h-7 bg-[var(--color-bg-subtle)] rounded-lg overflow-hidden relative">
-        <div
-          className="h-full rounded-lg transition-all duration-500 flex items-center px-3"
-          style={{
-            width: `${pct}%`,
-            backgroundColor: chain.color_hex + 'cc',
-          }}
-        />
-        <span className="absolute inset-0 flex items-center px-3">
-          {/* Own semi-opaque backing (independent of the bar/track color underneath)
-              guarantees the label stays readable regardless of fill width or theme. */}
-          <span className="bg-black/40 text-[var(--color-accent-text)] text-xs font-mono font-medium px-1.5 py-0.5 rounded">
-            ₪{total.toFixed(2)}
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-3">
+        <span className="w-20 text-xs text-[var(--color-text-muted)] text-end shrink-0">{name}</span>
+        <div className="flex-1 h-7 bg-[var(--color-bg-subtle)] rounded-lg overflow-hidden relative">
+          <div
+            className="h-full rounded-lg transition-all duration-500 flex items-center px-3"
+            style={{
+              width: `${pct}%`,
+              backgroundColor: chain.color_hex + 'cc',
+            }}
+          />
+          <span className="absolute inset-0 flex items-center px-3">
+            {/* Own semi-opaque backing (independent of the bar/track color underneath)
+                guarantees the label stays readable regardless of fill width or theme. */}
+            <span className="bg-black/40 text-[var(--color-accent-text)] text-xs font-mono font-medium px-1.5 py-0.5 rounded">
+              ₪{total.toFixed(2)}
+            </span>
           </span>
-        </span>
+        </div>
+        {isMin && (
+          <span className="text-[10px] font-bold text-[var(--color-success)] bg-[var(--color-success)]/10 border border-[var(--color-success)]/20 px-2 py-0.5 rounded-full shrink-0">
+            {lang === 'he' ? 'זול' : 'Best'}
+          </span>
+        )}
       </div>
-      {isMin && (
-        <span className="text-[10px] font-bold text-[var(--color-success)] bg-[var(--color-success)]/10 border border-[var(--color-success)]/20 px-2 py-0.5 rounded-full shrink-0">
-          {lang === 'he' ? 'זול' : 'Best'}
-        </span>
+      {branchCaption && (
+        <p className="ps-[5.75rem] text-[10px] text-[var(--color-text-muted)] truncate">{branchCaption}</p>
       )}
     </div>
   );
 }
+
+// Radius used for location-scoped search/compare calls (Phase 18) — decoupled
+// from the Location view's own distanceKm slider (a different concern: that
+// one filters which map pins show, this one bounds "nearby" for pricing).
+const DEFAULT_COMPARE_RADIUS_KM = 15;
 
 const CHAIN_SELECTION_KEY = 'sg_selected_chains';
 const MAX_SELECTED_CHAINS = 4;
@@ -837,19 +899,39 @@ function ChainPriceBreakdown({ prices, chains, lang }: { prices: Record<string, 
           const isCheapest = cp.price === minPrice;
           const isExpensive = cp.price === maxPrice && minPrice !== maxPrice;
           const unitLine = formatUnitPrice(cp, lang);
+          const freshness = formatFreshness(cp.captured_at, lang);
+          const branchLine = cp.source === 'branch' && cp.branch_name
+            ? `${cp.branch_name}${cp.distance_km != null ? ` (${cp.distance_km.toFixed(1)} ${lang === 'he' ? 'ק״מ' : 'km'})` : ''}`
+            : null;
           return (
             <div
               key={cid}
-              className={`flex items-center justify-between text-xs px-2 py-1.5 rounded-lg ${
+              className={`flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded-lg ${
                 isCheapest ? 'bg-[var(--color-success)]/10 text-[var(--color-success)]' :
                 isExpensive ? 'bg-[var(--color-danger)]/10 text-[var(--color-danger)]' :
                 'text-[var(--color-text-muted)]'
               }`}
             >
-              <span>{cName}</span>
-              <span className="text-end">
+              <span className="min-w-0">
+                <span className="block truncate">{cName}</span>
+                {branchLine && <span className="block text-[10px] opacity-70 truncate">{branchLine}</span>}
+                {/* Confidence indicator (Step 7): a chain-level (not branch-specific)
+                    price is flagged as an approximation rather than shown as if it
+                    were the exact price at a nearby store. */}
+                {cp.source === 'chain_fallback' && (
+                  <span className="block text-[10px] opacity-70">
+                    {lang === 'he' ? '⚠ מחיר ממוצע' : '⚠ Average price'}
+                  </span>
+                )}
+              </span>
+              <span className="text-end shrink-0">
                 <span className="font-mono font-medium block">₪{cp.price.toFixed(2)}</span>
                 {unitLine && <span className="block text-[10px] opacity-70 font-mono">{unitLine}</span>}
+                {freshness && (
+                  <span className="block text-[10px] opacity-70" title={freshness.label}>
+                    {freshness.emoji} {freshness.label}
+                  </span>
+                )}
               </span>
             </div>
           );
@@ -2100,7 +2182,7 @@ export default function SmartGroceryDashboard() {
             items: Array<{
               db_id: string; product_id: string; quantity_value: number;
               name_he: string; name_en: string | null; category: string | null; barcode: string | null;
-              prices: Array<{ chain_id: string; price: number; unit_qty: number | null; unit_type: string | null; is_sale: boolean }>;
+              prices: Array<{ chain_id: string; price: number; unit_qty: number | null; unit_type: string | null; is_sale: boolean; captured_at: string }>;
             }>;
           };
 
@@ -2185,7 +2267,14 @@ export default function SmartGroceryDashboard() {
     if (q.length < 1) { setSearchResults([]); return; }
     setIsSearching(true);
     try {
-      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&limit=8`);
+      // Phase 18: when GPS is available, search via the location-scoped
+      // endpoint so results carry real branch-specific prices from the
+      // moment they're shown, not just once added to the basket. Falls back
+      // to the plain catalog search when there's no location fix.
+      const url = userPosition
+        ? `/api/products/nearby?lat=${userPosition.lat}&lng=${userPosition.lng}&radius_km=${DEFAULT_COMPARE_RADIUS_KM}&q=${encodeURIComponent(q)}&limit=8`
+        : `/api/products/search?q=${encodeURIComponent(q)}&limit=8`;
+      const res = await fetch(url);
       const data = await res.json();
       setSearchResults(data.products ?? []);
       if (data.chains?.length > 0) setChains(data.chains);
@@ -2194,7 +2283,7 @@ export default function SmartGroceryDashboard() {
     } finally {
       setIsSearching(false);
     }
-  }, []);
+  }, [userPosition]);
 
   useEffect(() => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -2224,7 +2313,13 @@ export default function SmartGroceryDashboard() {
     fetch('/api/prices/compare', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, chain_ids: selectedChains.length > 0 ? selectedChains : undefined }),
+      body: JSON.stringify({
+        items,
+        chain_ids: selectedChains.length > 0 ? selectedChains : undefined,
+        // Phase 18: when GPS is available, price each chain at its nearest
+        // branch instead of a chain-wide figure.
+        ...(userPosition ? { lat: userPosition.lat, lng: userPosition.lng, radius_km: DEFAULT_COMPARE_RADIUS_KM } : {}),
+      }),
     })
       .then((r) => r.json())
       .then((data) => {
@@ -2233,7 +2328,7 @@ export default function SmartGroceryDashboard() {
       })
       .catch(() => {})
       .finally(() => setIsComparing(false));
-  }, [basket, selectedChains]);
+  }, [basket, selectedChains, userPosition]);
 
   // ── Basket CRUD ──────────────────────────────────────────────────────────────
 
@@ -2276,6 +2371,7 @@ export default function SmartGroceryDashboard() {
         prices: product.prices,
         min_price: product.min_price,
         quantity: 1,
+        match_type: product.match_type,
       },
     ]);
   };
@@ -3096,15 +3192,30 @@ export default function SmartGroceryDashboard() {
                             {p.name_en && <span className="text-xs text-[var(--color-text-muted)]">{p.name_en}</span>}
                           </div>
                           <div className="text-end shrink-0 ms-4">
-                            {p.min_price !== null && (
-                              <span className="font-mono text-[var(--color-success)] text-sm">
-                                {lang === 'he' ? 'מ-' : 'from '}₪{p.min_price.toFixed(2)}
-                              </span>
-                            )}
-                            {p.best_chain && chains.length > 0 && (
-                              <span className="block text-[10px] text-[var(--color-text-muted)]">
-                                {chains.find((c) => c.id === p.best_chain)?.[lang === 'he' ? 'name_he' : 'name_en']}
-                              </span>
+                            {/* Confidence indicator (Step 7): exact_barcode (the
+                                normal case) shows nothing extra; a name-only match
+                                gets a "~" prefix; a chain-wide fallback price gets a
+                                muted caption instead of pretending it's exact; a
+                                product with nothing nearby shows no price at all. */}
+                            {p.match_type === 'not_local' ? (
+                              <span className="block text-[10px] text-[var(--color-text-muted)]">{t.matchTypeNotLocal}</span>
+                            ) : (
+                              <>
+                                {p.min_price !== null && (
+                                  <span className="font-mono text-[var(--color-success)] text-sm">
+                                    {p.match_type === 'exact_name' && '~'}
+                                    {lang === 'he' ? 'מ-' : 'from '}₪{p.min_price.toFixed(2)}
+                                  </span>
+                                )}
+                                {p.match_type === 'chain_fallback' && (
+                                  <span className="block text-[10px] text-[var(--color-text-muted)]">{t.matchTypeChainFallback}</span>
+                                )}
+                                {p.match_type !== 'chain_fallback' && p.best_chain && chains.length > 0 && (
+                                  <span className="block text-[10px] text-[var(--color-text-muted)]">
+                                    {chains.find((c) => c.id === p.best_chain)?.[lang === 'he' ? 'name_he' : 'name_en']}
+                                  </span>
+                                )}
+                              </>
                             )}
                           </div>
                         </button>

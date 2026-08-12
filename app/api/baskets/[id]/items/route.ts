@@ -51,7 +51,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         ? supabase.from('products').select('id, name_he, name_en, category, barcode').in('id', productIds)
         : Promise.resolve({ data: [], error: null }),
       productIds.length > 0
-        ? supabase.from('latest_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale').in('product_id', productIds)
+        ? supabase.from('latest_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', productIds)
         : Promise.resolve({ data: [], error: null }),
     ]);
 
@@ -61,7 +61,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const productById: Record<string, { name_he: string; name_en: string | null; category: string | null; barcode: string | null }> = {};
     for (const p of products ?? []) productById[p.id] = p;
 
-    const pricesByProduct: Record<string, Array<{ chain_id: string; price: number; unit_qty: number | null; unit_type: string | null; is_sale: boolean }>> = {};
+    // captured_at feeds the freshness badge (Phase 18) in the expanded
+    // per-chain breakdown — missing here meant every basket restored on
+    // login/reload silently lost that indicator even though the search/add
+    // path (which already selected it) had it from day one.
+    const pricesByProduct: Record<string, Array<{ chain_id: string; price: number; unit_qty: number | null; unit_type: string | null; is_sale: boolean; captured_at: string }>> = {};
     for (const p of prices ?? []) {
       if (!pricesByProduct[p.product_id]) pricesByProduct[p.product_id] = [];
       pricesByProduct[p.product_id].push(p);
