@@ -84,7 +84,17 @@ export async function fetchShufersalStoresFileUrl(): Promise<string> {
   return match[1].replace(/&amp;/g, '&');
 }
 
-export async function fetchAndParseShufersalFile(url: string): Promise<ShufersalItem[]> {
+// One PriceFull file = one branch. storeId is the root <StoreID> field
+// (confirmed live: zero-padded, e.g. "001") — NOT the same numbering as the
+// separate Stores feed's unpadded StoreID ("756", "1", ...), so callers that
+// match against branches seeded from the Stores feed (scripts/seed-branches.ts,
+// scripts/ingest-prices.ts) must normalize via parseInt() first.
+export interface ShufersalBranchFeed {
+  storeId: string | null;
+  items: ShufersalItem[];
+}
+
+export async function fetchAndParseShufersalFile(url: string): Promise<ShufersalBranchFeed> {
   const res = await fetchWithRetry(url);
   if (!res.ok) throw new Error(`Shufersal file fetch failed: HTTP ${res.status}`);
   const gzBuffer = Buffer.from(await res.arrayBuffer());
@@ -92,9 +102,11 @@ export async function fetchAndParseShufersalFile(url: string): Promise<Shufersal
 
   const parser = new XMLParser();
   const parsed = parser.parse(xml);
+  const storeIdRaw = parsed?.Root?.StoreID;
+  const storeId = storeIdRaw != null && String(storeIdRaw).trim() !== '' ? String(storeIdRaw).trim() : null;
   const rawItems = toArray(parsed?.Root?.Items?.Item);
 
-  return rawItems
+  const items = rawItems
     .map((raw): ShufersalItem | null => {
       const barcode = String(raw.ItemCode ?? '').trim();
       const price = Number(raw.ItemPrice);
@@ -109,4 +121,6 @@ export async function fetchAndParseShufersalFile(url: string): Promise<Shufersal
       };
     })
     .filter((item): item is ShufersalItem => item !== null);
+
+  return { storeId, items };
 }

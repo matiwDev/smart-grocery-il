@@ -84,6 +84,26 @@ export function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+// Bounded-concurrency map — used to download per-branch feed files in
+// parallel (Phase 18's "process ALL branch files" removed the old ~3-20
+// file caps, so a plain sequential loop over hundreds of files per chain
+// would take hours). Only used for plain-HTTPS feeds (Shufersal, laibcatalog)
+// — the Cerberus FTP platform reuses a single control connection per chain
+// and isn't safe to hit with concurrent requests the same way.
+export async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    for (;;) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  return results;
+}
+
 export async function refreshLatestPrices(): Promise<void> {
   const res = await restFetch('rpc/refresh_latest_prices', { method: 'POST', body: '{}' });
   if (!res.ok) {

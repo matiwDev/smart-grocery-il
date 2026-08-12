@@ -148,7 +148,7 @@ async function main() {
 
     const batchItems: ShufersalItem[] = [];
     for (const url of links) {
-      const items = await fetchAndParseShufersalFile(url);
+      const { items } = await fetchAndParseShufersalFile(url);
       for (const item of items) {
         if (seenBarcodes.has(item.barcode)) continue;
         seenBarcodes.add(item.barcode);

@@ -38,13 +38,30 @@ interface BranchRow {
   name_he: string;
   city_he: string | null;
   address: string | null;
-  lat: null;
-  lng: null;
+  lat: number | null;
+  lng: number | null;
   is_active: boolean;
 }
 
 function toArray<T>(value: T | T[] | undefined): T[] {
   return value === undefined ? [] : Array.isArray(value) ? value : [value];
+}
+
+// Phase 18: prefer real coordinates straight from a feed over geocoding —
+// checked live this session across every field name variant seen in the
+// wild (GPSLat/GPSLon, Latitude/Longitude, lat/lng/lon). None of the 7
+// chains' actual feeds publish any of these today (confirmed by downloading
+// and inspecting a live Shufersal Stores file, a live Shufersal PriceFull
+// file, and a live laibcatalog getbranches response this session — see
+// CLAUDE.md "Data architecture"), so this is currently a no-op for all of
+// them, but costs nothing to check and future-proofs against a feed adding
+// GPS fields later without anyone noticing.
+function extractGpsFields(raw: Record<string, unknown>): { lat: number | null; lng: number | null } {
+  const latRaw = raw.GPSLat ?? raw.GpsLat ?? raw.Latitude ?? raw.latitude ?? raw.lat;
+  const lngRaw = raw.GPSLon ?? raw.GpsLon ?? raw.GPSLng ?? raw.Longitude ?? raw.longitude ?? raw.lng ?? raw.lon;
+  const lat = latRaw != null ? Number(latRaw) : NaN;
+  const lng = lngRaw != null ? Number(lngRaw) : NaN;
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0 ? { lat, lng } : { lat: null, lng: null };
 }
 
 // ---- Shufersal: catID=5 "Stores" feed ----
@@ -62,14 +79,15 @@ async function fetchShufersalBranches(): Promise<BranchRow[]> {
       const externalId = String(s.StoreID ?? '').trim();
       const name_he = String(s.StoreName ?? '').trim();
       if (!externalId || !name_he) continue;
+      const { lat, lng } = extractGpsFields(s);
       rows.push({
         chain_id: 'shufersal',
         external_id: externalId,
         name_he,
         city_he: s.City != null ? String(s.City).trim() : null,
         address: s.Address ? String(s.Address).trim() : null,
-        lat: null,
-        lng: null,
+        lat,
+        lng,
         is_active: true,
       });
     }
@@ -86,19 +104,22 @@ interface LaibcatalogBranch {
 async function fetchLaibcatalogBranches(chainId: string, edi: string): Promise<BranchRow[]> {
   const res = await fetchWithRetry(`https://laibcatalog.co.il/webapi/api/getbranches?edi=${edi}`);
   if (!res.ok) throw new Error(`laibcatalog getbranches failed for ${chainId}: HTTP ${res.status}`);
-  const branches = (await res.json()) as LaibcatalogBranch[];
+  const branches = (await res.json()) as Array<LaibcatalogBranch & Record<string, unknown>>;
   return branches
     .filter((b) => b.name && b.name.trim())
-    .map((b) => ({
-      chain_id: chainId,
-      external_id: String(b.number),
-      name_he: b.name.trim(),
-      city_he: null,
-      address: null,
-      lat: null,
-      lng: null,
-      is_active: true,
-    }));
+    .map((b) => {
+      const { lat, lng } = extractGpsFields(b);
+      return {
+        chain_id: chainId,
+        external_id: String(b.number),
+        name_he: b.name.trim(),
+        city_he: null,
+        address: null,
+        lat,
+        lng,
+        is_active: true,
+      };
+    });
 }
 
 // ---- Cerberus FTP: Yohananof, Osher Ad, Keshet Teamim ----
@@ -108,6 +129,7 @@ const CERBERUS_CHAIN_NAME_HE: Record<string, string> = {
   yohananof: 'יוחננוף',
   osher_ad: 'אושר עד',
   keshet_teamim: 'קשת טעמים',
+  rami_levy: 'רמי לוי',
 };
 
 const PRICE_FILE_PATTERN = /^Price([\d-]+)-(\d{8}-\d{6})\.gz$/;
@@ -187,6 +209,11 @@ const CHAINS: ChainSpec[] = [
   { id: 'yohananof', label: 'Yohananof', fetch: () => fetchCerberusBranches('yohananof', 'yohananof') },
   { id: 'osher_ad', label: 'Osher Ad', fetch: () => fetchCerberusBranches('osher_ad', 'osherad') },
   { id: 'keshet_teamim', label: 'Keshet Teamim', fetch: () => fetchCerberusBranches('keshet_teamim', 'Keshet') },
+  // Rami Levy's feed was only found and integrated in Phase 17 (same
+  // Cerberus platform as the three chains above, username RamiLevi) — it had
+  // never been added here, so its branches table still only had the 4
+  // original Gush-Dan seed rows until now.
+  { id: 'rami_levy', label: 'Rami Levy', fetch: () => fetchCerberusBranches('rami_levy', 'RamiLevi') },
 ];
 
 async function main() {

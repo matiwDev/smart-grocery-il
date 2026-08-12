@@ -13,8 +13,13 @@
  * getfiles returns every branch's files in one response (branchNumber field
  * per entry), not just the requested branch — so one call is enough per chain.
  */
-import { fetchWithRetry } from '../supabase-rest';
+import { fetchWithRetry, mapWithConcurrency } from '../supabase-rest';
 import { parseGovXml, gunzipToText, GovFeedItem } from './gov-xml';
+
+// Plain HTTPS, no shared connection state — safe to download several
+// branches' files at once instead of one at a time (Phase 18 removed the
+// old branch-count cap, so a full chain can be 70+ files).
+const DOWNLOAD_CONCURRENCY = 8;
 
 const LAIBCATALOG_BASE = 'https://laibcatalog.co.il';
 
@@ -47,19 +52,31 @@ async function downloadAndParse(chainId: string, fileName: string): Promise<GovF
   const res = await fetchWithRetry(`${LAIBCATALOG_BASE}/webapi/${chainId}/${fileName}`);
   if (!res.ok) throw new Error(`laibcatalog file download failed for ${fileName}: HTTP ${res.status}`);
   const buffer = Buffer.from(await res.arrayBuffer());
-  return parseGovXml(gunzipToText(buffer));
+  // laibcatalog's getfiles response already carries branchNumber per file
+  // (see fetchLaibcatalogItems below), so the XML root's own <StoreID> isn't
+  // needed here — only the items.
+  return parseGovXml(gunzipToText(buffer)).items;
+}
+
+// One result per branch. branchNumber comes straight from getfiles'
+// `branchNumber` field (a plain JSON number, e.g. 60) — matches
+// scripts/seed-branches.ts's fetchLaibcatalogBranches(), which keys
+// branches.external_id off the same platform's getbranches `number` field,
+// so no padding/normalization is needed to match them up.
+export interface LaibcatalogBranchFeed {
+  branchNumber: string;
+  items: GovFeedItem[];
 }
 
 // branchLimit caps how many branches' price files get downloaded per run —
 // mirrors SHUFERSAL_STORE_LIMIT's role for the Shufersal feed (avoid pulling
-// every branch on every ingest run).
-export async function fetchLaibcatalogItems(chainId: string, branchLimit: number): Promise<GovFeedItem[]> {
+// every branch on every ingest run). Pass Infinity to fetch every branch.
+export async function fetchLaibcatalogItems(chainId: string, branchLimit: number): Promise<LaibcatalogBranchFeed[]> {
   const files = await fetchFileList(chainId);
   const latestPerBranch = latestPriceFilePerBranch(files).slice(0, branchLimit);
 
-  const allItems: GovFeedItem[] = [];
-  for (const file of latestPerBranch) {
-    allItems.push(...(await downloadAndParse(chainId, file.fileName)));
-  }
-  return allItems;
+  return mapWithConcurrency(latestPerBranch, DOWNLOAD_CONCURRENCY, async (file) => {
+    const items = await downloadAndParse(chainId, file.fileName);
+    return { branchNumber: String(file.branchNumber), items };
+  });
 }

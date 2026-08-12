@@ -1,9 +1,9 @@
 import { fetchCerberusItems } from './cerberus';
-import { ParsedProduct, toParsedProducts } from './types';
+import { ParsedBranchFeed, toParsedProducts } from './types';
 
-const STORE_LIMIT = Number(process.env.KESHET_TEAMIM_STORE_LIMIT || 20);
+const STORE_LIMIT = Number(process.env.KESHET_TEAMIM_STORE_LIMIT || Infinity);
 
-export async function fetchAndParse(): Promise<ParsedProduct[]> {
-  const items = await fetchCerberusItems('Keshet', STORE_LIMIT);
-  return toParsedProducts(items);
+export async function fetchAndParse(): Promise<ParsedBranchFeed[]> {
+  const branchFeeds = await fetchCerberusItems('Keshet', STORE_LIMIT);
+  return branchFeeds.map((feed) => ({ externalId: feed.storeId, items: toParsedProducts(feed.items) }));
 }

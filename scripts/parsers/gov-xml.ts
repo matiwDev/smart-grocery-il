@@ -24,12 +24,28 @@ function toArray<T>(value: T | T[] | undefined): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
-export function parseGovXml(xml: string): GovFeedItem[] {
+// Every file in this schema represents exactly ONE branch — the root carries
+// ChainID/SubChainID/StoreID/BikoretNo alongside <Items> (confirmed live
+// against Shufersal and the Cerberus-platform chains, see CLAUDE.md "Data
+// architecture"). storeId is returned raw, exactly as published — different
+// platforms zero-pad differently (e.g. Shufersal's Stores feed publishes
+// unpadded IDs like "756" while its own PriceFull files publish the same
+// store as zero-padded "001"), so callers normalize per their own chain's
+// established branches.external_id convention rather than this shared parser
+// guessing at one.
+export interface GovFeedFile {
+  storeId: string | null;
+  items: GovFeedItem[];
+}
+
+export function parseGovXml(xml: string): GovFeedFile {
   const parser = new XMLParser();
   const parsed = parser.parse(xml);
+  const storeIdRaw = parsed?.Root?.StoreID;
+  const storeId = storeIdRaw != null && String(storeIdRaw).trim() !== '' ? String(storeIdRaw).trim() : null;
   const rawItems = toArray(parsed?.Root?.Items?.Item);
 
-  return rawItems
+  const items = rawItems
     .map((raw): GovFeedItem | null => {
       const barcode = String(raw.ItemCode ?? '').trim();
       const price = Number(raw.ItemPrice);
@@ -44,6 +60,8 @@ export function parseGovXml(xml: string): GovFeedItem[] {
       };
     })
     .filter((item): item is GovFeedItem => item !== null);
+
+  return { storeId, items };
 }
 
 export function gunzipToText(buffer: Buffer): string {

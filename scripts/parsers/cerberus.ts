@@ -33,11 +33,23 @@ function latestPriceFilePerStore(fileNames: string[]): string[] {
   return [...latest.values()].map((v) => v.file);
 }
 
+// One result per branch (one file = one store on this platform). storeId
+// prefers the XML root's own <StoreID> (confirmed identical to the filename's
+// trailing segment against a live Yohananof file) and falls back to the
+// filename if the XML is ever missing it — same raw, zero-padded convention
+// scripts/seed-branches.ts's fetchCerberusBranches() already uses for
+// external_id, so branch matching lines up without extra normalization.
+export interface CerberusBranchFeed {
+  storeId: string;
+  items: GovFeedItem[];
+}
+
 // storeLimit caps how many stores' price files get downloaded per run,
-// mirroring SHUFERSAL_STORE_LIMIT's role for the Shufersal feed.
-export async function fetchCerberusItems(ftpUsername: string, storeLimit: number): Promise<GovFeedItem[]> {
+// mirroring SHUFERSAL_STORE_LIMIT's role for the Shufersal feed. Pass
+// Infinity to fetch every store.
+export async function fetchCerberusItems(ftpUsername: string, storeLimit: number): Promise<CerberusBranchFeed[]> {
   const client = new ftp.Client(30000);
-  const allItems: GovFeedItem[] = [];
+  const results: CerberusBranchFeed[] = [];
   try {
     await client.access({ host: CERBERUS_HOST, user: ftpUsername, password: '', secure: false });
     const listing = await client.list();
@@ -54,10 +66,14 @@ export async function fetchCerberusItems(ftpUsername: string, storeLimit: number
       });
       await client.downloadTo(sink, fileName);
       const buffer = Buffer.concat(chunks);
-      allItems.push(...parseGovXml(gunzipToText(buffer)));
+      const { storeId, items } = parseGovXml(gunzipToText(buffer));
+
+      const match = PRICE_FILE_PATTERN.exec(fileName);
+      const filenameStoreId = match ? match[1].split('-').pop() ?? null : null;
+      results.push({ storeId: storeId ?? filenameStoreId ?? fileName, items });
     }
   } finally {
     client.close();
   }
-  return allItems;
+  return results;
 }
