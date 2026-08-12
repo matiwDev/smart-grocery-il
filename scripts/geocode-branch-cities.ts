@@ -77,8 +77,8 @@ async function fetchDistinctCityCodesWithoutCoords(): Promise<Set<string>> {
   return codes;
 }
 
-async function geocodeCity(name: string): Promise<{ lat: number; lng: number } | null> {
-  const params = new URLSearchParams({ format: 'json', q: `${name}, ישראל`, limit: '1' });
+async function geocodeQuery(query: string): Promise<{ lat: number; lng: number } | null> {
+  const params = new URLSearchParams({ format: 'json', q: query, limit: '1' });
   const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
     headers: { 'User-Agent': NOMINATIM_USER_AGENT },
   });
@@ -86,6 +86,70 @@ async function geocodeCity(name: string): Promise<{ lat: number; lng: number } |
   const data = await res.json();
   if (!Array.isArray(data) || data.length === 0) return null;
   return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+}
+
+async function geocodeCity(name: string): Promise<{ lat: number; lng: number } | null> {
+  return geocodeQuery(`${name}, ישראל`);
+}
+
+// Phase 18 — Victory and Mahsanei Hashuk (laibcatalog.co.il) publish no
+// address or city field at all (confirmed live — scripts/seed-branches.ts's
+// fetchLaibcatalogBranches only ever gets {number, name}), so these branches
+// have no city_he code for the settlement-lookup pass above to key off of.
+// Their branch `name` is frequently a real place name though (e.g. "18 נוף
+// הגליל", "44 ערד" — a leading branch number + city, sometimes with a
+// sub-area after a dash, e.g. "1 ב\"ש-בית אשל") — best-effort, not
+// guaranteed to resolve for abbreviated or sub-area-only names.
+const NAME_GEOCODE_CHAINS = ['victory', 'mahsanei_hashuk'];
+
+function extractCityQueryFromBranchName(name: string): string {
+  return name.replace(/^\s*\d+\s*/, '').trim();
+}
+
+async function fetchBranchesNeedingNameGeocode(): Promise<Array<{ id: string; name_he: string }>> {
+  const rows: Array<{ id: string; name_he: string }> = [];
+  const PAGE_SIZE = 1000;
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const res = await restFetch(
+      `branches?select=id,name_he&lat=is.null&chain_id=in.(${NAME_GEOCODE_CHAINS.join(',')})&order=id&limit=${PAGE_SIZE}&offset=${offset}`
+    );
+    if (!res.ok) throw new Error(`branches fetch failed: HTTP ${res.status}`);
+    const page: Array<{ id: string; name_he: string }> = await res.json();
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+  return rows;
+}
+
+async function geocodeFromBranchNames(): Promise<number> {
+  const branches = await fetchBranchesNeedingNameGeocode();
+  if (branches.length === 0) return 0;
+  console.log(`\n${branches.length} Victory/Mahsanei Hashuk branches with no city code — trying their branch name as a place query...`);
+
+  const nameCache: Record<string, { lat: number; lng: number } | null> = {};
+  let updated = 0;
+  for (const branch of branches) {
+    const query = extractCityQueryFromBranchName(branch.name_he);
+    if (!(query in nameCache)) {
+      nameCache[query] = await geocodeQuery(`${query}, ישראל`);
+      await sleep(1050); // Nominatim usage policy: max 1 request/second
+    }
+    const coords = nameCache[query];
+    if (!coords) {
+      console.log(`  "${branch.name_he}" (query: "${query}") -> no geocode result`);
+      continue;
+    }
+    const res = await restFetch(`branches?id=eq.${branch.id}`, {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ lat: coords.lat, lng: coords.lng }),
+    });
+    if (res.ok) {
+      updated++;
+      console.log(`  "${branch.name_he}" -> ${coords.lat}, ${coords.lng}`);
+    }
+  }
+  return updated;
 }
 
 async function main() {
@@ -144,7 +208,11 @@ async function main() {
     totalUpdated += rows.length;
   }
 
-  console.log(`Done. ${totalUpdated} branch rows backfilled with city-center lat/lng.`);
+  console.log(`Done. ${totalUpdated} branch rows backfilled with city-center lat/lng from settlement codes.`);
+
+  const nameGeocoded = await geocodeFromBranchNames();
+  console.log(`Done. ${nameGeocoded} additional Victory/Mahsanei Hashuk branches backfilled from their branch name.`);
+  console.log(`\nTotal this run: ${totalUpdated + nameGeocoded} branch rows backfilled.`);
 }
 
 main().catch((err) => {
