@@ -5,7 +5,7 @@ import { createServerClient } from '@/lib/supabaseServer';
 // Rehydrates a basket's items with current prices in one request — used on
 // login/page-load to restore the working basket instead of the client doing
 // three separate round trips (basket_items, then products, then
-// latest_prices) itself. Requires user_id so ownership can be checked
+// chain_prices) itself. Requires user_id so ownership can be checked
 // server-side: this route uses the service-role client, which bypasses RLS.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // No FK constraint exists between basket_items.product_id and products.id
     // (confirmed live: PostgREST embedding returns PGRST200), so this can't be
-    // a single embedded select — fetch products + latest_prices separately and
+    // a single embedded select — fetch products + chain_prices separately and
     // merge in JS. Still one round trip from the client's perspective, which
     // is the part that matters for the "not N individual fetches" goal.
     const [{ data: products, error: productsError }, { data: prices, error: pricesError }] = await Promise.all([
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         ? supabase.from('products').select('id, name_he, name_en, category, barcode').in('id', productIds)
         : Promise.resolve({ data: [], error: null }),
       productIds.length > 0
-        ? supabase.from('latest_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', productIds)
+        ? supabase.from('chain_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', productIds)
         : Promise.resolve({ data: [], error: null }),
     ]);
 

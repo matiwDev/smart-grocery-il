@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabaseServer';
-import { fetchAllPages, fetchNearbyBranches, isMissingRelation, isMissingColumn, NearbyBranch } from '@/lib/geo';
+import { fetchAllPages, fetchNearbyBranches, fetchBranchOverrides, nearestBranchPerChain, isMissingRelation, isMissingColumn, NearbyBranch } from '@/lib/geo';
 
 // POST /api/prices/compare
 // Body: { items: [{ product_id, quantity }], chain_ids?: string[], lat?, lng?, radius_km? }
@@ -10,12 +10,12 @@ import { fetchAllPages, fetchNearbyBranches, isMissingRelation, isMissingColumn,
 // average) — matching how a shopper would actually experience "the Rami Levy
 // near me". Per spec, this is one representative branch per chain, not a
 // different nearest branch per item; an item the nearest branch doesn't
-// carry falls back to that chain's overall latest_prices value instead of
+// carry falls back to that chain's chain_prices value instead of
 // silently vanishing (the hybrid-fallback architectural decision — see
 // CLAUDE.md "Data architecture"), and is flagged per-item via `source` so
 // the UI can show it as an approximation rather than a real branch price.
 // Without lat/lng, behavior is unchanged from before this phase: chain-level
-// latest_prices only, location_based: false.
+// chain_prices only, location_based: false.
 
 interface BasketRequestItem {
   product_id: string;
@@ -25,13 +25,6 @@ interface BasketRequestItem {
 interface ChainLevelRow {
   product_id: string;
   chain_id: string;
-  price: number;
-}
-
-interface BranchLevelRow {
-  product_id: string;
-  chain_id: string;
-  branch_id: string;
   price: number;
 }
 
@@ -70,7 +63,7 @@ export async function POST(req: NextRequest) {
     let chainLevelRows: ChainLevelRow[] = [];
     try {
       chainLevelRows = await fetchAllPages<ChainLevelRow>((from, to) =>
-        supabase.from('latest_prices').select('product_id, chain_id, price').in('product_id', productIds).range(from, to)
+        supabase.from('chain_prices').select('product_id, chain_id, price').in('product_id', productIds).range(from, to)
       );
     } catch (err) {
       if (!isMissingColumn(err)) throw err;
@@ -89,23 +82,22 @@ export async function POST(req: NextRequest) {
       radiusKm = Math.min(radiusKmRaw || 15, 50);
       const nearbyBranches = await fetchNearbyBranches(supabase, lat!, lng!, radiusKm, chainIdFilter);
 
-      for (const branch of nearbyBranches) {
-        if (!nearestBranchByChain.has(branch.chain_id)) nearestBranchByChain.set(branch.chain_id, branch);
-      }
+      for (const [chainId, branch] of nearestBranchPerChain(nearbyBranches)) nearestBranchByChain.set(chainId, branch);
 
       const nearestBranchIds = [...nearestBranchByChain.values()].map((b) => b.id);
       if (nearestBranchIds.length > 0) {
         try {
-          const branchRows = await fetchAllPages<BranchLevelRow>((from, to) =>
-            supabase
-              .from('latest_prices_by_branch')
-              .select('product_id, chain_id, branch_id, price')
-              .in('branch_id', nearestBranchIds)
-              .in('product_id', productIds)
-              .range(from, to)
-          );
+          // Migration 012: a branch's price is its override if it has one,
+          // otherwise its chain's chain_prices price.
+          const overrides = await fetchBranchOverrides(supabase, nearestBranchIds, productIds);
           branchPricingAvailable = true;
-          for (const row of branchRows) branchPriceByProductChain.set(`${row.product_id}:${row.chain_id}`, row.price);
+          for (const [chainId, branch] of nearestBranchByChain) {
+            for (const productId of productIds) {
+              const override = overrides.get(`${productId}:${branch.id}`);
+              const price = override ? Number(override.price) : chainLevelByProductChain.get(`${productId}:${chainId}`);
+              if (price !== undefined) branchPriceByProductChain.set(`${productId}:${chainId}`, price);
+            }
+          }
         } catch (err) {
           if (!isMissingRelation(err)) throw err;
           branchPricingAvailable = false;

@@ -1,6 +1,6 @@
 /**
  * Shared Shufersal price-feed fetch + parse logic (Israel Food Act transparency
- * feed). Used by both scripts/ingest-prices.ts (price_history ingestion) and
+ * feed). Used by both scripts/ingest-prices.ts (chain_prices ingestion) and
  * scripts/seed-products-from-feed.ts (product catalog seeding), so the
  * fetch/gunzip/XML-parse mechanics live here once.
  *

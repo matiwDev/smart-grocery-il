@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"http://localhost:3000/api/products/search?q=%D7%97%D7%9C%D7%91\")",
+      "Bash(curl -s -X POST http://localhost:3000/api/prices/compare -H 'Content-Type: application/json' -d '{\"items\":[{\"product_id\":\"fdeecb36-77c8-4203-b1b6-95d5f8616020\",\"quantity\":2},{\"product_id\":\"013b8f4c-ea14-47ab-9bef-ed01b15a107a\",\"quantity\":1}]}')",
+      "Bash(node -e ' *)",
+      "Bash(npx tsc *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('deps:', list\\(d.get\\('dependencies',{}\\).keys\\(\\)\\)\\); print\\('devDeps:', list\\(d.get\\('devDependencies',{}\\).keys\\(\\)\\)\\)\")",
+      "Bash(npm install *)",
+      "Bash(awk '/currentView === .HOME. &&/,0' /Users/matias/UnityProjects/smart-grocery-il/app/page.tsx)",
+      "Bash(awk '/currentView === .LOCATION./{exit} {print NR\": \"$0}')",
+      "Bash(npm run *)",
+      "Bash(git push *)",
+      "Bash(vercel --version)",
+      "Bash(vercel --prod)",
+      "Bash(curl -s \"https://smart-grocery-il.vercel.app/api/analytics?type=chain_ranking\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('chains:', len\\(d.get\\('ranking',[]\\)\\)\\)\")",
+      "Bash(curl -s -o /dev/null -w \"homepage: %{http_code}\\\\n\" \"https://smart-grocery-il.vercel.app/\")"
+    ]
+  }
+}

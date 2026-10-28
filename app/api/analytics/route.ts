@@ -2,12 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabaseServer';
 
 // PostgREST silently caps any response at its configured max-rows (1000 on
-// this project, confirmed live: a plain `latest_prices` select with no range
+// this project, confirmed live: a plain `chain_prices` select with no range
 // returned exactly 1000 rows total across chains, undercounting every chain
 // past the cutoff and skipping two entirely). `.limit(N)` on the client side
 // does NOT override that server-side cap. Queries below that can plausibly
-// exceed 1000 rows (the full latest_prices table, multi-day price_history
-// windows) page through with `.range()` instead of trusting a single select.
+// exceed 1000 rows (e.g. the full chain_prices table) page through with `.range()` instead of trusting a single select.
 async function fetchAllPages<T>(
   page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
   pageSize = 1000,
@@ -38,7 +37,7 @@ function isoWeekKey(d: Date): string {
 }
 
 // Cheapest-price cost of a set of (product_id, quantity) pairs: fetches
-// latest_prices for the involved products once and takes the per-product
+// chain_prices for the involved products once and takes the per-product
 // minimum, since there's no "price actually paid" data in this app — every
 // basket_items row is a planned purchase, not a receipt line. Shared by
 // spending_overview, monthly_basket, and personal_chain_ranking below.
@@ -48,7 +47,7 @@ async function minPriceByProduct(
 ): Promise<Record<string, number>> {
   if (productIds.length === 0) return {};
   const { data, error } = await supabase
-    .from('latest_prices')
+    .from('chain_prices')
     .select('product_id, price')
     .in('product_id', productIds);
   if (error) throw error;
@@ -129,7 +128,7 @@ export async function GET(req: NextRequest) {
         }
 
         const { data: prices, error: pricesErr } = await supabase
-          .from('latest_prices')
+          .from('chain_prices')
           .select('product_id, price')
           .in('product_id', productIds);
         if (pricesErr) throw pricesErr;
@@ -162,7 +161,7 @@ export async function GET(req: NextRequest) {
         if (chainsErr) throw chainsErr;
 
         const prices = await fetchAllPages<{ chain_id: string; price: number }>(
-          (from, to) => supabase.from('latest_prices').select('chain_id, price').range(from, to),
+          (from, to) => supabase.from('chain_prices').select('chain_id, price').range(from, to),
           1000,
           60000
         );
@@ -190,41 +189,33 @@ export async function GET(req: NextRequest) {
       }
 
       case 'price_drops': {
-        const days = Math.max(1, Math.min(90, parseInt(searchParams.get('days') ?? '7')));
-        const cutoffIso = new Date(Date.now() - days * 86400000).toISOString();
+        // Tracked products (in a basket or alert) whose latest price this
+        // month is below last month's average — from product_price_monthly
+        // (migration 012). No full price history is kept.
+        const thisMonth = new Date();
+        thisMonth.setUTCDate(1);
+        const thisMonthIso = thisMonth.toISOString().slice(0, 10);
+        const lastMonth = new Date(thisMonth);
+        lastMonth.setUTCMonth(lastMonth.getUTCMonth() - 1);
+        const lastMonthIso = lastMonth.toISOString().slice(0, 10);
 
-        type PriceHistoryRow = { product_id: string; chain_id: string; price: number; captured_at: string };
-        const [recent, older] = await Promise.all([
-          fetchAllPages<PriceHistoryRow>(
-            (from, to) => supabase.from('price_history').select('product_id, chain_id, price, captured_at')
-              .gte('captured_at', cutoffIso).order('captured_at', { ascending: false }).range(from, to),
-            1000, 5000
-          ),
-          fetchAllPages<PriceHistoryRow>(
-            (from, to) => supabase.from('price_history').select('product_id, chain_id, price, captured_at')
-              .lt('captured_at', cutoffIso).order('captured_at', { ascending: false }).range(from, to),
-            1000, 5000
-          ),
-        ]);
+        const { data: rows, error: rowsErr } = await supabase
+          .from('product_price_monthly')
+          .select('product_id, chain_id, month, avg_price, last_price')
+          .in('month', [lastMonthIso, thisMonthIso]);
+        if (rowsErr) throw rowsErr;
 
-        // Latest row per (product_id, chain_id) in each window — both result
-        // sets are already ordered newest-first, so the first time a key is
-        // seen is its latest snapshot in that window.
-        const latestInWindow = (rows: Array<{ product_id: string; chain_id: string; price: number }>) => {
-          const map = new Map<string, number>();
-          for (const r of rows) {
-            const key = `${r.product_id}|${r.chain_id}`;
-            if (!map.has(key)) map.set(key, r.price);
-          }
-          return map;
-        };
-
-        const newPrices = latestInWindow(recent);
-        const oldPrices = latestInWindow(older);
+        const prevAvg = new Map<string, number>();
+        const current = new Map<string, number>();
+        for (const r of rows ?? []) {
+          const key = `${r.product_id}|${r.chain_id}`;
+          if (r.month === lastMonthIso) prevAvg.set(key, Number(r.avg_price));
+          else current.set(key, Number(r.last_price));
+        }
 
         const drops: Array<{ product_id: string; chain_id: string; old_price: number; new_price: number; pct_drop: number }> = [];
-        for (const [key, newPrice] of newPrices) {
-          const oldPrice = oldPrices.get(key);
+        for (const [key, newPrice] of current) {
+          const oldPrice = prevAvg.get(key);
           if (oldPrice == null || oldPrice <= newPrice) continue;
           const [product_id, chain_id] = key.split('|');
           drops.push({
@@ -298,7 +289,7 @@ export async function GET(req: NextRequest) {
 
         const [{ data: products }, { data: prices }] = await Promise.all([
           supabase.from('products').select('id, name_he, name_en').in('id', topIds),
-          supabase.from('latest_prices').select('product_id, price').in('product_id', topIds),
+          supabase.from('chain_prices').select('product_id, price').in('product_id', topIds),
         ]);
 
         const minPriceByProduct: Record<string, number> = {};
@@ -319,26 +310,37 @@ export async function GET(req: NextRequest) {
       }
 
       case 'price_trend': {
+        // Monthly average per chain from product_price_monthly (migration
+        // 012) — only kept for tracked products (in a basket or alert).
+        // Points keep the { chain_id, price, captured_at } shape the client's
+        // buildTrendChartData() expects; captured_at is the month's first day.
         const productId = searchParams.get('product_id');
         if (!productId) return NextResponse.json({ error: 'product_id is required' }, { status: 400 });
-        const days = Math.max(1, Math.min(365, parseInt(searchParams.get('days') ?? '30')));
-        const cutoffIso = new Date(Date.now() - days * 86400000).toISOString();
+        const months = Math.max(1, Math.min(24, parseInt(searchParams.get('months') ?? '12')));
+        const since = new Date();
+        since.setUTCDate(1);
+        since.setUTCMonth(since.getUTCMonth() - (months - 1));
 
-        const history = await fetchAllPages<{ chain_id: string; price: number; captured_at: string }>(
-          (from, to) => supabase.from('price_history').select('chain_id, price, captured_at')
-            .eq('product_id', productId).gte('captured_at', cutoffIso).order('captured_at', { ascending: true }).range(from, to),
-          1000, 2000
-        );
+        const [{ data: rows, error: rowsErr }, { data: chains }] = await Promise.all([
+          supabase
+            .from('product_price_monthly')
+            .select('chain_id, month, avg_price')
+            .eq('product_id', productId)
+            .gte('month', since.toISOString().slice(0, 10))
+            .order('month', { ascending: true }),
+          supabase.from('chains').select('id, name_he, name_en, color_hex'),
+        ]);
+        if (rowsErr) throw rowsErr;
 
-        const { data: chains } = await supabase.from('chains').select('id, name_he, name_en, color_hex');
-
-        const pointsPerChain: Record<string, number> = {};
-        for (const h of history) pointsPerChain[h.chain_id] = (pointsPerChain[h.chain_id] ?? 0) + 1;
+        const history = (rows ?? []).map((r) => ({ chain_id: r.chain_id, price: Number(r.avg_price), captured_at: r.month as string }));
+        const monthsPerChain: Record<string, number> = {};
+        for (const h of history) monthsPerChain[h.chain_id] = (monthsPerChain[h.chain_id] ?? 0) + 1;
 
         return NextResponse.json({
           history,
           chains: chains ?? [],
-          has_enough_history: Object.values(pointsPerChain).some((c) => c >= 2),
+          granularity: 'month',
+          has_enough_history: Object.values(monthsPerChain).some((c) => c >= 2),
         });
       }
 
@@ -491,7 +493,7 @@ export async function GET(req: NextRequest) {
         if (productIds.length === 0) return NextResponse.json({ ranking: [] });
 
         const [{ data: prices, error: pricesErr }, { data: chains, error: chainsErr }] = await Promise.all([
-          supabase.from('latest_prices').select('product_id, chain_id, price').in('product_id', productIds),
+          supabase.from('chain_prices').select('product_id, chain_id, price').in('product_id', productIds),
           supabase.from('chains').select('id, name_he, name_en, color_hex'),
         ]);
         if (pricesErr) throw pricesErr;

@@ -104,9 +104,12 @@ export async function mapWithConcurrency<T, R>(items: T[], concurrency: number, 
   return results;
 }
 
-export async function refreshLatestPrices(): Promise<void> {
-  const res = await restFetch('rpc/refresh_latest_prices', { method: 'POST', body: '{}' });
+// Folds today's chain price of every tracked product (basket items + active
+// alerts) into product_price_monthly. Safe to call more than once a day.
+export async function rollupMonthlyPrices(): Promise<number> {
+  const res = await restFetch('rpc/rollup_monthly_prices', { method: 'POST', body: '{}' });
   if (!res.ok) {
-    throw new Error(`refresh_latest_prices() failed: HTTP ${res.status} ${await res.text()}`);
+    throw new Error(`rollup_monthly_prices() failed: HTTP ${res.status} ${await res.text()}`);
   }
+  return Number(await res.json()) || 0;
 }

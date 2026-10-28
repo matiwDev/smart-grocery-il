@@ -1282,7 +1282,7 @@ interface TrendHistoryRow {
   captured_at: string;
 }
 
-// Groups raw price_history rows into one row per day (recharts wants a flat
+// Groups price_trend points (monthly averages from product_price_monthly) into one row per date (recharts wants a flat
 // array with one key per line), keeping the last price seen that day per
 // chain since `history` is already ordered oldest-first.
 function buildTrendChartData(history: TrendHistoryRow[]): Array<Record<string, string | number>> {
@@ -1482,7 +1482,7 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
     setTrendQuery('');
     setTrendLoading(true);
     try {
-      const res = await fetch(`/api/analytics?type=price_trend&product_id=${p.id}&days=30`);
+      const res = await fetch(`/api/analytics?type=price_trend&product_id=${p.id}&months=12`);
       const data = await res.json();
       const history: TrendHistoryRow[] = data.history ?? [];
       setTrendHasEnough(!!data.has_enough_history);
@@ -2174,7 +2174,7 @@ export default function SmartGroceryDashboard() {
           setActiveBasketId(bData.id);
 
           // Single round trip: the API route joins basket_items -> products ->
-          // latest_prices server-side instead of the client doing it in two
+          // chain_prices server-side instead of the client doing it in two
           // separate queries.
           const res = await fetch(`/api/baskets/${bData.id}/items?user_id=${currentUser.id}`);
           if (!res.ok) { setBasket([]); return; }
@@ -2500,7 +2500,7 @@ export default function SmartGroceryDashboard() {
         ? supabase.from('products').select('id, name_he, name_en, category, barcode').in('id', withProductId.map((i) => i.product_id as string))
         : Promise.resolve({ data: [] as Array<{ id: string; name_he: string; name_en: string | null; category: string | null; barcode: string | null }> }),
       withProductId.length > 0
-        ? supabase.from('latest_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', withProductId.map((i) => i.product_id as string))
+        ? supabase.from('chain_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', withProductId.map((i) => i.product_id as string))
         : Promise.resolve({ data: [] as Array<{ product_id: string } & ChainPrice> }),
     ]);
 
@@ -2538,7 +2538,7 @@ export default function SmartGroceryDashboard() {
         .maybeSingle();
       if (!match) continue;
       const { data: matchPrices } = await supabase
-        .from('latest_prices')
+        .from('chain_prices')
         .select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at')
         .eq('product_id', match.id);
       const productPrices: Record<string, ChainPrice> = {};

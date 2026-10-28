@@ -1,7 +1,7 @@
 /**
  * Real price ingestion logic — fetches real price feeds published under
  * Israel's Food Act (2014) transparency requirement and loads them into
- * price_history. Talks to Supabase via plain REST (PostgREST) with the
+ * chain_prices + branch_price_overrides (migration 012). Talks to Supabase via plain REST (PostgREST) with the
  * service-role key rather than @supabase/supabase-js: the standalone-script
  * caller (scripts/run-ingest-cli.ts) runs on Node 20, and realtime-js (a
  * supabase-js dependency) requires a native WebSocket only available from
@@ -19,12 +19,12 @@
  * files (one file = one physical store), not one flat catalog — each
  * fetchAndParse() now returns items grouped by the store that published
  * them (ParsedBranchFeed[] / an equivalent per-chain shape). Every
- * price_history row inserted here gets a real branch_id: resolveBranchId()
+ * branch observation gets a real branch_id: resolveBranchId()
  * looks up (chain_id, external_id) in branches (as already seeded by
  * scripts/seed-branches.ts) and, if a store isn't there yet, creates a
  * placeholder branch row on the fly so no price is ever silently dropped.
  */
-import { restFetch, chunk, refreshLatestPrices, mapWithConcurrency } from './supabase-rest';
+import { restFetch, chunk, mapWithConcurrency, rollupMonthlyPrices } from './supabase-rest';
 import { fetchShufersalTotalPages, fetchShufersalFileLinks, fetchShufersalFileLinksPage, fetchAndParseShufersalFile } from './shufersal-feed';
 import { ParsedBranchFeed } from './parsers/types';
 import { fetchAndParse as fetchAndParseVictory } from './parsers/victory';
@@ -65,23 +65,12 @@ interface BranchGroup {
   items: FeedItem[];
 }
 
-interface PriceHistoryRow {
-  product_id: string;
-  chain_id: string;
-  branch_id: string | null;
-  price: number;
-  unit_qty: number;
-  unit_type: string;
-  is_sale: boolean;
-  captured_at: string;
-  source: string;
-}
-
 interface IngestResult {
   chainId: string;
   fetched: number;
   matched: number;
   inserted: number;
+  overridesWritten: number;
   branchesResolved: number;
   branchesCreated: number;
   errorText: string | null;
@@ -177,35 +166,145 @@ async function buildBarcodeToProductId(items: FeedItem[]): Promise<Map<string, s
   return map;
 }
 
-async function insertPriceRows(rows: PriceHistoryRow[]): Promise<number> {
-  let inserted = 0;
-  for (const batch of chunk(rows, 500)) {
-    const res = await restFetch('price_history', {
+// ─── Price model (migration 012) ────────────────────────────────────────────
+// price_history was dropped (710 MB — over the free tier). One row per
+// product x branch would be ~5-10M rows, so each chain's feed is collapsed to:
+//   chain_prices            one row per (product, chain) = the price MOST of
+//                           the chain's branches charge (mode; ties → lower)
+//   branch_price_overrides  one row per (product, branch) only where that
+//                           branch differs from the mode
+// History is kept only as monthly summaries for tracked products
+// (product_price_monthly, see rollupMonthlyPrices at the end of the run).
+
+interface ChainPriceRow {
+  product_id: string;
+  chain_id: string;
+  price: number;
+  min_price: number;
+  max_price: number;
+  branch_count: number;
+  unit_qty: number;
+  unit_type: string;
+  is_sale: boolean;
+  captured_at: string;
+}
+
+interface OverrideRow {
+  product_id: string;
+  branch_id: string;
+  chain_id: string;
+  price: number;
+  is_sale: boolean;
+  captured_at: string;
+}
+
+async function upsertRows(table: string, onConflict: string, rows: object[], batchSize = 500): Promise<number> {
+  let written = 0;
+  for (const batch of chunk(rows, batchSize)) {
+    const res = await restFetch(`${table}?on_conflict=${onConflict}`, {
       method: 'POST',
-      headers: { Prefer: 'return=minimal' },
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify(batch),
     });
     if (!res.ok) {
-      throw new Error(`Failed to insert price_history batch: HTTP ${res.status} ${await res.text()}`);
+      throw new Error(`Failed to upsert ${table} batch: HTTP ${res.status} ${await res.text()}`);
     }
-    inserted += batch.length;
+    written += batch.length;
   }
-  return inserted;
+  return written;
+}
+
+// Overrides for the branches processed in this run that weren't re-written
+// (captured_at older than the run start) are stale: that branch now charges
+// the chain price again, or no longer carries the product. Scoped to the
+// branches actually fetched, so a partial feed (e.g. some FTP files failed)
+// never wipes overrides of branches this run didn't see.
+async function deleteStaleOverrides(chainId: string, branchIds: string[], runStartedAt: string): Promise<void> {
+  for (const batch of chunk(branchIds, 100)) {
+    const res = await restFetch(
+      `branch_price_overrides?chain_id=eq.${encodeURIComponent(chainId)}&branch_id=in.(${batch.join(',')})&captured_at=lt.${encodeURIComponent(runStartedAt)}`,
+      { method: 'DELETE', headers: { Prefer: 'return=minimal' } }
+    );
+    if (!res.ok) {
+      console.warn(`  (failed to delete stale overrides for ${chainId}: HTTP ${res.status} ${await res.text()})`);
+    }
+  }
+}
+
+// Pure: collapses per-branch observations into chain rows + override rows.
+export function collapseToChainPrices(
+  chainId: string,
+  observations: Array<{ productId: string; branchId: string | null; item: FeedItem }>,
+  now: string
+): { chainRows: ChainPriceRow[]; overrides: OverrideRow[] } {
+  // productId -> branchKey -> observation (last one wins for duplicate lines
+  // in the same branch file). Feeds with no store id use a single '_' key.
+  const byProduct = new Map<string, Map<string, { branchId: string | null; item: FeedItem }>>();
+  for (const obs of observations) {
+    if (!Number.isFinite(obs.item.price) || obs.item.price <= 0) continue;
+    let perBranch = byProduct.get(obs.productId);
+    if (!perBranch) byProduct.set(obs.productId, (perBranch = new Map()));
+    perBranch.set(obs.branchId ?? '_', { branchId: obs.branchId, item: obs.item });
+  }
+
+  const chainRows: ChainPriceRow[] = [];
+  const overrides: OverrideRow[] = [];
+
+  for (const [productId, perBranch] of byProduct) {
+    const entries = [...perBranch.values()];
+    const counts = new Map<number, number>();
+    let min = Infinity;
+    let max = -Infinity;
+    for (const { item } of entries) {
+      const p = Math.round(item.price * 100) / 100;
+      counts.set(p, (counts.get(p) ?? 0) + 1);
+      if (p < min) min = p;
+      if (p > max) max = p;
+    }
+    let mode = min;
+    let modeCount = 0;
+    for (const [p, c] of counts) {
+      if (c > modeCount || (c === modeCount && p < mode)) {
+        mode = p;
+        modeCount = c;
+      }
+    }
+    const sample = entries.find((e) => Math.round(e.item.price * 100) / 100 === mode)!.item;
+    chainRows.push({
+      product_id: productId,
+      chain_id: chainId,
+      price: mode,
+      min_price: min,
+      max_price: max,
+      branch_count: entries.length,
+      unit_qty: sample.unitQty,
+      unit_type: sample.unitType,
+      is_sale: sample.isSale,
+      captured_at: now,
+    });
+
+    for (const { branchId, item } of entries) {
+      const p = Math.round(item.price * 100) / 100;
+      if (!branchId || p === mode) continue;
+      overrides.push({ product_id: productId, branch_id: branchId, chain_id: chainId, price: p, is_sale: item.isSale, captured_at: now });
+    }
+  }
+
+  return { chainRows, overrides };
 }
 
 // Shared by every chain: flattens barcode matching across all of a chain's
-// branch groups (one batched lookup instead of one per branch), then
-// resolves/creates a branch per group and stamps its items with that
-// branch_id before inserting.
+// branch groups (one batched lookup instead of one per branch), resolves/
+// creates a branch per group, then writes chain_prices + overrides.
 async function matchAndInsertGrouped(
   chainId: string,
   groups: BranchGroup[]
-): Promise<{ matched: number; inserted: number; branchesResolved: number; branchesCreated: number }> {
+): Promise<{ matched: number; inserted: number; overridesWritten: number; branchesResolved: number; branchesCreated: number }> {
   const barcodeToProductId = await buildBarcodeToProductId(groups.flatMap((g) => g.items));
   const branchCache = new Map<string, string>();
   const branchStats = { resolved: 0, created: 0 };
-  const now = new Date().toISOString();
-  const rows: PriceHistoryRow[] = [];
+  const runStartedAt = new Date().toISOString();
+  const observations: Array<{ productId: string; branchId: string | null; item: FeedItem }> = [];
 
   for (const group of groups) {
     const branchId = group.externalId
@@ -215,22 +314,26 @@ async function matchAndInsertGrouped(
     for (const item of group.items) {
       const productId = barcodeToProductId.get(item.barcode);
       if (!productId) continue;
-      rows.push({
-        product_id: productId,
-        chain_id: chainId,
-        branch_id: branchId,
-        price: item.price,
-        unit_qty: item.unitQty,
-        unit_type: item.unitType,
-        is_sale: item.isSale,
-        captured_at: now,
-        source: `${chainId}_gov_feed`,
-      });
+      observations.push({ productId, branchId, item });
     }
   }
 
-  const inserted = await insertPriceRows(rows);
-  return { matched: rows.length, inserted, branchesResolved: branchStats.resolved, branchesCreated: branchStats.created };
+  const { chainRows, overrides } = collapseToChainPrices(chainId, observations, runStartedAt);
+  console.log(
+    `[${chainId}] ${observations.length} matched observations → ${chainRows.length} chain prices + ${overrides.length} branch overrides`
+  );
+
+  const inserted = await upsertRows('chain_prices', 'product_id,chain_id', chainRows);
+  const overridesWritten = await upsertRows('branch_price_overrides', 'product_id,branch_id', overrides);
+  await deleteStaleOverrides(chainId, [...new Set(branchCache.values())], runStartedAt);
+
+  return {
+    matched: observations.length,
+    inserted,
+    overridesWritten,
+    branchesResolved: branchStats.resolved,
+    branchesCreated: branchStats.created,
+  };
 }
 
 // Never allowed to throw: this used to be an unprotected `await restFetch(...)`
@@ -255,6 +358,7 @@ async function writeIngestLog(result: IngestResult, startedAt: string): Promise<
         products_fetched: result.fetched,
         products_matched: result.matched,
         products_inserted: result.inserted,
+        overrides_written: result.overridesWritten,
         error_text: result.errorText,
       }),
     });
@@ -280,6 +384,7 @@ async function ingestShufersal(): Promise<IngestResult> {
   let fetched = 0;
   let matched = 0;
   let inserted = 0;
+  let overridesWritten = 0;
   let branchesResolved = 0;
   let branchesCreated = 0;
   let errorText: string | null = null;
@@ -320,6 +425,7 @@ async function ingestShufersal(): Promise<IngestResult> {
     const result = await matchAndInsertGrouped(chainId, groups);
     matched = result.matched;
     inserted = result.inserted;
+    overridesWritten = result.overridesWritten;
     branchesResolved = result.branchesResolved;
     branchesCreated = result.branchesCreated;
 
@@ -328,7 +434,7 @@ async function ingestShufersal(): Promise<IngestResult> {
     console.error(`[shufersal] ERROR: ${errorText}`);
   }
 
-  const result: IngestResult = { chainId, fetched, matched, inserted, branchesResolved, branchesCreated, errorText };
+  const result: IngestResult = { chainId, fetched, matched, inserted, overridesWritten, branchesResolved, branchesCreated, errorText };
   await writeIngestLog(result, startedAt);
   return result;
 }
@@ -355,6 +461,7 @@ export async function ingestFromParser(chainId: string, fetchAndParse: () => Pro
   let fetched = 0;
   let matched = 0;
   let inserted = 0;
+  let overridesWritten = 0;
   let branchesResolved = 0;
   let branchesCreated = 0;
   let errorText: string | null = null;
@@ -374,6 +481,7 @@ export async function ingestFromParser(chainId: string, fetchAndParse: () => Pro
     const result = await matchAndInsertGrouped(chainId, groups);
     matched = result.matched;
     inserted = result.inserted;
+    overridesWritten = result.overridesWritten;
     branchesResolved = result.branchesResolved;
     branchesCreated = result.branchesCreated;
 
@@ -382,7 +490,7 @@ export async function ingestFromParser(chainId: string, fetchAndParse: () => Pro
     console.error(`[${chainId}] ERROR: ${errorText}`);
   }
 
-  const result: IngestResult = { chainId, fetched, matched, inserted, branchesResolved, branchesCreated, errorText };
+  const result: IngestResult = { chainId, fetched, matched, inserted, overridesWritten, branchesResolved, branchesCreated, errorText };
   await writeIngestLog(result, startedAt);
   return result;
 }
@@ -412,29 +520,16 @@ export async function runIngestion(): Promise<IngestResult[]> {
       results.push(await run());
     } catch (err) {
       console.error(`[${chainId}] UNEXPECTED ERROR outside its own try/catch, continuing to next chain:`, err instanceof Error ? err.message : err);
-      results.push({ chainId, fetched: 0, matched: 0, inserted: 0, branchesResolved: 0, branchesCreated: 0, errorText: err instanceof Error ? err.message : String(err) });
+      results.push({ chainId, fetched: 0, matched: 0, inserted: 0, overridesWritten: 0, branchesResolved: 0, branchesCreated: 0, errorText: err instanceof Error ? err.message : String(err) });
     }
   }
 
-  // Refreshed ONCE at the end of the whole run, not once per chain (Phase 18
-  // originally did the latter and hit `57014 canceling statement due to
-  // statement timeout` on 6 of 7 chains during a smoke test — the view scans
-  // all of price_history on every call, so 7 calls in a row against a
-  // multi-hundred-thousand-row table is 7x the cost for no benefit; every
-  // chain's rows are visible to the same single refresh at the end anyway).
-  // Still wrapped defensively: price_history itself is already durably
-  // written regardless of whether this succeeds, and a stuck refresh
-  // shouldn't make the whole run report as failed. If this keeps timing out
-  // at full data volume, it needs a manual `SELECT refresh_latest_prices();`
-  // from the Supabase Dashboard SQL Editor (a Dashboard session isn't bound
-  // by the same statement_timeout as the PostgREST/service-role connection
-  // this script uses) — see CLAUDE.md "Data architecture".
-  console.log('\nRefreshing latest_prices / latest_prices_by_branch...');
+  // Monthly price summary for tracked products only (migration 012).
   try {
-    await refreshLatestPrices();
-    console.log('Refresh succeeded.');
+    const rolled = await rollupMonthlyPrices();
+    console.log(`\nMonthly rollup: ${rolled} tracked product x chain rows updated.`);
   } catch (err) {
-    console.error('Refresh FAILED (price_history rows are still inserted correctly):', err instanceof Error ? err.message : err);
+    console.error('Monthly rollup FAILED (current prices are still written):', err instanceof Error ? err.message : err);
   }
 
   return results;

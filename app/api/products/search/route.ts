@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 
     // Fetch latest prices for all matched products across all chains in one query
     const { data: prices, error: priceError } = await supabase
-      .from('latest_prices')
+      .from('chain_prices')
       .select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at')
       .in('product_id', productIds);
 

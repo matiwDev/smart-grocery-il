@@ -9,7 +9,7 @@
  * the first SHUFERSAL_STORE_LIMIT branch files, inserts only the ones not
  * already in products (existing rows are left untouched — re-running this
  * script is safe and only adds new catalog items), and inserts a matching
- * price_history row for each newly-added product.
+ * chain_prices row for each newly-added product.
  *
  * The real feed has no ItemSection/SubSection field (verified against the
  * live feed — only ItemName, ManufactureName, price/unit fields exist), so
@@ -17,7 +17,7 @@
  *
  * Run with: npm run seed:products
  */
-import { requireEnv, restFetch, chunk, refreshLatestPrices, sleep } from './supabase-rest';
+import { requireEnv, restFetch, chunk, sleep } from './supabase-rest';
 import { fetchShufersalTotalPages, fetchShufersalFileLinksPage, fetchAndParseShufersalFile, ShufersalItem } from './shufersal-feed';
 
 requireEnv();
@@ -63,7 +63,7 @@ async function getProductCount(): Promise<number> {
 // Inserts only barcodes not already present in products — existing rows are
 // left untouched (resolution=ignore-duplicates), so this is safe to re-run.
 // Returns just the newly-inserted rows (PostgREST omits ignored conflicts
-// from the response), which is exactly what's needed to seed price_history
+// from the response), which is exactly what's needed to seed chain_prices
 // for new products only.
 async function insertNewProducts(items: ShufersalItem[]): Promise<Map<string, string>> {
   const rows = items.map((item) => ({
@@ -98,24 +98,27 @@ async function insertPrices(items: ShufersalItem[], barcodeToId: Map<string, str
     .map((item) => ({
       product_id: barcodeToId.get(item.barcode),
       chain_id: 'shufersal',
-      branch_id: null,
       price: item.price,
+      min_price: item.price,
+      max_price: item.price,
+      branch_count: 1,
       unit_qty: item.unitQty,
       unit_type: item.unitType,
       is_sale: false,
       captured_at: now,
-      source: 'shufersal_gov_feed',
     }));
 
   let inserted = 0;
   for (const batch of chunk(rows, 500)) {
-    const res = await restFetch('price_history', {
+    // Seed-only placeholder price; the next `npm run ingest` replaces it
+    // with the real chain-wide mode price (migration 012).
+    const res = await restFetch('chain_prices?on_conflict=product_id,chain_id', {
       method: 'POST',
-      headers: { Prefer: 'return=minimal' },
+      headers: { Prefer: 'resolution=ignore-duplicates,return=minimal' },
       body: JSON.stringify(batch),
     });
     if (!res.ok) {
-      throw new Error(`Failed to insert price_history batch: HTTP ${res.status} ${await res.text()}`);
+      throw new Error(`Failed to insert chain_prices batch: HTTP ${res.status} ${await res.text()}`);
     }
     inserted += batch.length;
   }
@@ -130,9 +133,9 @@ async function main() {
   console.log(`[seed] Shufersal listing has ${totalPages} pages (~20 branch files each)`);
 
   // Cross-batch dedup: only the FIRST time a barcode is seen anywhere in the
-  // run gets a products insert attempt + a price_history row — later batches
+  // run gets a products insert attempt + a chain_prices row — later batches
   // skip it entirely (on_conflict=ignore-duplicates would no-op it anyway,
-  // but this also avoids inserting a second price_history row for the same
+  // but this also avoids inserting a second chain_prices row for the same
   // barcode from a later branch file, matching the original single-pass
   // behavior).
   const seenBarcodes = new Set<string>();
@@ -169,14 +172,11 @@ async function main() {
     if (page < totalPages) await sleep(BATCH_DELAY_MS);
   }
 
-  console.log('[seed] Refreshing latest_prices...');
-  await refreshLatestPrices();
-
   const countAfter = await getProductCount();
   console.log(`\n[seed] Products before: ${countBefore}`);
   console.log(`[seed] Products after:  ${countAfter}`);
   console.log(`[seed] New products added: ${totalNewProducts}`);
-  console.log(`[seed] New price_history rows inserted: ${totalNewPrices}`);
+  console.log(`[seed] New chain_prices rows inserted: ${totalNewPrices}`);
 }
 
 main().catch((err) => {
