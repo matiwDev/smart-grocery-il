@@ -18,6 +18,7 @@ import {
 import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
 import { AuthModal, AuthMode } from '@/components/AuthModal';
 import { supabase } from '@/utils/supabase';
+import { authFetch } from '@/utils/authFetch';
 import { DebugPanel } from '@/components/DebugPanel';
 import { isDebugAllowed } from '@/lib/debug';
 import { ShoppingList } from '@/components/ShoppingList';
@@ -25,6 +26,7 @@ import { ItemEditSheet, ItemEditValues } from '@/components/ItemEditSheet';
 import { DoneShoppingSheet } from '@/components/DoneShoppingSheet';
 import { RecentTrips } from '@/components/RecentTrips';
 import { ChainPickerSheet } from '@/components/ChainPickerSheet';
+import { HouseholdChat } from '@/components/HouseholdChat';
 import {
   BasketItem, BasketItemRow, ChainMeta, ChainPrice, CustomProduct, OverrideMap,
   effective, unitPrice, estimate, rowToBasketItem, itemToRow, loadOverrides, uploadItemPhoto,
@@ -81,14 +83,6 @@ interface SavedBasket {
   name: string;
   updated_at: string;
   basket_items?: SavedBasketItem[];
-}
-
-interface ChatMessage {
-  id: string;
-  user_id: string;
-  nickname: string;
-  content: string;
-  created_at: string;
 }
 
 // ─── Dictionary ───────────────────────────────────────────────────────────────
@@ -216,6 +210,10 @@ const DICTIONARY = {
     clearListConfirm: 'לרוקן את הסל? הפעולה בלתי הפיכה.',
     listSavedToast: 'הרשימה נשמרה',
     listLoadedToast: 'הרשימה נטענה',
+    loadIntoList: 'טען לרשימה הנוכחית',
+    loadListReplaceConfirm: 'לטעון את הרשימה השמורה במקום הרשימה הנוכחית של משק הבית?',
+    householdMembersLabel: 'בני הבית',
+    listUpdatedByOther: 'הרשימה עודכנה',
     basketRestoredToast: 'הסל שלך שוחזר',
     listDeletedToast: 'הרשימה נמחקה',
     deleteListConfirm: 'למחוק רשימה זו?',
@@ -394,6 +392,10 @@ const DICTIONARY = {
     clearListConfirm: 'Clear the basket? This cannot be undone.',
     listSavedToast: 'List saved',
     listLoadedToast: 'List loaded',
+    loadIntoList: 'Load into current list',
+    loadListReplaceConfirm: "Replace your household's current list with this saved list?",
+    householdMembersLabel: 'Household members',
+    listUpdatedByOther: 'List updated',
     basketRestoredToast: 'Your basket restored',
     listDeletedToast: 'List deleted',
     deleteListConfirm: 'Delete this list?',
@@ -513,73 +515,6 @@ function BottomNav({ currentView, setCurrentView, t }: BottomNavProps) {
         );
       })}
     </nav>
-  );
-}
-
-// Formats a chat message timestamp: today shows time only (e.g. 14:32),
-// older messages show date + time (e.g. 03/07 14:32).
-function formatMessageTimestamp(iso: string, lang: Lang): string {
-  const date = new Date(iso);
-  const now = new Date();
-  const isToday = date.toDateString() === now.toDateString();
-  const locale = lang === 'he' ? 'he-IL' : 'en-US';
-  const timeStr = date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
-  if (isToday) return timeStr;
-  const dateStr = date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit' });
-  return `${dateStr} ${timeStr}`;
-}
-
-// "היום"/"Today", "אתמול"/"Yesterday", or a DD/MM/YYYY date — used for the
-// centered date-separator pill between chat message groups.
-function formatDateSeparator(iso: string, lang: Lang): string {
-  const date = new Date(iso);
-  const now = new Date();
-  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
-  if (diffDays === 0) return lang === 'he' ? 'היום' : 'Today';
-  if (diffDays === 1) return lang === 'he' ? 'אתמול' : 'Yesterday';
-  const locale = lang === 'he' ? 'he-IL' : 'en-US';
-  return date.toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-type ChatTimelineEntry =
-  | { type: 'separator'; key: string; label: string }
-  | { type: 'message'; key: string; msg: ChatMessage };
-
-// Groups chat messages into a flat render list with a date-separator entry
-// inserted whenever the calendar date changes between consecutive messages.
-function buildChatTimeline(messages: ChatMessage[], lang: Lang): ChatTimelineEntry[] {
-  const entries: ChatTimelineEntry[] = [];
-  let lastDateKey: string | null = null;
-  for (const msg of messages) {
-    const dateKey = new Date(msg.created_at).toDateString();
-    if (dateKey !== lastDateKey) {
-      entries.push({ type: 'separator', key: `sep-${dateKey}`, label: formatDateSeparator(msg.created_at, lang) });
-      lastDateKey = dateKey;
-    }
-    entries.push({ type: 'message', key: msg.id, msg });
-  }
-  return entries;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-// Wraps every case-insensitive match of `query` inside `text` in a <mark>.
-// Renders `text` untouched when query is blank.
-function HighlightMatch({ text, query }: { text: string; query: string }) {
-  const q = query.trim();
-  if (!q) return <>{text}</>;
-  const parts = text.split(new RegExp(`(${escapeRegExp(q)})`, 'gi'));
-  return (
-    <>
-      {parts.map((part, i) =>
-        part.toLowerCase() === q.toLowerCase()
-          ? <mark key={i} className="bg-[var(--color-accent)]/40 text-inherit rounded-sm">{part}</mark>
-          : <React.Fragment key={i}>{part}</React.Fragment>
-      )}
-    </>
   );
 }
 
@@ -861,7 +796,7 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
   const loadMarkets = useCallback(() => {
     if (!currentUserId) { setMarketsLoading(false); return; }
     setMarketsLoading(true);
-    fetch(`/api/analytics?type=custom_markets&user_id=${currentUserId}`)
+    authFetch(`/api/analytics?type=custom_markets`)
       .then((r) => r.json()).then((d) => setMarkets(d.markets ?? []))
       .finally(() => setMarketsLoading(false));
   }, [currentUserId]);
@@ -874,17 +809,17 @@ function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; l
       return;
     }
     setSpendingLoading(true);
-    fetch(`/api/analytics?type=spending_overview&user_id=${currentUserId}`)
+    authFetch(`/api/analytics?type=spending_overview`)
       .then((r) => r.json()).then((d) => setSpending(d))
       .finally(() => setSpendingLoading(false));
 
     setPersonalRankingLoading(true);
-    fetch(`/api/analytics?type=personal_chain_ranking&user_id=${currentUserId}`)
+    authFetch(`/api/analytics?type=personal_chain_ranking`)
       .then((r) => r.json()).then((d) => setPersonalRanking(d.ranking ?? []))
       .finally(() => setPersonalRankingLoading(false));
 
     setMonthlyBasketLoading(true);
-    fetch(`/api/analytics?type=monthly_basket&user_id=${currentUserId}`)
+    authFetch(`/api/analytics?type=monthly_basket`)
       .then((r) => r.json()).then((d) => {
         setMonthlyBasket(d.products ?? []);
         setMonthlyBasketTotalItems(d.total_items ?? 0);
@@ -1441,14 +1376,11 @@ export default function SmartGroceryDashboard() {
   // Saved lists
   const [savedBaskets, setSavedBaskets] = useState<SavedBasket[]>([]);
   const [isLoadingSaved, setIsLoadingSaved] = useState(false);
-  // Chat
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    { id: '1', user_id: 'dad', nickname: 'Dad', content: 'Don\'t forget the 3% milk!', created_at: new Date().toISOString() },
-    { id: '2', user_id: 'mom', nickname: 'Mom', content: 'Added to the list ✓', created_at: new Date().toISOString() },
-  ]);
-  const [chatInput, setChatInput] = useState('');
-  const [isChatSearchOpen, setIsChatSearchOpen] = useState(false);
-  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  // Household members (for the chat header and the profile card)
+  const [householdMembers, setHouseholdMembers] = useState<{ user_id: string; nickname: string; role: string }[]>([]);
+  // Refs for the live-update handlers (realtime callbacks outlive renders)
+  const listIdsRef = useRef<Set<string>>(new Set());
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const t = DICTIONARY[lang];
 
@@ -1506,7 +1438,22 @@ export default function SmartGroceryDashboard() {
     });
   }, []);
 
-  // ── Basket load on login ─────────────────────────────────────────────────────
+  // ── The household's shared list (phase 3) ───────────────────────────────────
+  // Everyone in a household works on the same current list (the household's
+  // non-archived basket). Changes by anyone arrive live (Realtime, below).
+
+  const reloadList = useCallback(async (basketId: string): Promise<BasketItem[] | null> => {
+    const res = await authFetch(`/api/baskets/${basketId}/items`);
+    if (!res.ok) return null;
+    const { items } = await res.json() as { items: BasketItemRow[] };
+    const next = items.map(rowToBasketItem);
+    setBasket(next);
+    return next;
+  }, []);
+
+  useEffect(() => {
+    listIdsRef.current = new Set(basket.map((i) => i.dbId).filter((x): x is string => !!x));
+  }, [basket]);
 
   useEffect(() => {
     if (!currentUser?.id || currentUser.id === '00000000-0000-0000-0000-000000000000' || !supabase) {
@@ -1514,64 +1461,101 @@ export default function SmartGroceryDashboard() {
       setIsBasketLoading(false);
       return;
     }
+    if (!household?.id) return; // wait for the household (created on first use)
 
+    let cancelled = false;
     setIsBasketLoading(true);
     (async () => {
       try {
         const { data: bData } = await supabase.from('baskets')
           .select('id')
-          .eq('user_id', currentUser.id)
+          .eq('household_id', household.id)
           .eq('is_archived', false)
           .order('created_at', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
 
-        if (bData) {
-          setActiveBasketId(bData.id);
-
-          // Single round trip: the API route joins basket_items -> products ->
-          // chain_prices server-side instead of the client doing it in two
-          // separate queries.
-          const res = await fetch(`/api/baskets/${bData.id}/items?user_id=${currentUser.id}`);
-          if (!res.ok) { setBasket([]); return; }
-          const { items } = await res.json() as { items: BasketItemRow[] };
-          if (items.length > 0) {
-            setBasket(items.map(rowToBasketItem));
-            showToast(t.basketRestoredToast);
-          }
-        } else {
+        let basketId = bData?.id as string | undefined;
+        if (!basketId) {
           const { data: newB } = await supabase.from('baskets').insert({
             user_id: currentUser.id,
+            household_id: household.id,
             name: lang === 'he' ? 'רשימת קניות' : 'My Grocery List',
-          }).select().single();
-          if (newB) setActiveBasketId(newB.id);
+          }).select('id').single();
+          basketId = newB?.id;
         }
+        if (cancelled || !basketId) return;
+        setActiveBasketId(basketId);
+        const items = await reloadList(basketId);
+        if (!cancelled && items && items.length > 0) showToast(t.basketRestoredToast);
       } catch {
-        setBasket([]);
+        if (!cancelled) setBasket([]);
       } finally {
-        setIsBasketLoading(false);
+        if (!cancelled) setIsBasketLoading(false);
       }
     })();
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser]);
+  }, [currentUser?.id, household?.id]);
 
   // ── Household + its product edits (phase 2) ─────────────────────────────────
-  // Every signed-in user belongs to a household (created on first use), so
-  // edits to catalog products are shared with everyone in it.
+  // Every signed-in user belongs to exactly one household (created on first
+  // use). Product edits, "My products", the list and the chat are shared in it.
+
+  const refreshHousehold = useCallback(async () => {
+    if (!supabase) return;
+    const { data } = await supabase.rpc('get_or_create_own_household').single();
+    if (!data) return;
+    const h = data as { id: string; name: string; invite_code: string | null };
+    setHousehold(h);
+    const [map, members] = await Promise.all([
+      loadOverrides(supabase, h.id),
+      supabase.rpc('get_household_members'),
+    ]);
+    setOverrides(map);
+    setHouseholdMembers((members.data ?? []) as { user_id: string; nickname: string; role: string }[]);
+  }, []);
 
   useEffect(() => {
-    if (!currentUser?.id || !supabase) return;
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase.rpc('get_or_create_own_household').single();
-      if (cancelled || !data) return;
-      const h = data as { id: string; name: string; invite_code: string | null };
-      setHousehold(h);
-      const map = await loadOverrides(supabase, h.id);
-      if (!cancelled) setOverrides(map);
-    })();
-    return () => { cancelled = true; };
-  }, [currentUser?.id]);
+    if (!currentUser?.id) return;
+    refreshHousehold();
+  }, [currentUser?.id, refreshHousehold]);
+
+  // ── Live updates from the household (Realtime) ──────────────────────────────
+  // Any change to the list's items, the household's product edits or its own
+  // products reloads the list (debounced, so a burst of changes is one reload).
+  // DELETE events carry only the row id under RLS, so they are matched against
+  // the ids currently on the list.
+
+  useEffect(() => {
+    if (!supabase || !activeBasketId || !household?.id) return;
+    const basketId = activeBasketId;
+    const householdId = household.id;
+    const scheduleReload = () => {
+      if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+      reloadTimerRef.current = setTimeout(() => { reloadList(basketId); }, 350);
+    };
+    const channel = supabase
+      .channel(`list:${basketId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'basket_items', filter: `basket_id=eq.${basketId}` }, scheduleReload)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'basket_items', filter: `basket_id=eq.${basketId}` }, scheduleReload)
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'basket_items' }, (payload) => {
+        const id = (payload.old as { id?: string }).id;
+        if (id && listIdsRef.current.has(id)) scheduleReload();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'custom_products', filter: `household_id=eq.${householdId}` }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'product_overrides', filter: `household_id=eq.${householdId}` }, () => {
+        loadOverrides(supabase, householdId).then(setOverrides);
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'product_overrides' }, () => {
+        loadOverrides(supabase, householdId).then(setOverrides);
+      })
+      .subscribe();
+    return () => {
+      if (reloadTimerRef.current) clearTimeout(reloadTimerRef.current);
+      supabase.removeChannel(channel);
+    };
+  }, [activeBasketId, household?.id, reloadList]);
 
   // ── Product search (debounced) ───────────────────────────────────────────────
 
@@ -1646,7 +1630,7 @@ export default function SmartGroceryDashboard() {
     }
 
     const values = Object.values(product.prices).map((p) => Number(p.price));
-    setBasket((prev) => [
+    setBasket((prev) => prev.some((i) => i.id === product.id) ? prev : [
       ...prev,
       {
         id: product.id,
@@ -1692,7 +1676,7 @@ export default function SmartGroceryDashboard() {
       }).select('id').single();
       dbId = data?.id;
     }
-    setBasket((prev) => [
+    setBasket((prev) => prev.some((i) => i.id === `custom:${cp.id}`) ? prev : [
       ...prev,
       {
         id: `custom:${cp.id}`,
@@ -1881,9 +1865,9 @@ export default function SmartGroceryDashboard() {
     const { data: existing } = await supabase
       .from('baskets')
       .select('id')
-      .eq('user_id', currentUser.id)
       .eq('name', trimmed)
       .eq('is_archived', true)
+      .limit(1)
       .maybeSingle();
 
     if (existing) {
@@ -1898,6 +1882,7 @@ export default function SmartGroceryDashboard() {
     if (!supabase || !currentUser?.id) return;
     const { data: newBasket } = await supabase.from('baskets').insert({
       user_id: currentUser.id,
+      household_id: household?.id ?? null,
       name,
       is_archived: true,
     }).select().single();
@@ -1938,14 +1923,20 @@ export default function SmartGroceryDashboard() {
     handleSaveList();
   };
 
-  // Loads a saved (is_archived=true) list into the working view with current
-  // estimated prices — same route as the login-time rehydration.
+  // Loads a saved (is_archived=true) list: its items replace the household's
+  // current list (copied, so the saved list stays as it was).
   const handleLoadSavedList = async (sb: SavedBasket) => {
-    if (!currentUser?.id) return;
-    const res = await fetch(`/api/baskets/${sb.id}/items?user_id=${currentUser.id}`);
-    const { items } = res.ok ? (await res.json() as { items: BasketItemRow[] }) : { items: [] as BasketItemRow[] };
-    setActiveBasketId(sb.id);
-    setBasket(items.map(rowToBasketItem));
+    if (!supabase || !activeBasketId || sb.id === activeBasketId) return;
+    if (basket.length > 0 && !window.confirm(t.loadListReplaceConfirm)) return;
+    const { data: rows, error } = await supabase.from('basket_items')
+      .select('product_id, custom_product_id, product_name, quantity_value, category, custom_price, image_url')
+      .eq('basket_id', sb.id);
+    if (error) { showToast(lang === 'he' ? 'טעינת הרשימה נכשלה' : 'Could not load the list'); return; }
+    await supabase.from('basket_items').delete().eq('basket_id', activeBasketId);
+    if (rows && rows.length > 0) {
+      await supabase.from('basket_items').insert(rows.map((r) => ({ ...r, basket_id: activeBasketId, checked: false })));
+    }
+    await reloadList(activeBasketId);
     setCurrentView('HOME');
     showToast(t.listLoadedToast);
   };
@@ -1954,7 +1945,7 @@ export default function SmartGroceryDashboard() {
     setDeleteConfirmId(null);
     setSavedBaskets((prev) => prev.filter((b) => b.id !== basketId));
     if (supabase && currentUser?.id) {
-      await supabase.from('baskets').delete().eq('id', basketId).eq('user_id', currentUser.id);
+      await supabase.from('baskets').delete().eq('id', basketId).eq('is_archived', true);
     }
     showToast(t.listDeletedToast);
   };
@@ -2116,7 +2107,7 @@ export default function SmartGroceryDashboard() {
     setIsLoadingSaved(true);
     supabase.from('baskets')
       .select('*, basket_items(*)')
-      .eq('user_id', currentUser.id)
+      .eq('is_archived', true)
       .order('updated_at', { ascending: false })
       .then(({ data }) => {
         setSavedBaskets(data ?? []);
@@ -2144,8 +2135,7 @@ export default function SmartGroceryDashboard() {
   const handleGenerateInviteCode = async () => {
     if (!supabase || !currentUser?.id) return;
     setIsLoadingHousehold(true);
-    const { data } = await supabase.rpc('get_or_create_own_household').single();
-    if (data) setHousehold(data as { id: string; name: string; invite_code: string | null });
+    await refreshHousehold();
     setIsLoadingHousehold(false);
   };
 
@@ -2166,21 +2156,9 @@ export default function SmartGroceryDashboard() {
     } else {
       setJoinStatus('success');
       setJoinCodeInput('');
+      await refreshHousehold();
     }
     setTimeout(() => setJoinStatus('idle'), 3000);
-  };
-
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
-    setChatMessages((prev) => [...prev, {
-      id: Date.now().toString(),
-      user_id: currentUser?.id || 'guest',
-      nickname: currentUser?.nickname || t.guest,
-      content: chatInput.trim(),
-      created_at: new Date().toISOString(),
-    }]);
-    setChatInput('');
   };
 
   const handleAuthSuccess = async (nickname: string) => {
@@ -2506,8 +2484,8 @@ export default function SmartGroceryDashboard() {
                     </div>
                     <p className="text-xs text-[var(--color-text-muted)]">{sb.basket_items?.length ?? 0} {lang === 'he' ? 'פריטים' : 'items'}</p>
                     <button onClick={() => handleLoadSavedList(sb)}
-                      className="w-full mt-4 bg-[var(--color-accent)]/10 hover:bg-[var(--color-accent)]/20 text-[var(--color-accent)] py-2 rounded-xl text-sm font-semibold transition-colors border border-[var(--color-accent)]/20">
-                      {t.viewDetails}
+                      className="w-full mt-4 bg-[var(--color-accent)]/10 hover:bg-[var(--color-accent)]/20 text-[var(--color-accent)] py-2 rounded-xl text-sm font-semibold transition-colors border border-[var(--color-accent)]/20 min-h-[44px]">
+                      {t.loadIntoList}
                     </button>
                   </div>
                 ))}
@@ -2601,6 +2579,19 @@ export default function SmartGroceryDashboard() {
                   </button>
                 )}
 
+                {householdMembers.length > 0 && (
+                  <div className="mt-6">
+                    <h4 className="text-sm font-medium text-[var(--color-text-muted)] mb-2">{t.householdMembersLabel} ({householdMembers.length})</h4>
+                    <ul className="flex flex-wrap gap-2">
+                      {householdMembers.map((m) => (
+                        <li key={m.user_id} className="px-3 py-1.5 rounded-full bg-[var(--color-bg-subtle)] border border-[var(--color-border)] text-sm text-[var(--color-text-primary)]">
+                          {m.nickname}{m.user_id === currentUser.id ? (lang === 'he' ? ' (אני)' : ' (me)') : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 <div className="mt-8 pt-6 border-t border-[var(--color-border)]">
                   <h4 className="text-sm font-medium text-[var(--color-text-muted)] mb-3">{t.joinHousehold}</h4>
                   <form onSubmit={handleJoinHousehold} className="flex flex-col sm:flex-row gap-3">
@@ -2640,79 +2631,17 @@ export default function SmartGroceryDashboard() {
         {/* ═══ CHAT ═══ */}
         {currentView === 'CHAT' && (
           <motion.div key="CHAT" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1 max-w-4xl mx-auto w-full flex flex-col gap-6 text-start mt-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-3xl font-bold text-[var(--color-text-primary)]">{t.navChat}</h2>
-              <button
-                onClick={() => { setIsChatSearchOpen((v) => !v); if (isChatSearchOpen) setChatSearchQuery(''); }}
-                aria-label={t.chatSearchPlaceholder}
-                className="w-11 h-11 flex items-center justify-center rounded-xl text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-              >
-                {isChatSearchOpen ? <X className="w-5 h-5" /> : <Search className="w-5 h-5" />}
-              </button>
-            </div>
-            <div className="bg-[var(--color-bg-panel)]/60 backdrop-blur-xl border border-[var(--color-border)] rounded-3xl p-6 shadow-xl flex flex-col" style={{ height: '60vh' }}>
-              <AnimatePresence>
-                {isChatSearchOpen && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                    <div className="relative mb-4">
-                      <Search className="w-4 h-4 absolute top-1/2 -translate-y-1/2 start-3 text-[var(--color-text-muted)]" />
-                      <input
-                        type="text" value={chatSearchQuery} onChange={(e) => setChatSearchQuery(e.target.value)}
-                        placeholder={t.chatSearchPlaceholder} autoFocus dir="auto"
-                        className="w-full bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-xl ps-9 pe-9 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] transition-colors"
-                      />
-                      {chatSearchQuery && (
-                        <button onClick={() => setChatSearchQuery('')} className="absolute top-1/2 -translate-y-1/2 end-2 w-7 h-7 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]">
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-              <div className="flex-1 overflow-y-auto space-y-3 mb-4 pe-2">
-                {(() => {
-                  const visibleMessages = chatSearchQuery.trim()
-                    ? chatMessages.filter((m) => m.content.toLowerCase().includes(chatSearchQuery.trim().toLowerCase()))
-                    : chatMessages;
-                  if (chatSearchQuery.trim() && visibleMessages.length === 0) {
-                    return <p className="text-center text-sm text-[var(--color-text-muted)] py-6">{t.chatNoResults}</p>;
-                  }
-                  return buildChatTimeline(visibleMessages, lang).map((entry) => {
-                    if (entry.type === 'separator') {
-                      return (
-                        <div key={entry.key} className="flex justify-center py-1">
-                          <span className="text-[11px] font-medium text-[var(--color-text-muted)] bg-[var(--color-bg-subtle)] rounded-full px-3 py-1">
-                            {entry.label}
-                          </span>
-                        </div>
-                      );
-                    }
-                    const msg = entry.msg;
-                    return (
-                      <div key={entry.key} className={`flex flex-col ${msg.user_id === currentUser?.id ? 'items-end' : 'items-start'}`}>
-                        <div className={`px-4 py-2 rounded-2xl max-w-[80%] text-sm ${msg.user_id === currentUser?.id ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)]' : 'bg-[var(--color-bg-subtle)] text-[var(--color-text-primary)]'}`}>
-                          <HighlightMatch text={msg.content} query={chatSearchQuery} />
-                        </div>
-                        <span className="text-[10px] text-[var(--color-text-muted)] mt-1">
-                          {msg.nickname} · {formatMessageTimestamp(msg.created_at, lang)}
-                        </span>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-              <form onSubmit={handleSendMessage} className="flex gap-3">
-                <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
-                  placeholder={lang === 'he' ? 'הקלד הודעה...' : 'Type a message...'}
-                  className="flex-1 bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-xl px-4 py-3 text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] transition-colors min-h-[44px]"
-                  dir="auto"
-                />
-                <button type="submit" disabled={!chatInput.trim()} className="bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] p-3 rounded-xl transition-colors disabled:opacity-50 min-h-[44px] min-w-[44px] flex items-center justify-center">
-                  <MessageCircle className="w-5 h-5" />
-                </button>
-              </form>
-            </div>
+            {currentUser?.id && household ? (
+              <HouseholdChat
+                householdId={household.id}
+                userId={currentUser.id!}
+                nickname={currentUser.nickname}
+                memberCount={Math.max(1, householdMembers.length)}
+                lang={lang}
+              />
+            ) : (
+              <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[var(--color-text-muted)]" /></div>
+            )}
           </motion.div>
         )}
 

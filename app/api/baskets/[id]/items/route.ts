@@ -2,33 +2,48 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabaseServer';
 import type { BasketItemRow } from '@/lib/list';
 
-// GET /api/baskets/{basketId}/items?user_id=<uid>
-// Rehydrates a list's items (catalog AND free-text items) with current
-// estimated prices in one request — used on login, and when loading a saved
-// list. Requires user_id so ownership can be checked server-side: this route
-// uses the service-role client, which bypasses RLS. Household edits to
-// products (product_overrides) are applied by the client, not here.
+// GET /api/baskets/{basketId}/items   (Authorization: Bearer <access token>)
+// Rehydrates a list's items (catalog AND "My products" items) with current
+// estimated prices in one request — used on login, on live updates from the
+// household, and when loading a saved list. This route uses the service-role
+// client (bypasses RLS), so it checks the caller itself: the signed-in user
+// must own the list or belong to the household it is shared with. Household
+// edits to products (product_overrides) are applied by the client, not here.
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id: basketId } = await params;
-    const userId = req.nextUrl.searchParams.get('user_id');
-
-    if (!userId) {
-      return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+    const token = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
+    if (!token) {
+      return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
     }
 
     const supabase = createServerClient();
+    const { data: auth, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !auth?.user) {
+      return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
+    }
+    const userId = auth.user.id;
 
     const { data: basketRow, error: basketError } = await supabase
       .from('baskets')
-      .select('id, user_id')
+      .select('id, user_id, household_id')
       .eq('id', basketId)
       .single();
 
     if (basketError || !basketRow) {
       return NextResponse.json({ error: 'Basket not found' }, { status: 404 });
     }
-    if (basketRow.user_id !== userId) {
+    let allowed = basketRow.user_id === userId;
+    if (!allowed && basketRow.household_id) {
+      const { data: member } = await supabase
+        .from('household_members')
+        .select('user_id')
+        .eq('household_id', basketRow.household_id)
+        .eq('user_id', userId)
+        .maybeSingle();
+      allowed = !!member;
+    }
+    if (!allowed) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

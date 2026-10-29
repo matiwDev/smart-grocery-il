@@ -23,10 +23,9 @@ lack names/photos/categories; it blew the free-tier database).
    default use that chain. Free text becomes a household "My product" (custom_products),
    found in search under "My products" whatever chain is chosen. Tapping an item's photo
    opens a large preview (change / remove); an empty photo slot opens the picker.
-   NOT YET: the list itself is still per user (baskets.user_id); household sharing of the
-   live list comes with phase 3 (Realtime).
-3. Household chat: real messages per household, live (Supabase Realtime), photo upload.
-   TODAY THE CHAT IS A PLACEHOLDER: hard-coded "Dad/Mom" messages, nothing saved or shared.
+3. Shared live list + household chat — DONE (phase3/household, migrations 021–022): the
+   household has ONE current list that every member sees and edits, live; saved lists are
+   the household's; real chat per household with photos, live. See "Household sharing".
 4. Recipes + meal plan → list (household recipes in Hebrew; TheMealDB shown in English).
 5. Product photo + health grade (Open Food Facts, cached; measure coverage first).
 6. What can I cook?
@@ -109,6 +108,33 @@ ingested but never shown. Promote one with
   Row key `custom:<id>`; older free-text rows (`free:<row id>`) still work.
 - `cheaperElsewhere()` in lib/list.ts drives the list hint.
 
+### Household sharing (migrations 021–022)
+- Every user is in exactly ONE household (`get_or_create_own_household()` creates one on
+  first use and returns the newest membership). `join_household_by_code(code)` moves you:
+  removes your other memberships; if the new household already has a current list, yours
+  becomes a saved list, otherwise yours becomes its list. `get_household_members()` →
+  user_id, nickname, role (profiles stay private to their owner).
+- Lists: `baskets` / `basket_items` RLS = owner OR member of `baskets.household_id`.
+  The current list = the household's newest non-archived basket (created with
+  household_id if none). Saved lists = archived baskets visible to you (own + household);
+  "Load into current list" COPIES a saved list's items into the current list.
+- `/api/baskets/{id}/items` and the personal `/api/analytics` reports authenticate with
+  the Supabase access token (`Authorization: Bearer`, `utils/authFetch.ts`,
+  `lib/authServer.ts`) — never a user_id parameter (service-role routes bypass RLS).
+- Realtime (`supabase_realtime` publication): basket_items, messages, product_overrides,
+  custom_products; REPLICA IDENTITY FULL on basket_items and messages. app/page.tsx
+  subscribes per list: INSERT/UPDATE filtered by basket_id, DELETE matched by row id (under
+  RLS a DELETE event carries only the id), household product edits / My products → a
+  debounced (350 ms) reload of the list.
+- `messages` (household_id NOT NULL, user_id default auth.uid(), nickname, message_text,
+  image_path; text or photo required). RLS: members read; insert only as yourself into
+  your household; delete your own. UI: components/HouseholdChat.tsx (last 200, live,
+  search, tap own message → delete, photo preview).
+- Storage bucket `chat-photos`: PRIVATE, path `<household_id>/<uuid>.jpg` (1280px JPEG),
+  members read/upload, uploader deletes; shown through 1-hour signed URLs.
+- Fixed in 022: the households / household_members read policies referenced themselves
+  ("infinite recursion"), so any direct read of those tables failed.
+
 ### Categories (migration 018)
 `categorize_product(name)` (SQL, Hebrew keyword rules, first match wins) sets
 `products.category` via trigger on insert/rename; also callable as an RPC (free-text items).
@@ -120,7 +146,6 @@ item. Old keys (dairy, meat, beverage) map via `normalizeCategory()`.
 ### Other tables
 - `chains` (7, 4 active), `products` (~38k, barcode-keyed)
 - `baskets`, `basket_items`, `profiles`, `households`, `household_members`
-- `messages` (unused so far: no household_id, no photo — rebuilt in phase 3)
 - `price_alerts`, `promotions`, `waitlist` (no UI; kept, tiny)
 - `ingest_log`, `custom_markets`, `custom_market_entries`, `schema_migrations`
 
@@ -220,10 +245,18 @@ Everything runs on free tiers. Watch:
 009_custom_markets, 010_basket_items_fk, 010_promotions, 011_branch_pricing_views,
 012_chain_prices, 013_drop_price_history, 014_lock_tracked_products, 015_chain_status,
 016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions,
-020_home_chain_custom_products
+020_home_chain_custom_products, 021_household_sharing_chat, 022_household_members_fix
 (all recorded in public.schema_migrations)
 
 Security note (019): `generate_household_invite(p_user_id)` and
 `join_household_by_code(p_user_id, p_code)` took any user id and were callable without
 signing in; nobody can execute them now. The app uses `get_or_create_own_household()` and
 `join_household_by_code(code)`, which act on `auth.uid()`.
+
+Security notes (021, phase 3): `messages` was readable and writable by ANY signed-in user
+(policy "Authenticated users read and write messages"); now household members only. The
+unused `/api/baskets/sync` route (service role, trusted a client-sent userId) was deleted;
+`/api/analytics` personal reports used a `user_id` parameter (anyone could read anyone's
+data) — now the access token. Open advisor items (low risk, not yet fixed):
+`handle_new_user()` is executable via RPC (trigger function), a few functions lack a fixed
+search_path, leaked-password protection is off (Auth settings).

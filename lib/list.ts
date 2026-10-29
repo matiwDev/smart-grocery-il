@@ -198,7 +198,7 @@ export async function uploadItemPhoto(supabase: SupabaseClient, userId: string, 
   return supabase.storage.from('item-photos').getPublicUrl(path).data.publicUrl;
 }
 
-async function downscale(file: File, maxSide: number): Promise<Blob> {
+export async function downscale(file: File, maxSide: number): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement('canvas');

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabaseServer';
+import { requestUserId } from '@/lib/authServer';
 
 // PostgREST silently caps any response at its configured max-rows (1000 on
 // this project, confirmed live: a plain `chain_prices` select with no range
@@ -98,11 +99,13 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const type = searchParams.get('type');
     const supabase = createServerClient();
+    // Personal reports are for the signed-in user only (never a user_id param).
+    const me = () => requestUserId(req, supabase);
 
     switch (type) {
       case 'savings': {
-        const userId = searchParams.get('user_id');
-        if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+        const userId = await me();
+        if (!userId) return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
 
         const { data: baskets, error: basketsErr } = await supabase
           .from('baskets')
@@ -256,8 +259,8 @@ export async function GET(req: NextRequest) {
       }
 
       case 'top_products': {
-        const userId = searchParams.get('user_id');
-        if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+        const userId = await me();
+        if (!userId) return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
 
         const { data: baskets, error: basketsErr } = await supabase
           .from('baskets')
@@ -352,8 +355,8 @@ export async function GET(req: NextRequest) {
       }
 
       case 'spending_overview': {
-        const userId = searchParams.get('user_id');
-        if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+        const userId = await me();
+        if (!userId) return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
 
         const { data: baskets, error: basketsErr } = await supabase
           .from('baskets')
@@ -481,8 +484,8 @@ export async function GET(req: NextRequest) {
       }
 
       case 'personal_chain_ranking': {
-        const userId = searchParams.get('user_id');
-        if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+        const userId = await me();
+        if (!userId) return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
 
         const { data: baskets, error: basketsErr } = await supabase.from('baskets').select('id').eq('user_id', userId);
         if (basketsErr) throw basketsErr;
@@ -541,8 +544,8 @@ export async function GET(req: NextRequest) {
       }
 
       case 'monthly_basket': {
-        const userId = searchParams.get('user_id');
-        if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+        const userId = await me();
+        if (!userId) return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
 
         const now = new Date();
         const monthParam = searchParams.get('month'); // YYYY-MM, defaults to current month
@@ -621,8 +624,8 @@ export async function GET(req: NextRequest) {
       }
 
       case 'custom_markets': {
-        const userId = searchParams.get('user_id');
-        if (!userId) return NextResponse.json({ error: 'user_id is required' }, { status: 400 });
+        const userId = await me();
+        if (!userId) return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
 
         const { data: markets, error: marketsErr } = await supabase
           .from('custom_markets')
