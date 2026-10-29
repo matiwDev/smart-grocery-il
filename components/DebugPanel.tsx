@@ -6,7 +6,7 @@
  * Open with the floating bug button or Ctrl/Cmd + Shift + D.
  */
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { Bug, X, RefreshCw, ShoppingBasket, Wifi, Database, Trash2, Copy, ChevronDown } from 'lucide-react';
+import { Bug, X, RefreshCw, ShoppingBasket, Wifi, Database, Trash2, Copy, ChevronDown, ChefHat } from 'lucide-react';
 import { supabase } from '@/utils/supabase';
 import {
   getNetworkCheats,
@@ -21,7 +21,7 @@ import {
 } from '@/lib/debug';
 
 const STAPLE_QUERIES = ['חלב', 'לחם', 'ביצים', 'עגבניות', 'קוטג', 'שמן', 'אורז', 'פסטה', 'קפה', 'סוכר', 'מלפפון', 'טונה'];
-const VIEWS = ['HOME', 'SCAN', 'SAVED_LISTS', 'ANALYTICS', 'CHAT', 'PROFILE'] as const;
+const VIEWS = ['HOME', 'MEALS', 'RECIPES', 'SCAN', 'SAVED_LISTS', 'ANALYTICS', 'CHAT', 'PROFILE'] as const;
 
 export interface DebugPanelProps {
   userId: string | null;
@@ -38,6 +38,10 @@ export interface DebugPanelProps {
   onSetAllChecked: (checked: boolean) => Promise<void>;
   onGoTo: (view: string) => void;
   showToast: (msg: string) => void;
+  /** Phase 4: sample Hebrew recipes, and a filled week of meals. */
+  onSeedRecipes?: () => Promise<number>;
+  onFillWeek?: () => Promise<number>;
+  onClearWeek?: () => Promise<number>;
 }
 
 interface ChainStatus {
@@ -241,6 +245,16 @@ export function DebugPanel(props: DebugPanelProps) {
                       <Btn danger onClick={() => run('Clear basket', props.onClearBasket)} disabled={!!busy || props.basketCount === 0}>Clear basket</Btn>
                     </div>
                   </Section>
+
+                  {props.onSeedRecipes && (
+                    <Section title="Recipes & meals" icon={ChefHat}>
+                      <div className="flex flex-wrap gap-2">
+                        <Btn onClick={() => run('Seed recipes', async () => { const n = await props.onSeedRecipes!(); props.showToast(`Added ${n} sample recipes`); })} disabled={!!busy}>+5 sample recipes</Btn>
+                        <Btn onClick={() => run('Fill week', async () => { const n = await props.onFillWeek!(); props.showToast(n ? `Planned ${n} meals this week` : 'No recipes / week already full'); })} disabled={!!busy}>Fill this week</Btn>
+                        <Btn danger onClick={() => run('Clear week', async () => { const n = await props.onClearWeek!(); props.showToast(`Removed ${n} planned meals`); })} disabled={!!busy}>Clear this week</Btn>
+                      </div>
+                    </Section>
+                  )}
 
                   <Section title="App" icon={Bug}>
                     <div className="flex flex-wrap gap-2">

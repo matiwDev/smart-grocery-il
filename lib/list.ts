@@ -48,6 +48,8 @@ export interface BasketItem {
   /** Own price/photo of a household product (custom_products) or older free-text row. */
   customPrice: number | null;
   imageUrl: string | null;
+  /** Planned recipes this item was added for (meal plan badge); empty = added by hand. */
+  fromMeals?: string[];
 }
 
 export type QuantityUnit = 'unit' | 'kg';
@@ -157,6 +159,7 @@ export interface BasketItemRow {
   barcode: string | null;
   custom_price: number | null;
   image_url: string | null;
+  from_meals?: string[] | null;
   prices: ChainPrice[];
 }
 
@@ -180,6 +183,7 @@ export function rowToBasketItem(row: BasketItemRow): BasketItem {
     checked: !!row.checked,
     customPrice: row.custom_price != null ? Number(row.custom_price) : null,
     imageUrl: row.image_url,
+    fromMeals: row.from_meals ?? [],
   };
 }
 

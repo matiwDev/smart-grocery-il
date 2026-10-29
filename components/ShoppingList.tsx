@@ -8,7 +8,7 @@
  * small hint when another chain sells the item for less.
  */
 import React, { useState } from 'react';
-import { Check, ChevronDown, ShoppingCart, Pencil, TrendingDown } from 'lucide-react';
+import { Check, ChevronDown, ShoppingCart, Pencil, TrendingDown, ChefHat } from 'lucide-react';
 import { CATEGORIES } from '@/lib/categories';
 import { BasketItem, ChainMeta, OverrideMap, cheaperElsewhere, effective, estimate, formatQty, unitPrice } from '@/lib/list';
 
@@ -19,13 +19,13 @@ const TEXT = {
     items: 'פריטים', inCart: 'בעגלה', estTotal: 'סה״כ משוער', priced: 'מתוך', pricedSuffix: 'עם מחיר',
     done: 'סיימתי קנייה', save: 'שמור רשימה', clear: 'נקה רשימה', empty: 'הרשימה ריקה. חפשו מוצר או הוסיפו פריט משלכם.',
     yourPrice: 'המחיר שלך', noPrice: 'אין מחיר', edited: 'נערך', check: 'סמן כנאסף', uncheck: 'החזר לרשימה',
-    notAt: (c: string) => `לא נמכר ב${c}`, cheaperAt: (c: string, p: string) => `${p} ב${c}`, mine: 'שלי',
+    notAt: (c: string) => `לא נמכר ב${c}`, cheaperAt: (c: string, p: string) => `${p} ב${c}`, mine: 'שלי', forMeals: 'לפי תכנון הארוחות',
   },
   en: {
     items: 'items', inCart: 'In the cart', estTotal: 'Estimated total', priced: 'of', pricedSuffix: 'priced',
     done: 'Done shopping', save: 'Save list', clear: 'Clear list', empty: 'Your list is empty. Search for a product or add your own item.',
     yourPrice: 'your price', noPrice: 'no price', edited: 'edited', check: 'Mark as picked', uncheck: 'Back to the list',
-    notAt: (c: string) => `not sold at ${c}`, cheaperAt: (c: string, p: string) => `${p} at ${c}`, mine: 'mine',
+    notAt: (c: string) => `not sold at ${c}`, cheaperAt: (c: string, p: string) => `${p} at ${c}`, mine: 'mine', forMeals: 'from the meal plan',
   },
 };
 
@@ -89,6 +89,11 @@ function Row({ item, overrides, chains, homeChainId, lang, onToggle, onQuantity,
             {eff.name}
           </span>
           <span className="flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
+            {item.fromMeals && item.fromMeals.length > 0 && (
+              <span title={`${tx.forMeals}: ${item.fromMeals.join(', ')}`} aria-label={`${tx.forMeals}: ${item.fromMeals.join(', ')}`} className="inline-flex items-center gap-0.5 px-1.5 rounded-full bg-[var(--color-success)]/10 text-[var(--color-success)] font-semibold">
+                <ChefHat className="w-3 h-3" />{item.fromMeals.length > 1 ? item.fromMeals.length : ''}
+              </span>
+            )}
             {item.customProductId && <span className="px-1.5 rounded-full bg-[var(--color-accent)]/10 text-[var(--color-accent)] font-semibold">{tx.mine}</span>}
             {source === 'custom' && <span>{tx.yourPrice}</span>}
             {source !== 'custom' && price != null && <span className="font-mono">₪{price.toFixed(2)}</span>}

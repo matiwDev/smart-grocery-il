@@ -8,7 +8,7 @@ import {
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   Loader2, Bell, Copy, UserPlus, Sun, Moon,
   ScanBarcode, Camera, VideoOff, Trash2,
-  Store, Bookmark, Plus,
+  Store, Bookmark, Plus, ChefHat, CalendarDays,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -27,6 +27,9 @@ import { DoneShoppingSheet } from '@/components/DoneShoppingSheet';
 import { RecentTrips } from '@/components/RecentTrips';
 import { ChainPickerSheet } from '@/components/ChainPickerSheet';
 import { HouseholdChat } from '@/components/HouseholdChat';
+import { MealPlanView } from '@/components/MealPlanView';
+import { RecipesView } from '@/components/RecipesView';
+import { ListNeed, addNeedsToList, seedSampleRecipes, fillWeekWithMeals, weekStart, isoDate, addDays } from '@/lib/recipes';
 import {
   BasketItem, BasketItemRow, ChainMeta, ChainPrice, CustomProduct, OverrideMap,
   effective, unitPrice, estimate, rowToBasketItem, itemToRow, loadOverrides, uploadItemPhoto, qtyStep, qtyMin,
@@ -34,13 +37,13 @@ import {
 import { categoryLabel, normalizeCategory } from '@/lib/categories';
 
 type Lang = 'he' | 'en';
-type View = 'HOME' | 'PROFILE' | 'SAVED_LISTS' | 'ANALYTICS' | 'COMMUNITY' | 'CHAT' | 'SCAN';
+type View = 'HOME' | 'MEALS' | 'RECIPES' | 'PROFILE' | 'SAVED_LISTS' | 'ANALYTICS' | 'COMMUNITY' | 'CHAT' | 'SCAN';
 type Theme = 'light' | 'dark';
 
 const BOTTOM_NAV_TABS: { view: View; icon: React.ComponentType<{ className?: string }> }[] = [
   { view: 'HOME', icon: Home },
-  { view: 'SCAN', icon: ScanBarcode },
-  { view: 'SAVED_LISTS', icon: Bookmark },
+  { view: 'MEALS', icon: CalendarDays },
+  { view: 'RECIPES', icon: ChefHat },
   { view: 'ANALYTICS', icon: TrendingDown },
 ];
 
@@ -232,7 +235,7 @@ const DICTIONARY = {
     aboutVersion: 'גרסה',
     close: 'סגירה',
     notifications: 'התראות',
-    navScan: 'סריקה', navCoupons: 'קופונים',
+    navScan: 'סריקה', navCoupons: 'קופונים', navMeals: 'ארוחות', navRecipes: 'מתכונים', navList: 'רשימה', scanAria: 'סריקת ברקוד',
     chainsLabel: 'רשתות להשוואה',
     maxChainsToast: 'ניתן לבחור עד 4 רשתות',
     chainInDevelopment: 'בפיתוח',
@@ -414,7 +417,7 @@ const DICTIONARY = {
     aboutVersion: 'Version',
     close: 'Close',
     notifications: 'Notifications',
-    navScan: 'Scan', navCoupons: 'Coupons',
+    navScan: 'Scan', navCoupons: 'Coupons', navMeals: 'Meals', navRecipes: 'Recipes', navList: 'List', scanAria: 'Scan a barcode',
     chainsLabel: 'Chains to compare',
     maxChainsToast: 'Maximum 4 chains selected',
     chainInDevelopment: 'In development',
@@ -488,7 +491,7 @@ interface BottomNavProps {
 
 function BottomNav({ currentView, setCurrentView, t }: BottomNavProps) {
   const labelFor = (view: View) => ({
-    HOME: t.navHome, SCAN: t.navScan, SAVED_LISTS: t.navSavedLists, ANALYTICS: t.navAnalytics,
+    HOME: t.navList, MEALS: t.navMeals, RECIPES: t.navRecipes, SCAN: t.navScan, SAVED_LISTS: t.navSavedLists, ANALYTICS: t.navAnalytics,
   } as Record<string, string>)[view];
 
   return (
@@ -1602,6 +1605,16 @@ export default function SmartGroceryDashboard() {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // ── Meal plan / recipes → the household's current list (phase 4) ────────────
+  const addMealNeedsToList = useCallback(async (needs: ListNeed[]) => {
+    if (!supabase || !activeBasketId || !household?.id) {
+      throw new Error(lang === 'he' ? 'הרשימה עדיין נטענת, נסו שוב' : 'The list is still loading, try again');
+    }
+    const result = await addNeedsToList(supabase, activeBasketId, household.id, needs);
+    await reloadList(activeBasketId);
+    return result;
+  }, [activeBasketId, household?.id, lang, reloadList]);
+
   // ── Basket CRUD ──────────────────────────────────────────────────────────────
 
   const handleAddProduct = async (product: ProductResult) => {
@@ -2345,9 +2358,17 @@ export default function SmartGroceryDashboard() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onFocus={() => searchQuery && setShowPredictions(true)}
                     placeholder={t.searchPlaceholder}
-                    className="w-full bg-[var(--color-bg-panel)]/80 border border-[var(--color-border)]/50 text-[var(--color-text-primary)] rounded-2xl h-14 ps-12 pe-4 focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent outline-none transition-all"
+                    className="w-full bg-[var(--color-bg-panel)]/80 border border-[var(--color-border)]/50 text-[var(--color-text-primary)] rounded-2xl h-14 ps-12 pe-14 focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent outline-none transition-all"
                     dir="auto"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setCurrentView('SCAN')}
+                    aria-label={t.scanAria}
+                    className="absolute inset-y-0 end-1 my-auto w-12 h-12 flex items-center justify-center rounded-xl text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+                  >
+                    <ScanBarcode className="w-5 h-5" />
+                  </button>
                 </div>
 
                 {/* Autocomplete predictions */}
@@ -2669,6 +2690,35 @@ export default function SmartGroceryDashboard() {
           </motion.div>
         )}
 
+        {/* ═══ MEALS (phase 4) ═══ */}
+        {currentView === 'MEALS' && (
+          <motion.div key="MEALS" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1 flex flex-col max-w-lg mx-auto w-full">
+            <MealPlanView
+              householdId={household?.id ?? null}
+              lang={lang}
+              members={householdMembers}
+              onAddNeeds={addMealNeedsToList}
+              onGoToRecipes={() => setCurrentView('RECIPES')}
+              showToast={showToast}
+            />
+          </motion.div>
+        )}
+
+        {/* ═══ RECIPES (phase 4) ═══ */}
+        {currentView === 'RECIPES' && (
+          <motion.div key="RECIPES" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1 flex flex-col max-w-lg mx-auto w-full">
+            <RecipesView
+              householdId={household?.id ?? null}
+              userId={currentUser?.id ?? null}
+              lang={lang}
+              members={householdMembers}
+              homeChainId={homeChainId}
+              onAddNeeds={addMealNeedsToList}
+              showToast={showToast}
+            />
+          </motion.div>
+        )}
+
         {/* ═══ ANALYTICS ═══ */}
         {currentView === 'ANALYTICS' && (
           <AnalyticsView t={t} lang={lang} currentUserId={currentUser?.id ?? null} showToast={showToast} />
@@ -2881,6 +2931,7 @@ export default function SmartGroceryDashboard() {
               <div className="flex-1 overflow-y-auto py-4 flex flex-col gap-1 px-3">
                 <DrawerItem view="PROFILE"       currentView={currentView} setCurrentView={setCurrentView} icon={User}         label={t.navProfile}      close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="SAVED_LISTS"   currentView={currentView} setCurrentView={setCurrentView} icon={List}         label={t.navSavedLists}   close={() => setIsDrawerOpen(false)} />
+                <DrawerItem view="SCAN"          currentView={currentView} setCurrentView={setCurrentView} icon={ScanBarcode}  label={t.navScan}         close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="CHAT"          currentView={currentView} setCurrentView={setCurrentView} icon={MessageSquare} label={t.navChat}         close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="ANALYTICS" currentView={currentView} setCurrentView={setCurrentView} icon={TrendingDown} label={t.navAnalytics} close={() => setIsDrawerOpen(false)} />
                 <DrawerItem view="COMMUNITY"     currentView={currentView} setCurrentView={setCurrentView} icon={Users}        label={t.navCommunity}    close={() => setIsDrawerOpen(false)} />
@@ -2988,6 +3039,15 @@ export default function SmartGroceryDashboard() {
           onSetAllChecked={setAllChecked}
           onGoTo={(v) => setCurrentView(v as typeof currentView)}
           showToast={showToast}
+          onSeedRecipes={async () => (household ? seedSampleRecipes(supabase, household.id) : 0)}
+          onFillWeek={async () => (household ? fillWeekWithMeals(supabase, household.id, weekStart(new Date()), Math.max(1, householdMembers.length)) : 0)}
+          onClearWeek={async () => {
+            if (!household) return 0;
+            const start = weekStart(new Date());
+            const { data } = await supabase.from('meal_plan_entries').delete()
+              .eq('household_id', household.id).gte('plan_date', isoDate(start)).lte('plan_date', isoDate(addDays(start, 6))).select('id');
+            return data?.length ?? 0;
+          }}
         />
       )}
 

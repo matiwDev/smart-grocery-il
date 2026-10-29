@@ -22,7 +22,7 @@ const TEXT = {
     priceHint: (p: string) => `השאירו ריק כדי להשתמש בהערכה (${p})`, noEstimate: 'אין הערכת מחיר לפריט הזה',
     estimates: 'מחיר משוער ברשתות', householdNote: 'השינויים נשמרים למוצר הזה בכל משק הבית.',
     viewPhoto: 'הצג תמונה', close: 'סגור', mine: 'המוצר נשמר ב"המוצרים שלי" ויופיע בחיפוש בכל רשת.',
-    save: 'שמור', remove: 'הסר מהרשימה', reset: 'חזור לפרטי הקטלוג', uploading: 'מעלה…', photoError: 'העלאת התמונה נכשלה',
+    save: 'שמור', forMeals: 'בשביל:', remove: 'הסר מהרשימה', reset: 'חזור לפרטי הקטלוג', uploading: 'מעלה…', photoError: 'העלאת התמונה נכשלה',
   },
   en: {
     title: 'Edit item', name: 'Name', amount: 'Amount', units: 'Units', kg: 'kg', amountHint: 'How many, or the weight in kilos (e.g. 1.5)', perKg: 'Price is per kg', category: 'Aisle', myPrice: 'My price (₪)', photo: 'Photo',
@@ -30,7 +30,7 @@ const TEXT = {
     priceHint: (p: string) => `Leave empty to use the estimate (${p})`, noEstimate: 'No price estimate for this item',
     estimates: 'Estimated price by chain', householdNote: 'Changes are saved for this product across your household.',
     viewPhoto: 'View photo', close: 'Close', mine: 'Saved in “My products”: it shows up in search whatever chain you pick.',
-    save: 'Save', remove: 'Remove from list', reset: 'Back to catalog details', uploading: 'Uploading…', photoError: 'Photo upload failed',
+    save: 'Save', forMeals: 'For:', remove: 'Remove from list', reset: 'Back to catalog details', uploading: 'Uploading…', photoError: 'Photo upload failed',
   },
 };
 
@@ -123,6 +123,10 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {item.fromMeals && item.fromMeals.length > 0 && (
+          <p className="-mt-2 text-xs text-[var(--color-success)]" dir="auto">🍳 {tx.forMeals} {item.fromMeals.join(' · ')}</p>
+        )}
 
         <div className="flex gap-4 items-start">
           <div className="shrink-0 flex flex-col items-center gap-1.5">

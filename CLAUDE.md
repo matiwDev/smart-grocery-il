@@ -26,7 +26,10 @@ lack names/photos/categories; it blew the free-tier database).
 3. Shared live list + household chat — DONE (phase3/household, migrations 021–022): the
    household has ONE current list that every member sees and edits, live; saved lists are
    the household's; real chat per household with photos, live. See "Household sharing".
-4. Recipes + meal plan → list (household recipes in Hebrew; TheMealDB shown in English).
+4. Recipes + meal plan → list — BUILT (phase4/recipes-meals, migration 024): household
+   recipes (Hebrew), TheMealDB ideas (English) browse + save, week grid (days × breakfast /
+   lunch / dinner) with servings and who eats, "Add week to list" (scaled, merged, topped
+   up, never added twice). New tabs: List, Meals, Recipes, Analytics. See "Recipes & meal plan".
 5. Product photo + health grade (Open Food Facts, cached; measure coverage first).
 6. What can I cook?
 7. Daily nutrition, per person (age, sex, activity → target ranges). Planned meals only,
@@ -44,7 +47,8 @@ Source: `~/.config/smartgrocery/.env.local` (or `.env.local` at project root)
 Restore: `npm run env:link`
 Required: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
           SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET, RESEND_API_KEY, ANTHROPIC_API_KEY
-Optional: NEXT_PUBLIC_DEBUG_EMAILS (debug panel in production)
+Optional: NEXT_PUBLIC_DEBUG_EMAILS (debug panel in production), THEMEALDB_API_KEY
+          (defaults to TheMealDB's free dev key "1")
 
 ## Key npm scripts
 ```
@@ -141,6 +145,35 @@ price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts
 - Fixed in 022: the households / household_members read policies referenced themselves
   ("infinite recursion"), so any direct read of those tables failed.
 
+### Recipes & meal plan (migration 024, phase 4)
+- `recipes` (household_id, title, lang he|en, servings, instructions, image_url, category,
+  source own|mealdb, source_id = idMeal (unique per household), source_url).
+- `recipe_ingredients` (recipe_id, position, name + measure AS WRITTEN; for the list:
+  amount + unit `unit`|`kg`|`none`, list_name, product_id / custom_product_id link,
+  skip_list). `none` = "need some": counts as 1 and is never summed. `parseMeasure()` in
+  lib/recipes.ts reads "1 ק״ג", "500 גרם", "2 large", "1 lb" → kg/units; tsp/cup/cloves → none.
+  TheMealDB imports get a Hebrew list_name from the `EN_HE` table when known; water,
+  salt and pepper default to skip_list.
+- `meal_plan_entries` (household_id, plan_date, slot breakfast|lunch|dinner, recipe_id,
+  servings, eaters uuid[] = member user ids, NULL = everyone, added_to_list_at).
+- `basket_items.from_meals text[]`: recipe titles the item was added for → green chef-hat
+  badge on the list and "For: …" in the edit sheet.
+- RLS: household members (`is_household_member`). Realtime: recipes, meal_plan_entries
+  (REPLICA IDENTITY FULL); MealPlanView / RecipesView subscribe and reload (debounced).
+- Meal plan → list: `needsFor()` scales each ingredient by entry servings / recipe servings,
+  merges per product (product_id, custom_product_id, else name), rounds up (whole units,
+  kg to 100 g). `addNeedsToList()` turns unlinked ingredients into household "My
+  products" (categorize_product for the aisle), tops up items already on the list (counts
+  and kg add; `none` stays; an item already in the cart is unchecked and reset to the
+  need), inserts the rest. Entries sent get `added_to_list_at`; "Add again" re-sends.
+- TheMealDB through `/api/recipes/mealdb` (`?s=`, `?c=`, `?i=`, `?list=categories`,
+  `?random=1`; cached 1 day). Key `THEMEALDB_API_KEY` (optional env, default dev key "1";
+  production key £10 at launch). Attribution line on the Ideas tab.
+- UI: components/MealPlanView.tsx (week grid, Sunday first), RecipesView.tsx (Our recipes /
+  Ideas tabs), RecipeSheet.tsx (detail: plan, add to list, save idea, edit, delete),
+  RecipeEditor.tsx (ingredients as written; "⋯" = list name, product link, skip),
+  PlanMealSheet.tsx (recipe, day, slot, who eats, servings follow eaters until changed).
+
 ### Categories (migration 018)
 `categorize_product(name)` (SQL, Hebrew keyword rules, first match wins) sets
 `products.category` via trigger on insert/rename; also callable as an RPC (free-text items).
@@ -192,15 +225,15 @@ Vercel's 300s limit. Parsers: `scripts/parsers/`.
 ---
 
 ## UI structure
-- Bottom nav (interim, until phases 2–8): Home (list), Scan, Saved lists, Analytics.
-  Target: List, Meals, Recipes, Insights.
+- Bottom nav (phase 4): List, Meals, Recipes, Analytics (→ Insights in phase 8). Scan is
+  the barcode button inside the search bar (and in the drawer); Saved lists is in the drawer.
 - Home: product search ("from ₪X · cheapest chain", plus "Add “…” as your own item") →
   shopping list grouped by aisle (components/ShoppingList.tsx). Tap the circle = in the
   cart; tap the item = edit sheet (components/ItemEditSheet.tsx); "Done shopping" =
   components/DoneShoppingSheet.tsx. Saved lists screen starts with Recent trips
   (components/RecentTrips.tsx).
 - Header: app icon + Globe/language, Sun/Moon/theme, Bell, User/avatar (opens the drawer:
-  Profile, Saved lists, Chat, Analytics, Community).
+  Profile, Saved lists, Scan, Chat, Analytics, Community).
 - Auth: email + password with an emailed code on sign-up. No guest mode. Signing up with
   an existing email switches to Sign In (Supabase sends no code in that case).
 - Theme: light/dark via CSS variables.
@@ -210,7 +243,7 @@ Who sees them: everyone on `npm run dev`; in production, only signed-in users wh
 is in `NEXT_PUBLIC_DEBUG_EMAILS` (comma-separated, set in Vercel).
 Open: floating bug button (bottom corner) or Ctrl/Cmd+Shift+D.
 - **Cheats:** +5/+12 staple products, +3 free-text items, check all / uncheck all, clear
-  list, jump to any view, toggle lang/theme, test toast, copy user id, reset all `sg_*`
+  list, +5 sample Hebrew recipes, fill / clear this week's meal plan, jump to any view, toggle lang/theme, test toast, copy user id, reset all `sg_*`
   localStorage keys.
 - **Network:** 0.5/2/5s delay on /api/* calls, force every /api/* call to fail (500),
   live API call log with status/timing and expandable JSON bodies.
@@ -252,7 +285,7 @@ Everything runs on free tiers. Watch:
 012_chain_prices, 013_drop_price_history, 014_lock_tracked_products, 015_chain_status,
 016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions,
 020_home_chain_custom_products, 021_household_sharing_chat, 022_household_members_fix,
-023_quantity_unit
+023_quantity_unit, 024_recipes_meal_plan
 (all recorded in public.schema_migrations)
 
 Security note (019): `generate_household_invite(p_user_id)` and
