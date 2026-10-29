@@ -29,11 +29,13 @@ export interface DoneShoppingSheetProps {
   overrides: OverrideMap;
   chains: ChainMeta[];
   lang: Lang;
+  /** Pre-selected: the user's chain. */
+  homeChainId: string | null;
   onConfirm: (chainId: string | null, label: string) => Promise<void>;
   onClose: () => void;
 }
 
-export function DoneShoppingSheet({ items, overrides, chains, lang, onConfirm, onClose }: DoneShoppingSheetProps) {
+export function DoneShoppingSheet({ items, overrides, chains, lang, homeChainId, onConfirm, onClose }: DoneShoppingSheetProps) {
   const tx = TEXT[lang];
   const options = chains
     .filter((c) => c.status !== 'in_development')
@@ -41,7 +43,7 @@ export function DoneShoppingSheet({ items, overrides, chains, lang, onConfirm, o
     .sort((a, b) => b.est.priced - a.est.priced || a.est.total - b.est.total);
   const other = { id: null as string | null, label: tx.other, color: null as string | null, est: estimate(items, overrides, null) };
   const best = options.filter((o) => o.est.priced === items.length).sort((a, b) => a.est.total - b.est.total)[0];
-  const [selected, setSelected] = useState<string | null | undefined>(undefined);
+  const [selected, setSelected] = useState<string | null | undefined>(homeChainId ?? undefined);
   const [busy, setBusy] = useState(false);
   const choice = selected === undefined ? null : [...options, other].find((o) => o.id === selected) ?? null;
 

@@ -29,8 +29,10 @@ export interface BasketItem {
   /** Stable row key: product id for catalog items, `free:<row id>` for free text. */
   id: string;
   dbId?: string;
-  /** Catalog product, or null for a free-text item ("tomatoes"). */
+  /** Catalog product, or null for the household's own items. */
   productId: string | null;
+  /** The household's own product ("My products"), or null. */
+  customProductId: string | null;
   /** Catalog values (or the free-text item's own). Household edits live in ProductOverride. */
   name_he: string;
   name_en: string | null;
@@ -41,7 +43,7 @@ export interface BasketItem {
   min_price: number | null;
   quantity: number;
   checked: boolean;
-  /** Own price/photo of a free-text item (stored on basket_items). */
+  /** Own price/photo of a household product (custom_products) or older free-text row. */
   customPrice: number | null;
   imageUrl: string | null;
 }
@@ -56,6 +58,32 @@ export interface ProductOverride {
 }
 
 export type OverrideMap = Record<string, ProductOverride>;
+
+/** A household's own product ("My products", table custom_products). */
+export interface CustomProduct {
+  id: string;
+  name: string;
+  category: string | null;
+  price: number | null;
+  image_url: string | null;
+}
+
+const CHEAPER_MIN_DIFF = 0.05; // ₪
+
+/**
+ * When another active chain sells this item for less than the user's chain,
+ * that chain and price (for the small "cheaper at …" hint). Null when the
+ * household set its own price, or the user's chain doesn't carry the item.
+ */
+export function cheaperElsewhere(item: BasketItem, overrides: OverrideMap, homeChainId: string | null) {
+  if (!homeChainId || effective(item, overrides).myPrice != null) return null;
+  const home = item.prices[homeChainId]?.price;
+  if (home == null) return null;
+  const best = Object.values(item.prices)
+    .filter((p) => p.chain_id !== homeChainId)
+    .sort((a, b) => a.price - b.price)[0];
+  return best && best.price < home - CHEAPER_MIN_DIFF ? { chainId: best.chain_id, price: Number(best.price) } : null;
+}
 
 /** What the list shows for an item: household edits applied over catalog values. */
 export function effective(item: BasketItem, overrides: OverrideMap) {
@@ -99,6 +127,7 @@ export function estimate(items: BasketItem[], overrides: OverrideMap, chainId: s
 export interface BasketItemRow {
   db_id: string;
   product_id: string | null;
+  custom_product_id: string | null;
   quantity_value: number;
   checked: boolean;
   name_he: string;
@@ -115,9 +144,10 @@ export function rowToBasketItem(row: BasketItemRow): BasketItem {
   for (const p of row.prices) prices[p.chain_id] = { ...p, price: Number(p.price) };
   const values = Object.values(prices).map((p) => p.price);
   return {
-    id: row.product_id ?? `free:${row.db_id}`,
+    id: row.product_id ?? (row.custom_product_id ? `custom:${row.custom_product_id}` : `free:${row.db_id}`),
     dbId: row.db_id,
     productId: row.product_id,
+    customProductId: row.custom_product_id ?? null,
     name_he: row.name_he,
     name_en: row.name_en,
     category: row.category,
@@ -136,6 +166,7 @@ export function itemToRow(item: BasketItem, basketId: string) {
   return {
     basket_id: basketId,
     product_id: item.productId,
+    custom_product_id: item.customProductId,
     product_name: item.name_he,
     quantity_value: item.quantity,
     category: item.productId ? null : item.category,

@@ -4,12 +4,13 @@
  * The shopping list (Plan v2, phase 2): items grouped by aisle, tap the circle
  * to put an item in the cart, tap the item to edit it. Checked items move to an
  * "In the cart" section; "Done shopping" turns them into a saved trip.
- * Every price shown is an estimate (see lib/list.ts).
+ * Every price shown is an estimate at the user's chain (see lib/list.ts), with a
+ * small hint when another chain sells the item for less.
  */
 import React, { useState } from 'react';
-import { Check, ChevronDown, ShoppingCart, Pencil } from 'lucide-react';
+import { Check, ChevronDown, ShoppingCart, Pencil, TrendingDown } from 'lucide-react';
 import { CATEGORIES } from '@/lib/categories';
-import { BasketItem, OverrideMap, effective, estimate, unitPrice } from '@/lib/list';
+import { BasketItem, ChainMeta, OverrideMap, cheaperElsewhere, effective, estimate, unitPrice } from '@/lib/list';
 
 type Lang = 'he' | 'en';
 
@@ -18,17 +19,22 @@ const TEXT = {
     items: 'פריטים', inCart: 'בעגלה', estTotal: 'סה״כ משוער', priced: 'מתוך', pricedSuffix: 'עם מחיר',
     done: 'סיימתי קנייה', save: 'שמור רשימה', clear: 'נקה רשימה', empty: 'הרשימה ריקה. חפשו מוצר או הוסיפו פריט משלכם.',
     yourPrice: 'המחיר שלך', noPrice: 'אין מחיר', edited: 'נערך', check: 'סמן כנאסף', uncheck: 'החזר לרשימה',
+    notAt: (c: string) => `לא נמכר ב${c}`, cheaperAt: (c: string, p: string) => `${p} ב${c}`, mine: 'שלי',
   },
   en: {
     items: 'items', inCart: 'In the cart', estTotal: 'Estimated total', priced: 'of', pricedSuffix: 'priced',
     done: 'Done shopping', save: 'Save list', clear: 'Clear list', empty: 'Your list is empty. Search for a product or add your own item.',
     yourPrice: 'your price', noPrice: 'no price', edited: 'edited', check: 'Mark as picked', uncheck: 'Back to the list',
+    notAt: (c: string) => `not sold at ${c}`, cheaperAt: (c: string, p: string) => `${p} at ${c}`, mine: 'mine',
   },
 };
 
 export interface ShoppingListProps {
   items: BasketItem[];
   overrides: OverrideMap;
+  chains: ChainMeta[];
+  /** The user's chain: every price is shown at this chain. */
+  homeChainId: string | null;
   lang: Lang;
   onToggle: (id: string) => void;
   onQuantity: (id: string, delta: number) => void;
@@ -38,14 +44,20 @@ export interface ShoppingListProps {
   onClear: () => void;
 }
 
-function Row({ item, overrides, lang, onToggle, onQuantity, onEdit }: {
-  item: BasketItem; overrides: OverrideMap; lang: Lang;
+function Row({ item, overrides, chains, homeChainId, lang, onToggle, onQuantity, onEdit }: {
+  item: BasketItem; overrides: OverrideMap; chains: ChainMeta[]; homeChainId: string | null; lang: Lang;
   onToggle: () => void; onQuantity: (d: number) => void; onEdit: () => void;
 }) {
   const tx = TEXT[lang];
   const eff = effective(item, overrides);
-  const { price, source } = unitPrice(item, overrides, null);
+  const { price, source } = unitPrice(item, overrides, homeChainId);
   const line = price != null ? price * item.quantity : null;
+  const chainName = (id: string | null) => {
+    const c = chains.find((x) => x.id === id);
+    return c ? (lang === 'he' ? c.name_he : c.name_en) : '';
+  };
+  const cheaper = cheaperElsewhere(item, overrides, homeChainId);
+  const notAtHome = price == null && !!item.productId && item.min_price != null;
 
   return (
     <div className={`flex items-center gap-2 px-2 min-h-[56px] rounded-2xl border transition-colors ${
@@ -77,11 +89,17 @@ function Row({ item, overrides, lang, onToggle, onQuantity, onEdit }: {
             {eff.name}
           </span>
           <span className="flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
+            {item.customProductId && <span className="px-1.5 rounded-full bg-[var(--color-accent)]/10 text-[var(--color-accent)] font-semibold">{tx.mine}</span>}
             {source === 'custom' && <span>{tx.yourPrice}</span>}
             {source !== 'custom' && price != null && <span className="font-mono">₪{price.toFixed(2)}</span>}
-            {price == null && <span>{tx.noPrice}</span>}
+            {price == null && <span>{notAtHome ? tx.notAt(chainName(homeChainId)) : tx.noPrice}</span>}
             {eff.edited && <><span>·</span><Pencil className="w-3 h-3" /><span>{tx.edited}</span></>}
           </span>
+          {cheaper && (
+            <span className="flex items-center gap-1 text-[10px] font-medium text-[var(--color-success)]">
+              <TrendingDown className="w-3 h-3" /> {tx.cheaperAt(chainName(cheaper.chainId), `₪${cheaper.price.toFixed(2)}`)}
+            </span>
+          )}
         </span>
       </button>
 
@@ -98,7 +116,7 @@ function Row({ item, overrides, lang, onToggle, onQuantity, onEdit }: {
   );
 }
 
-export function ShoppingList({ items, overrides, lang, onToggle, onQuantity, onEdit, onDone, onSave, onClear }: ShoppingListProps) {
+export function ShoppingList({ items, overrides, chains, homeChainId, lang, onToggle, onQuantity, onEdit, onDone, onSave, onClear }: ShoppingListProps) {
   const tx = TEXT[lang];
   const [cartOpen, setCartOpen] = useState(true);
 
@@ -116,13 +134,15 @@ export function ShoppingList({ items, overrides, lang, onToggle, onQuantity, onE
   const groups = CATEGORIES
     .map((c) => ({ cat: c, items: open.filter((i) => effective(i, overrides).category === c.key) }))
     .filter((g) => g.items.length > 0);
-  const all = estimate(items, overrides, null);
+  const all = estimate(items, overrides, homeChainId);
 
   const row = (item: BasketItem) => (
     <Row
       key={item.id}
       item={item}
       overrides={overrides}
+      chains={chains}
+      homeChainId={homeChainId}
       lang={lang}
       onToggle={() => onToggle(item.id)}
       onQuantity={(d) => onQuantity(item.id, d)}

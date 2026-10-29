@@ -33,6 +33,8 @@ export interface DebugPanelProps {
   onAddProduct: (product: unknown) => Promise<void>;
   onClearBasket: () => Promise<void>;
   onAddFreeText: (name: string) => Promise<void>;
+  /** The user's chain, so staples come from it. */
+  chainId: string | null;
   onSetAllChecked: (checked: boolean) => Promise<void>;
   onGoTo: (view: string) => void;
   showToast: (msg: string) => void;
@@ -165,7 +167,7 @@ export function DebugPanel(props: DebugPanelProps) {
       let added = 0;
       for (const q of STAPLE_QUERIES) {
         if (added >= count) break;
-        const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&limit=5`);
+        const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&limit=5${props.chainId ? `&chain=${props.chainId}` : ''}`);
         const json = await res.json();
         const product = (json.products ?? []).find((p: { prices?: Record<string, unknown> }) => p.prices && Object.keys(p.prices).length > 0);
         if (!product) continue;

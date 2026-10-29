@@ -4,7 +4,9 @@
  * Edit any list item (Plan v2, phase 2): name, aisle category, your own price
  * and a photo. For catalog products the edit is saved for the whole household
  * (product_overrides) and shows wherever the product appears; for free-text
- * items it is saved on the list item itself.
+ * items it is saved on the household's own product ("My products"). Tapping an
+ * existing photo opens a large preview (change / remove there); tapping an empty
+ * photo slot opens the camera or file picker.
  */
 import React, { useRef, useState } from 'react';
 import { X, Camera, Trash2, RotateCcw, Loader2, Barcode } from 'lucide-react';
@@ -19,6 +21,7 @@ const TEXT = {
     addPhoto: 'הוסף תמונה', changePhoto: 'החלף תמונה', removePhoto: 'הסר תמונה',
     priceHint: (p: string) => `השאירו ריק כדי להשתמש בהערכה (${p})`, noEstimate: 'אין הערכת מחיר לפריט הזה',
     estimates: 'מחיר משוער ברשתות', householdNote: 'השינויים נשמרים למוצר הזה בכל משק הבית.',
+    viewPhoto: 'הצג תמונה', close: 'סגור', mine: 'המוצר נשמר ב"המוצרים שלי" ויופיע בחיפוש בכל רשת.',
     save: 'שמור', remove: 'הסר מהרשימה', reset: 'חזור לפרטי הקטלוג', uploading: 'מעלה…', photoError: 'העלאת התמונה נכשלה',
   },
   en: {
@@ -26,6 +29,7 @@ const TEXT = {
     addPhoto: 'Add photo', changePhoto: 'Change photo', removePhoto: 'Remove photo',
     priceHint: (p: string) => `Leave empty to use the estimate (${p})`, noEstimate: 'No price estimate for this item',
     estimates: 'Estimated price by chain', householdNote: 'Changes are saved for this product across your household.',
+    viewPhoto: 'View photo', close: 'Close', mine: 'Saved in “My products”: it shows up in search whatever chain you pick.',
     save: 'Save', remove: 'Remove from list', reset: 'Back to catalog details', uploading: 'Uploading…', photoError: 'Photo upload failed',
   },
 };
@@ -58,6 +62,7 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
   const [image, setImage] = useState<string | null>(eff.image);
   const [busy, setBusy] = useState<'save' | 'photo' | 'other' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const estimates = Object.values(item.prices)
@@ -84,6 +89,7 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
     setError(null);
     try {
       setImage(await onUploadPhoto(file));
+      setPreviewOpen(false);
     } catch {
       setError(tx.photoError);
     }
@@ -115,8 +121,8 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
           <div className="shrink-0 flex flex-col items-center gap-1.5">
             <button
               type="button"
-              onClick={() => fileRef.current?.click()}
-              aria-label={image ? tx.changePhoto : tx.addPhoto}
+              onClick={() => (image ? setPreviewOpen(true) : fileRef.current?.click())}
+              aria-label={image ? tx.viewPhoto : tx.addPhoto}
               className="w-20 h-20 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-bg-subtle)] flex items-center justify-center overflow-hidden text-[var(--color-text-muted)]"
             >
               {busy === 'photo' ? <Loader2 className="w-5 h-5 animate-spin" /> : image ? (
@@ -124,10 +130,7 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
                 <img src={image} alt="" className="w-full h-full object-cover" />
               ) : <Camera className="w-6 h-6" />}
             </button>
-            {image && (
-              <button type="button" onClick={() => setImage(null)} className="text-[11px] text-[var(--color-text-muted)] underline">{tx.removePhoto}</button>
-            )}
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => pickPhoto(e.target.files?.[0])} />
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { pickPhoto(e.target.files?.[0]); e.target.value = ''; }} />
           </div>
           <div className="flex-1 min-w-0 flex flex-col gap-3">
             <div>
@@ -175,6 +178,7 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
           <p className="flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)] font-mono"><Barcode className="w-3.5 h-3.5" /> {item.barcode}</p>
         )}
         {item.productId && <p className="text-[11px] text-[var(--color-text-muted)]">{tx.householdNote}</p>}
+        {item.customProductId && <p className="text-[11px] text-[var(--color-text-muted)]">{tx.mine}</p>}
         {error && <p className="text-xs font-semibold text-[var(--color-danger)]">{error}</p>}
 
         <button
@@ -206,6 +210,29 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
           </button>
         </div>
       </div>
+
+      {previewOpen && image && (
+        <div
+          role="dialog"
+          aria-label={tx.viewPhoto}
+          className="fixed inset-0 z-[70] bg-black/90 flex flex-col items-center justify-center gap-4 p-4"
+          onClick={(e) => { e.stopPropagation(); setPreviewOpen(false); }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={image} alt={name} className="max-w-full max-h-[72vh] rounded-2xl object-contain shadow-2xl" onClick={(e) => e.stopPropagation()} />
+          <div className="flex gap-3 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <button type="button" onClick={() => fileRef.current?.click()} disabled={busy === 'photo'}
+              className="flex-1 min-h-[48px] rounded-xl bg-white text-black font-semibold flex items-center justify-center gap-2">
+              {busy === 'photo' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />} {tx.changePhoto}
+            </button>
+            <button type="button" onClick={() => { setImage(null); setPreviewOpen(false); }}
+              className="flex-1 min-h-[48px] rounded-xl border border-white/40 text-white font-semibold flex items-center justify-center gap-2">
+              <Trash2 className="w-4 h-4" /> {tx.removePhoto}
+            </button>
+          </div>
+          <button type="button" onClick={() => setPreviewOpen(false)} className="text-white/80 text-sm underline min-h-[44px]">{tx.close}</button>
+        </div>
+      )}
     </div>
   );
 }

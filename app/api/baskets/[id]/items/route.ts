@@ -34,7 +34,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const { data: items, error: itemsError } = await supabase
       .from('basket_items')
-      .select('id, product_id, quantity_value, product_name, checked, category, custom_price, image_url, created_at')
+      .select('id, product_id, custom_product_id, quantity_value, product_name, checked, category, custom_price, image_url, created_at, custom_products(name, category, price, image_url)')
       .eq('basket_id', basketId)
       .order('created_at', { ascending: true });
 
@@ -64,17 +64,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const result: BasketItemRow[] = (items ?? []).map((i) => {
       const product = i.product_id ? productById[i.product_id] : undefined;
+      // "My products" (custom_products) are the source of truth for items
+      // linked to one; the row's own columns are a fallback for older items.
+      const embedded = i.custom_products as unknown;
+      const custom = (Array.isArray(embedded) ? embedded[0] : embedded) as
+        { name: string; category: string | null; price: number | null; image_url: string | null } | null | undefined;
       return {
         db_id: i.id,
         product_id: i.product_id,
+        custom_product_id: i.custom_product_id ?? null,
         quantity_value: i.quantity_value,
         checked: !!i.checked,
-        name_he: product?.name_he ?? i.product_name,
+        name_he: product?.name_he ?? custom?.name ?? i.product_name,
         name_en: product?.name_en ?? null,
-        category: product?.category ?? i.category ?? null,
+        category: product?.category ?? custom?.category ?? i.category ?? null,
         barcode: product?.barcode ?? null,
-        custom_price: i.custom_price,
-        image_url: i.image_url,
+        custom_price: custom ? custom.price : i.custom_price,
+        image_url: custom ? custom.image_url : i.image_url,
         prices: (i.product_id ? pricesByProduct[i.product_id] : undefined) ?? [],
       };
     });

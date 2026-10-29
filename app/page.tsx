@@ -24,8 +24,9 @@ import { ShoppingList } from '@/components/ShoppingList';
 import { ItemEditSheet, ItemEditValues } from '@/components/ItemEditSheet';
 import { DoneShoppingSheet } from '@/components/DoneShoppingSheet';
 import { RecentTrips } from '@/components/RecentTrips';
+import { ChainPickerSheet } from '@/components/ChainPickerSheet';
 import {
-  BasketItem, BasketItemRow, ChainMeta, ChainPrice, OverrideMap,
+  BasketItem, BasketItemRow, ChainMeta, ChainPrice, CustomProduct, OverrideMap,
   effective, unitPrice, estimate, rowToBasketItem, itemToRow, loadOverrides, uploadItemPhoto,
 } from '@/lib/list';
 import { categoryLabel, normalizeCategory } from '@/lib/categories';
@@ -55,6 +56,9 @@ interface ProductResult {
   max_price: number | null;
   best_chain: string | null;
   prices: Record<string, ChainPrice>;
+  // Present when searching with the user's chain (see /api/products/search).
+  chain_price?: number | null;
+  cheaper?: { chain_id: string; price: number } | null;
 }
 
 interface UserProfile {
@@ -1426,6 +1430,14 @@ export default function SmartGroceryDashboard() {
   const [isDoneSheetOpen, setIsDoneSheetOpen] = useState(false);
   const [tripsRefreshKey, setTripsRefreshKey] = useState(0);
 
+  // The one chain the user shops at (profiles.preferred_chain_id). Search shows
+  // only its products; the list and trip estimates use its prices.
+  const [homeChainId, setHomeChainId] = useState<string | null>(null);
+  const [isProfileLoaded, setIsProfileLoaded] = useState(false);
+  const [isChainPickerOpen, setIsChainPickerOpen] = useState(false);
+  // Household's own products ("My products") matching the search text.
+  const [customResults, setCustomResults] = useState<CustomProduct[]>([]);
+
   // Saved lists
   const [savedBaskets, setSavedBaskets] = useState<SavedBasket[]>([]);
   const [isLoadingSaved, setIsLoadingSaved] = useState(false);
@@ -1487,6 +1499,8 @@ export default function SmartGroceryDashboard() {
           phone: profile?.phone_number || '',
           avatar: profile?.avatar_url || '',
         });
+        setHomeChainId(profile?.preferred_chain_id ?? null);
+        setIsProfileLoaded(true);
         setIsAuthChecked(true);
       });
     });
@@ -1562,19 +1576,28 @@ export default function SmartGroceryDashboard() {
   // ── Product search (debounced) ───────────────────────────────────────────────
 
   const doSearch = useCallback(async (q: string) => {
-    if (q.length < 1) { setSearchResults([]); return; }
+    if (q.length < 1) { setSearchResults([]); setCustomResults([]); return; }
     setIsSearching(true);
     try {
-      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&limit=8`);
+      const chainParam = homeChainId ? `&chain=${encodeURIComponent(homeChainId)}` : '';
+      const [res, custom] = await Promise.all([
+        fetch(`/api/products/search?q=${encodeURIComponent(q)}&limit=8${chainParam}`),
+        supabase && household
+          ? supabase.from('custom_products').select('id, name, category, price, image_url')
+              .eq('household_id', household.id).ilike('name', `%${q.replace(/[%_]/g, '')}%`).limit(5)
+          : Promise.resolve({ data: [] as CustomProduct[] }),
+      ]);
       const data = await res.json();
       setSearchResults(data.products ?? []);
+      setCustomResults(((custom.data ?? []) as CustomProduct[]).map((c) => ({ ...c, price: c.price != null ? Number(c.price) : null })));
       if (data.chains?.length > 0) setChains(data.chains);
     } catch {
       setSearchResults([]);
+      setCustomResults([]);
     } finally {
       setIsSearching(false);
     }
-  }, []);
+  }, [homeChainId, household]);
 
   useEffect(() => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -1629,6 +1652,7 @@ export default function SmartGroceryDashboard() {
         id: product.id,
         dbId,
         productId: product.id,
+        customProductId: null,
         name_he: product.name_he,
         name_en: product.name_en,
         category: product.category,
@@ -1643,54 +1667,77 @@ export default function SmartGroceryDashboard() {
     ]);
   };
 
-  // Free-text item ("tomatoes"): no catalog product, so no price or photo until
-  // the household adds one. Its aisle is guessed with the same rules the
-  // catalog uses (categorize_product, migration 018).
-  const handleAddFreeText = async (rawName: string) => {
-    const name = rawName.trim();
-    if (!name) return;
+  // Adds one of the household's own products ("My products") to the list.
+  const handleAddCustomProduct = async (cp: CustomProduct) => {
     setSearchQuery('');
     setShowPredictions(false);
-
-    const dup = basket.find((i) => !i.productId && i.name_he === name);
-    if (dup) { await updateQuantity(dup.id, 1); return; }
-
-    let category = 'other';
-    if (supabase) {
-      const { data } = await supabase.rpc('categorize_product', { p_name: name });
-      if (typeof data === 'string') category = data;
+    const existing = basket.find((i) => i.customProductId === cp.id);
+    if (existing) {
+      const newQ = existing.quantity + 1;
+      setBasket((prev) => prev.map((i) => i.id === existing.id ? { ...i, quantity: newQ, checked: false } : i));
+      if (supabase && existing.dbId) {
+        await supabase.from('basket_items').update({ quantity_value: newQ, checked: false }).eq('id', existing.dbId);
+      }
+      return;
     }
-
     let dbId: string | undefined;
     if (supabase && activeBasketId) {
       const { data } = await supabase.from('basket_items').insert({
         basket_id: activeBasketId,
         product_id: null,
-        product_name: name,
+        custom_product_id: cp.id,
+        product_name: cp.name,
         quantity_value: 1,
-        category,
+        category: cp.category,
       }).select('id').single();
       dbId = data?.id;
     }
-
     setBasket((prev) => [
       ...prev,
       {
-        id: `free:${dbId ?? crypto.randomUUID()}`,
+        id: `custom:${cp.id}`,
         dbId,
         productId: null,
-        name_he: name,
+        customProductId: cp.id,
+        name_he: cp.name,
         name_en: null,
-        category,
+        category: cp.category,
         barcode: null,
         prices: {},
         min_price: null,
         quantity: 1,
         checked: false,
-        customPrice: null,
-        imageUrl: null,
+        customPrice: cp.price,
+        imageUrl: cp.image_url,
       },
     ]);
+  };
+
+  // Free text ("עגבניות שרי") becomes one of the household's own products —
+  // created once, then found in search whatever chain is chosen. Its aisle is
+  // guessed with the catalog's rules (categorize_product, migration 018).
+  const handleAddFreeText = async (rawName: string) => {
+    const name = rawName.trim();
+    if (!name || !supabase || !household) return;
+    setSearchQuery('');
+    setShowPredictions(false);
+
+    const { data: found } = await supabase.from('custom_products')
+      .select('id, name, category, price, image_url')
+      .eq('household_id', household.id).ilike('name', name.replace(/[%_]/g, '')).limit(1).maybeSingle();
+    let cp = found as CustomProduct | null;
+    if (!cp) {
+      const { data: guessed } = await supabase.rpc('categorize_product', { p_name: name });
+      const { data: created, error } = await supabase.from('custom_products')
+        .insert({ household_id: household.id, name, category: typeof guessed === 'string' ? guessed : 'other' })
+        .select('id, name, category, price, image_url').single();
+      if (error || !created) {
+        showToast(lang === 'he' ? 'לא הצלחנו לשמור את המוצר' : 'Could not save the product');
+        return;
+      }
+      cp = created as CustomProduct;
+    }
+    await handleAddCustomProduct({ ...cp, price: cp.price != null ? Number(cp.price) : null });
   };
 
   const updateQuantity = async (id: string, delta: number) => {
@@ -1752,7 +1799,14 @@ export default function SmartGroceryDashboard() {
         const productId = item.productId;
         setOverrides((prev) => ({ ...prev, [productId]: { product_id: productId, name: row.name, category: row.category, price: row.price, image_url: row.image_url } }));
       }
+    } else if (item.customProductId) {
+      const { error } = await supabase.from('custom_products')
+        .update({ name: v.name, category: v.category, price: v.price, image_url: v.image, updated_at: new Date().toISOString() })
+        .eq('id', item.customProductId);
+      if (error) throw error;
+      setBasket((prev) => prev.map((i) => i.customProductId === item.customProductId ? { ...i, name_he: v.name, category: v.category, customPrice: v.price, imageUrl: v.image } : i));
     } else {
+      // Older free-text rows from before "My products" (phase 2).
       if (item.dbId) {
         const { error } = await supabase.from('basket_items')
           .update({ product_name: v.name, category: v.category, custom_price: v.price, image_url: v.image })
@@ -1799,7 +1853,7 @@ export default function SmartGroceryDashboard() {
     const rows = cart.map((i) => {
       const e = effective(i, overrides);
       const p = unitPrice(i, overrides, chainId);
-      return { trip_id: trip.id, product_id: i.productId, name: e.name, category: e.category, quantity: i.quantity, unit_price: p.price, price_source: p.source };
+      return { trip_id: trip.id, product_id: i.productId, custom_product_id: i.customProductId, name: e.name, category: e.category, quantity: i.quantity, unit_price: p.price, price_source: p.source };
     });
     const { error: itemsError } = await supabase.from('trip_items').insert(rows);
     if (itemsError) {
@@ -2141,7 +2195,20 @@ export default function SmartGroceryDashboard() {
         phone: profile?.phone_number || '',
         avatar: profile?.avatar_url || '',
       });
+      setHomeChainId(profile?.preferred_chain_id ?? null);
+      setIsProfileLoaded(true);
     }
+  };
+
+  const chooseHomeChain = async (chainId: string) => {
+    setHomeChainId(chainId);
+    setIsChainPickerOpen(false);
+    setSearchResults([]);
+    if (supabase && currentUser?.id) {
+      await supabase.from('profiles').update({ preferred_chain_id: chainId }).eq('id', currentUser.id);
+    }
+    const c = chains.find((x) => x.id === chainId);
+    if (c) showToast(lang === 'he' ? `קונים ב${c.name_he}` : `Shopping at ${c.name_en}`);
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -2259,6 +2326,23 @@ export default function SmartGroceryDashboard() {
         {currentView === 'HOME' && (
           <motion.div key="HOME" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1 flex flex-col gap-6">
 
+            {/* Store chip: the one chain the user shops at */}
+            {(() => {
+              const home = chains.find((c) => c.id === homeChainId);
+              return (
+                <button
+                  type="button"
+                  onClick={() => setIsChainPickerOpen(true)}
+                  className="self-start flex items-center gap-2 min-h-[40px] px-3 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-panel)] text-sm"
+                >
+                  <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: home?.color_hex ?? 'var(--color-border)' }} />
+                  <span className="text-[var(--color-text-muted)]">{lang === 'he' ? 'קונים ב:' : 'Shopping at:'}</span>
+                  <span className="font-semibold text-[var(--color-text-primary)]">{home ? (lang === 'he' ? home.name_he : home.name_en) : (lang === 'he' ? 'בחרו רשת' : 'Pick a chain')}</span>
+                  <ChevronDown className="w-4 h-4 text-[var(--color-text-muted)]" />
+                </button>
+              );
+            })()}
+
             {/* Search bar */}
             <div className="w-full relative z-20" ref={searchRef}>
                 <div className="relative">
@@ -2299,7 +2383,31 @@ export default function SmartGroceryDashboard() {
                           ))}
                         </div>
                       )}
-                      {!isSearching && searchResults.length === 0 && searchQuery && (
+                      {!isSearching && customResults.length > 0 && (
+                        <div className="border-b border-[var(--color-border)]">
+                          <p className="px-4 pt-3 pb-1 text-[11px] font-bold text-[var(--color-accent)]">{lang === 'he' ? 'המוצרים שלי' : 'My products'}</p>
+                          {customResults.map((cp) => (
+                            <button
+                              key={cp.id}
+                              onClick={() => handleAddCustomProduct(cp)}
+                              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[var(--color-bg-hover)]/50 transition-colors text-start"
+                            >
+                              {cp.image_url
+                                // eslint-disable-next-line @next/next/no-img-element
+                                ? <img src={cp.image_url} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0" />
+                                : <span className="w-8 h-8 rounded-lg bg-[var(--color-accent)]/10 text-[var(--color-accent)] flex items-center justify-center shrink-0"><User className="w-4 h-4" /></span>}
+                              <span className="flex-1 font-medium text-[var(--color-text-primary)] truncate">{cp.name}</span>
+                              {cp.price != null && <span className="font-mono text-sm text-[var(--color-text-secondary)] shrink-0">₪{cp.price.toFixed(2)}</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {!isSearching && homeChainId && searchResults.length > 0 && (
+                        <p className="px-4 pt-3 pb-1 text-[11px] font-bold text-[var(--color-text-secondary)]">
+                          {(() => { const c = chains.find((x) => x.id === homeChainId); return c ? (lang === 'he' ? c.name_he : c.name_en) : ''; })()}
+                        </p>
+                      )}
+                      {!isSearching && searchResults.length === 0 && customResults.length === 0 && searchQuery && (
                         <div className="p-4 text-[var(--color-text-muted)] text-sm">{t.noResults}</div>
                       )}
                       {!isSearching && searchResults.map((p) => (
@@ -2313,20 +2421,23 @@ export default function SmartGroceryDashboard() {
                             {p.name_en && <span className="text-xs text-[var(--color-text-muted)]">{p.name_en}</span>}
                           </div>
                           <div className="text-end shrink-0 ms-4">
-                            {p.min_price !== null && (
+                            {p.chain_price != null ? (
+                              <span className="font-mono text-[var(--color-text-primary)] text-sm font-semibold">₪{p.chain_price.toFixed(2)}</span>
+                            ) : p.min_price !== null && (
                               <span className="font-mono text-[var(--color-success)] text-sm">
                                 {lang === 'he' ? 'מ-' : 'from '}₪{p.min_price.toFixed(2)}
                               </span>
                             )}
-                            {p.best_chain && chains.length > 0 && (
-                              <span className="block text-[10px] text-[var(--color-text-muted)]">
-                                {chains.find((c) => c.id === p.best_chain)?.[lang === 'he' ? 'name_he' : 'name_en']}
+                            {p.cheaper && (
+                              <span className="flex items-center justify-end gap-1 text-[10px] font-medium text-[var(--color-success)]">
+                                <TrendingDown className="w-3 h-3" />
+                                ₪{p.cheaper.price.toFixed(2)} {lang === 'he' ? 'ב' : 'at '}{chains.find((c) => c.id === p.cheaper!.chain_id)?.[lang === 'he' ? 'name_he' : 'name_en']}
                               </span>
                             )}
                           </div>
                         </button>
                       ))}
-                      {searchQuery.trim() && (
+                      {searchQuery.trim() && !customResults.some((c) => c.name.trim().toLowerCase() === searchQuery.trim().toLowerCase()) && (
                         <button
                           onClick={() => handleAddFreeText(searchQuery)}
                           className="w-full flex items-center gap-2 p-4 hover:bg-[var(--color-bg-hover)]/50 transition-colors text-start text-sm font-semibold text-[var(--color-accent)]"
@@ -2351,6 +2462,8 @@ export default function SmartGroceryDashboard() {
                   <ShoppingList
                     items={basket}
                     overrides={overrides}
+                    chains={chains}
+                    homeChainId={homeChainId}
                     lang={lang}
                     onToggle={toggleChecked}
                     onQuantity={updateQuantity}
@@ -2898,12 +3011,23 @@ export default function SmartGroceryDashboard() {
         ) : null;
       })()}
 
+      {(isChainPickerOpen || (isProfileLoaded && !homeChainId && chains.length > 0)) && (
+        <ChainPickerSheet
+          chains={chains}
+          current={homeChainId}
+          lang={lang}
+          onPick={chooseHomeChain}
+          onClose={homeChainId ? () => setIsChainPickerOpen(false) : undefined}
+        />
+      )}
+
       {isDoneSheetOpen && (
         <DoneShoppingSheet
           items={basket.filter((i) => i.checked)}
           overrides={overrides}
           chains={chains}
           lang={lang}
+          homeChainId={homeChainId}
           onConfirm={finishTrip}
           onClose={() => setIsDoneSheetOpen(false)}
         />
@@ -2922,6 +3046,7 @@ export default function SmartGroceryDashboard() {
             for (const item of basket) await removeProduct(item.id);
           }}
           onAddFreeText={handleAddFreeText}
+          chainId={homeChainId}
           onSetAllChecked={setAllChecked}
           onGoTo={(v) => setCurrentView(v as typeof currentView)}
           showToast={showToast}

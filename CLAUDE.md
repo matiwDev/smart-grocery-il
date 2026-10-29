@@ -17,6 +17,12 @@ lack names/photos/categories; it blew the free-tier database).
 2. List v2 + trip estimate — DONE (phase2/list-v2): free-text items, edit any item (name,
    aisle, own price, photo), aisle grouping, check-off, "Done shopping at…" → trip saved
    with an estimated total; Recent trips on the Saved lists screen.
+   Adjusted 29 Oct (migration 020): ONE chain per user (profiles.preferred_chain_id) —
+   search shows only that chain's products at its price, with a green "₪X at <chain>"
+   hint when another active chain is cheaper; the list, totals and the done-shopping
+   default use that chain. Free text becomes a household "My product" (custom_products),
+   found in search under "My products" whatever chain is chosen. Tapping an item's photo
+   opens a large preview (change / remove); an empty photo slot opens the picker.
    NOT YET: the list itself is still per user (baskets.user_id); household sharing of the
    live list comes with phase 3 (Realtime).
 3. Household chat: real messages per household, live (Supabase Realtime), photo upload.
@@ -88,6 +94,20 @@ ingested but never shown. Promote one with
 - Price shown for an item = household price if set, else the chain's estimate
   (`unitPrice()` in `lib/list.ts`). Same function feeds the list, the done-shopping sheet
   and the saved trip, so they always agree.
+
+### Chain choice + My products (migration 020)
+- `profiles.preferred_chain_id`: the user's chain. Picker opens by itself until set
+  (components/ChainPickerSheet.tsx); the "Shopping at" chip on Home changes it.
+- `/api/products/search?q=&chain=<id>`: only products with a `chain_prices` row for that
+  chain (inner join), each with `chain_price` and `cheaper` ({chain_id, price} of the
+  cheapest OTHER active chain when lower by more than ₪0.05). Without `chain` (barcode
+  scanner) it returns every match.
+- `custom_products` (household_id, name unique per household case-insensitive, category,
+  price, image_url): the household's own products. RLS: household members.
+  `basket_items.custom_product_id` / `trip_items.custom_product_id` link to it; the list
+  API reads name/aisle/price/photo from it. Searched client-side (RLS) in `doSearch`.
+  Row key `custom:<id>`; older free-text rows (`free:<row id>`) still work.
+- `cheaperElsewhere()` in lib/list.ts drives the list hint.
 
 ### Categories (migration 018)
 `categorize_product(name)` (SQL, Hebrew keyword rules, first match wins) sets
@@ -199,7 +219,8 @@ Everything runs on free tiers. Watch:
 005_waitlist, 006_online_branches, 007_branches_external_id, 008_analytics_indexes,
 009_custom_markets, 010_basket_items_fk, 010_promotions, 011_branch_pricing_views,
 012_chain_prices, 013_drop_price_history, 014_lock_tracked_products, 015_chain_status,
-016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions
+016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions,
+020_home_chain_custom_products
 (all recorded in public.schema_migrations)
 
 Security note (019): `generate_household_invite(p_user_id)` and
