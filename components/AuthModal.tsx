@@ -212,6 +212,19 @@ export function AuthModal({ authMode, setAuthMode, onAuthSuccess, t, lang, dismi
           
           if (authError) throw authError;
 
+          // Email already registered: Supabase deliberately answers with a
+          // normal-looking success (so emails can't be probed), sends NO code,
+          // and returns a user with zero identities. Send them to sign in
+          // instead of waiting for a code that never arrives.
+          if (authData.user && (authData.user.identities?.length ?? 0) === 0) {
+            setAuthMode('SIGN_IN');
+            setErrorMsg(lang === 'he'
+              ? 'האימייל הזה כבר רשום. התחבר עם הסיסמה שלך.'
+              : 'This email is already registered. Sign in with your password instead.');
+            setIsLoading(false);
+            return;
+          }
+
           if (authData.user) {
             userProfile.id = authData.user.id;
 
