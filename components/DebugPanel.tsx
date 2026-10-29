@@ -32,6 +32,8 @@ export interface DebugPanelProps {
   basketCount: number;
   onAddProduct: (product: unknown) => Promise<void>;
   onClearBasket: () => Promise<void>;
+  onAddFreeText: (name: string) => Promise<void>;
+  onSetAllChecked: (checked: boolean) => Promise<void>;
   onGoTo: (view: string) => void;
   showToast: (msg: string) => void;
 }
@@ -50,6 +52,9 @@ interface DbStatus {
   chains: ChainStatus[];
   tracked_products: number;
   monthly_rows: number;
+  trips: number;
+  overrides: number;
+  categories: Record<string, number> | null;
   months: string[] | null;
   server: { node_env: string; vercel_env: string | null; commit: string | null; region: string | null };
 }
@@ -225,6 +230,12 @@ export function DebugPanel(props: DebugPanelProps) {
                     <div className="flex flex-wrap gap-2">
                       <Btn onClick={() => fillBasket(5)} disabled={!!busy}>{busy === 'Fill 5' ? 'Adding…' : '+5 staples'}</Btn>
                       <Btn onClick={() => fillBasket(12)} disabled={!!busy}>{busy === 'Fill 12' ? 'Adding…' : '+12 staples'}</Btn>
+                      <Btn onClick={() => run('Free text', async () => {
+                        for (const n of ['עגבניות שרי', 'מלפפונים', 'כוסברה']) await props.onAddFreeText(n);
+                        props.showToast('Added 3 free-text items');
+                      })} disabled={!!busy}>+3 own items</Btn>
+                      <Btn onClick={() => run('Check all', () => props.onSetAllChecked(true))} disabled={!!busy || props.basketCount === 0}>Check all</Btn>
+                      <Btn onClick={() => run('Uncheck all', () => props.onSetAllChecked(false))} disabled={!!busy || props.basketCount === 0}>Uncheck all</Btn>
                       <Btn danger onClick={() => run('Clear basket', props.onClearBasket)} disabled={!!busy || props.basketCount === 0}>Clear basket</Btn>
                     </div>
                   </Section>
@@ -319,7 +330,10 @@ export function DebugPanel(props: DebugPanelProps) {
                         </div>
                         <p className="text-xs">{mb(status.db_size_bytes)} of {mb(status.db_limit_bytes)} free-tier limit</p>
                         <p className="text-xs text-[var(--color-text-secondary)]">
-                          Tracked products: {status.tracked_products} · Monthly rows: {status.monthly_rows} · Months: {(status.months ?? []).map((m) => m.slice(0, 7)).join(', ') || '—'}
+                          Trips: {status.trips} · Household edits: {status.overrides} · Tracked products: {status.tracked_products} · Monthly rows: {status.monthly_rows} · Months: {(status.months ?? []).map((m) => m.slice(0, 7)).join(', ') || '—'}
+                        </p>
+                        <p className="text-[11px] text-[var(--color-text-secondary)]">
+                          Categories: {Object.entries(status.categories ?? {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(' · ')}
                         </p>
                       </Section>
                       <Section title="Chains" icon={ShoppingBasket}>

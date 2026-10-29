@@ -14,8 +14,11 @@ lack names/photos/categories; it blew the free-tier database).
 ### Build order (Plan v2)
 1. Clean up — DONE (phase1/cleanup): map, Location/Coupons tabs, compare/nearby APIs,
    basket modes, chain selector, price alerts UI, branch tables and overrides removed.
-2. List v2 + trip estimate: free-text items, edit any item (name, category, price, photo;
-   household override), category grouping, check-off, "Done shopping at…" → trip saved.
+2. List v2 + trip estimate — DONE (phase2/list-v2): free-text items, edit any item (name,
+   aisle, own price, photo), aisle grouping, check-off, "Done shopping at…" → trip saved
+   with an estimated total; Recent trips on the Saved lists screen.
+   NOT YET: the list itself is still per user (baskets.user_id); household sharing of the
+   live list comes with phase 3 (Realtime).
 3. Household chat: real messages per household, live (Supabase Realtime), photo upload.
    TODAY THE CHAT IS A PLACEHOLDER: hard-coded "Dad/Mom" messages, nothing saved or shared.
 4. Recipes + meal plan → list (household recipes in Hebrew; TheMealDB shown in English).
@@ -71,6 +74,29 @@ osher_ad, keshet_teamim — their feeds return only a few hundred items) are sti
 ingested but never shown. Promote one with
 `UPDATE chains SET status = 'active' WHERE id = '...'`.
 
+### Shopping list (migration 018)
+- `basket_items`: `checked`; free-text items have `product_id IS NULL` and keep their own
+  `category`, `custom_price`, `image_url`. App row key: product id, or `free:<row id>`.
+- `product_overrides` (household_id, product_id): a household's edits to a catalog product
+  (name, category, price, image_url). Only values that differ are stored; deleting the row
+  = "back to catalog". RLS: household members (`is_household_member()`).
+- `shopping_trips` + `trip_items`: each "Done shopping". `est_total`, `item_count`,
+  `priced_count`; per item `unit_price` + `price_source` (custom | chain | cheapest | none).
+  RLS: own trips + household members' trips; insert own only.
+- Storage bucket `item-photos` (public read, 5 MB, jpeg/png/webp), uploads only into
+  `<auth.uid()>/…`. The client shrinks photos to 800px JPEG first (`lib/list.ts`).
+- Price shown for an item = household price if set, else the chain's estimate
+  (`unitPrice()` in `lib/list.ts`). Same function feeds the list, the done-shopping sheet
+  and the saved trip, so they always agree.
+
+### Categories (migration 018)
+`categorize_product(name)` (SQL, Hebrew keyword rules, first match wins) sets
+`products.category` via trigger on insert/rename; also callable as an RPC (free-text items).
+12 aisles in `lib/categories.ts` (order = list order): produce, bread, dairy_eggs,
+meat_fish, pantry, snacks, drinks, frozen, baby, personal_care, household, other.
+After migration: other 24%, personal_care 23%, pantry 11%… Households can re-assign any
+item. Old keys (dairy, meat, beverage) map via `normalizeCategory()`.
+
 ### Other tables
 - `chains` (7, 4 active), `products` (~38k, barcode-keyed)
 - `baskets`, `basket_items`, `profiles`, `households`, `household_members`
@@ -117,8 +143,11 @@ Vercel's 300s limit. Parsers: `scripts/parsers/`.
 ## UI structure
 - Bottom nav (interim, until phases 2–8): Home (list), Scan, Saved lists, Analytics.
   Target: List, Meals, Recipes, Insights.
-- Home: product search ("from ₪X · cheapest chain") → shopping list; each row shows the
-  cheapest active chain's price, tap to see the estimated price per chain; estimated total.
+- Home: product search ("from ₪X · cheapest chain", plus "Add “…” as your own item") →
+  shopping list grouped by aisle (components/ShoppingList.tsx). Tap the circle = in the
+  cart; tap the item = edit sheet (components/ItemEditSheet.tsx); "Done shopping" =
+  components/DoneShoppingSheet.tsx. Saved lists screen starts with Recent trips
+  (components/RecentTrips.tsx).
 - Header: app icon + Globe/language, Sun/Moon/theme, Bell, User/avatar (opens the drawer:
   Profile, Saved lists, Chat, Analytics, Community).
 - Auth: email + password with an emailed code on sign-up. No guest mode. Signing up with
@@ -129,13 +158,15 @@ Vercel's 300s limit. Parsers: `scripts/parsers/`.
 Who sees them: everyone on `npm run dev`; in production, only signed-in users whose email
 is in `NEXT_PUBLIC_DEBUG_EMAILS` (comma-separated, set in Vercel).
 Open: floating bug button (bottom corner) or Ctrl/Cmd+Shift+D.
-- **Cheats:** +5/+12 staple products to the list, clear list, jump to any view, toggle
-  lang/theme, test toast, copy user id, reset all `sg_*` localStorage keys.
+- **Cheats:** +5/+12 staple products, +3 free-text items, check all / uncheck all, clear
+  list, jump to any view, toggle lang/theme, test toast, copy user id, reset all `sg_*`
+  localStorage keys.
 - **Network:** 0.5/2/5s delay on /api/* calls, force every /api/* call to fail (500),
   live API call log with status/timing and expandable JSON bodies.
 - **Status:** `GET /api/debug/status` (server re-checks the email list against the
   verified Supabase session; 404 otherwise) → DB size vs 500 MB, per-chain price counts
-  and last ingest, tracked products, monthly rows; "Run monthly rollup now"
+  and last ingest, trips, household edits, category counts, tracked products, monthly
+  rows; "Run monthly rollup now"
   (`POST {action:'rollup'}`). Backed by `debug_db_stats()` (migrations 016/017).
 - "Dev Login" on the sign-in screen (dev server only, `app/api/dev/login`):
   dev@smartgrocery.local.
@@ -168,4 +199,10 @@ Everything runs on free tiers. Watch:
 005_waitlist, 006_online_branches, 007_branches_external_id, 008_analytics_indexes,
 009_custom_markets, 010_basket_items_fk, 010_promotions, 011_branch_pricing_views,
 012_chain_prices, 013_drop_price_history, 014_lock_tracked_products, 015_chain_status,
-016_debug_stats, 017_drop_branches (all recorded in public.schema_migrations)
+016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions
+(all recorded in public.schema_migrations)
+
+Security note (019): `generate_household_invite(p_user_id)` and
+`join_household_by_code(p_user_id, p_code)` took any user id and were callable without
+signing in; nobody can execute them now. The app uses `get_or_create_own_household()` and
+`join_household_by_code(code)`, which act on `auth.uid()`.

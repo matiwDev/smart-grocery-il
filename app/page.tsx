@@ -7,8 +7,8 @@ import {
   ChevronDown,
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   Loader2, Bell, Copy, UserPlus, Sun, Moon,
-  ScanBarcode, Camera, Barcode, VideoOff, Trash2,
-  Store, Bookmark,
+  ScanBarcode, Camera, VideoOff, Trash2,
+  Store, Bookmark, Plus,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -20,6 +20,15 @@ import { AuthModal, AuthMode } from '@/components/AuthModal';
 import { supabase } from '@/utils/supabase';
 import { DebugPanel } from '@/components/DebugPanel';
 import { isDebugAllowed } from '@/lib/debug';
+import { ShoppingList } from '@/components/ShoppingList';
+import { ItemEditSheet, ItemEditValues } from '@/components/ItemEditSheet';
+import { DoneShoppingSheet } from '@/components/DoneShoppingSheet';
+import { RecentTrips } from '@/components/RecentTrips';
+import {
+  BasketItem, BasketItemRow, ChainMeta, ChainPrice, OverrideMap,
+  effective, unitPrice, estimate, rowToBasketItem, itemToRow, loadOverrides, uploadItemPhoto,
+} from '@/lib/list';
+import { categoryLabel, normalizeCategory } from '@/lib/categories';
 
 type Lang = 'he' | 'en';
 type View = 'HOME' | 'PROFILE' | 'SAVED_LISTS' | 'ANALYTICS' | 'COMMUNITY' | 'CHAT' | 'SCAN';
@@ -36,15 +45,6 @@ const THEME_STORAGE_KEY = 'sg_theme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface ChainPrice {
-  chain_id: string;
-  price: number;
-  is_sale?: boolean;
-  unit_qty?: number | null;
-  unit_type?: string | null;
-  captured_at?: string;
-}
-
 interface ProductResult {
   id: string;
   barcode: string | null;
@@ -55,28 +55,6 @@ interface ProductResult {
   max_price: number | null;
   best_chain: string | null;
   prices: Record<string, ChainPrice>;
-}
-
-interface ChainMeta {
-  id: string;
-  name_he: string;
-  name_en: string;
-  color_hex: string;
-  // 'in_development' = feed integration not finished: shown greyed out with a
-  // badge, never selectable, never priced (see active_chain_prices view).
-  status?: 'active' | 'in_development';
-}
-
-interface BasketItem {
-  id: string;          // product_id (UUID from products table)
-  dbId?: string;       // basket_items row id in Supabase
-  name_he: string;
-  name_en: string | null;
-  category: string | null;
-  barcode: string | null;
-  prices: Record<string, ChainPrice>;
-  min_price: number | null;
-  quantity: number;
 }
 
 interface UserProfile {
@@ -601,14 +579,6 @@ function HighlightMatch({ text, query }: { text: string; query: string }) {
   );
 }
 
-// Cheapest (chain_id, price) entry for a product's per-chain price map.
-function computeCheapestEntry(prices: Record<string, ChainPrice>): [string, ChainPrice] | null {
-  return Object.entries(prices).reduce<[string, ChainPrice] | null>(
-    (best, [cid, cp]) => (!best || cp.price < best[1].price) ? [cid, cp] : best,
-    null
-  );
-}
-
 // Price per 100g/100ml (or per unit for unit-priced items), derived from the
 // feed's unit_qty/unit_type. The government feed's UnitOfMeasure values are
 // free-text Hebrew (e.g. "100 גרם", "1קילוגרם", "1ליטר", "יחידות") rather than
@@ -719,84 +689,6 @@ function ChainPriceBreakdown({ prices, chains, lang }: { prices: Record<string, 
   );
 }
 
-interface BasketRowProps {
-  item: BasketItem;
-  chains: ChainMeta[];
-  lang: Lang;
-  t: Dictionary;
-  isExpanded: boolean;
-  onToggleExpand: () => void;
-  onUpdateQuantity: (delta: number) => void;
-  onRemove: () => void;
-}
-
-// Compact (<=56px) list row: name + unit price on the left, quantity
-// controls centered, estimated line total (cheapest active chain) + delete on
-// the right. Tapping the row expands the estimated price per chain.
-function BasketRow({ item, chains, lang, t, isExpanded, onToggleExpand, onUpdateQuantity, onRemove }: BasketRowProps) {
-  const cheapestEntry = computeCheapestEntry(item.prices);
-  const unitLine = formatUnitPrice(cheapestEntry?.[1], lang);
-  const lineTotal = (cheapestEntry?.[1].price ?? item.min_price ?? 0) * item.quantity;
-
-  return (
-    <div className="bg-[var(--color-bg-subtle)]/50 rounded-2xl border border-[var(--color-border)]/50 overflow-hidden">
-      <div
-        onClick={onToggleExpand}
-        className="flex items-center gap-2 px-3 min-h-[56px] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors"
-      >
-        {/* Left: name + unit price */}
-        <div className="flex-1 min-w-0 text-start">
-          <h3 className="font-semibold text-sm text-[var(--color-text-primary)] truncate">{item.name_he}</h3>
-          {unitLine && <p className="text-[11px] text-[var(--color-text-muted)] font-mono truncate">{unitLine}</p>}
-        </div>
-
-        {/* Center: quantity controls */}
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="flex items-center bg-[var(--color-bg-panel)] rounded-lg border border-[var(--color-border)] shrink-0"
-        >
-          <button onClick={() => onUpdateQuantity(-1)} className="w-7 h-8 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors">−</button>
-          <span className="w-6 text-center font-mono text-sm font-medium text-[var(--color-text-primary)]">{item.quantity}</span>
-          <button onClick={() => onUpdateQuantity(1)} className="w-7 h-8 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] rounded-lg transition-colors">+</button>
-        </div>
-
-        {/* Right: cheapest-chain line total + delete */}
-        <span className="font-mono font-semibold text-[var(--color-accent)] text-sm shrink-0 whitespace-nowrap">
-          ₪{lineTotal.toFixed(2)}
-        </span>
-        <button
-          onClick={(e) => { e.stopPropagation(); onRemove(); }}
-          aria-label={t.clearList}
-          className="w-8 h-8 shrink-0 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded-lg transition-colors"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-
-      <AnimatePresence>
-        {isExpanded && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.15 }} className="overflow-hidden"
-          >
-            <div className="px-4 pb-3">
-              <ChainPriceBreakdown prices={item.prices} chains={chains} lang={lang} />
-              <div className="mt-1 flex items-center justify-end gap-2">
-                {item.barcode && (
-                  <span className="flex items-center gap-1 text-[11px] text-[var(--color-text-muted)] font-mono shrink-0">
-                    <Barcode className="w-3.5 h-3.5" />
-                    {item.barcode}
-                  </span>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
 // ─── Analytics ────────────────────────────────────────────────────────────────
 
 interface ChainRankingEntry {
@@ -863,20 +755,6 @@ interface CustomMarket {
   name: string;
   total_spent: number;
   recent_entries: CustomMarketEntry[];
-}
-
-const CATEGORY_LABELS: Record<string, { he: string; en: string }> = {
-  dairy: { he: 'מוצרי חלב', en: 'Dairy' },
-  bread: { he: 'לחם ומאפים', en: 'Bread & Bakery' },
-  meat: { he: 'בשר ודגים', en: 'Meat & Fish' },
-  beverage: { he: 'משקאות', en: 'Beverages' },
-  produce: { he: 'פירות וירקות', en: 'Produce' },
-  other: { he: 'אחר', en: 'Other' },
-};
-
-function categoryLabel(category: string | null, lang: Lang): string {
-  const c = category && CATEGORY_LABELS[category] ? category : 'other';
-  return CATEGORY_LABELS[c][lang];
 }
 
 interface TrendSearchResult {
@@ -1542,8 +1420,11 @@ export default function SmartGroceryDashboard() {
   const [activeBasketId, setActiveBasketId] = useState<string | null>(null);
   const [isBasketLoading, setIsBasketLoading] = useState(true);
 
-  // Per-item price breakdown: which basket item is expanded in the comparison panel
-  const [expandedPriceItemId, setExpandedPriceItemId] = useState<string | null>(null);
+  // List v2 (phase 2): household edits to products, edit sheet, done-shopping sheet
+  const [overrides, setOverrides] = useState<OverrideMap>({});
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [isDoneSheetOpen, setIsDoneSheetOpen] = useState(false);
+  const [tripsRefreshKey, setTripsRefreshKey] = useState(0);
 
   // Saved lists
   const [savedBaskets, setSavedBaskets] = useState<SavedBasket[]>([]);
@@ -1639,32 +1520,9 @@ export default function SmartGroceryDashboard() {
           // separate queries.
           const res = await fetch(`/api/baskets/${bData.id}/items?user_id=${currentUser.id}`);
           if (!res.ok) { setBasket([]); return; }
-          const { items } = await res.json() as {
-            items: Array<{
-              db_id: string; product_id: string; quantity_value: number;
-              name_he: string; name_en: string | null; category: string | null; barcode: string | null;
-              prices: Array<{ chain_id: string; price: number; unit_qty: number | null; unit_type: string | null; is_sale: boolean; captured_at: string }>;
-            }>;
-          };
-
+          const { items } = await res.json() as { items: BasketItemRow[] };
           if (items.length > 0) {
-            const rehydrated: BasketItem[] = items.map((i) => {
-              const productPrices: Record<string, ChainPrice> = {};
-              for (const p of i.prices) productPrices[p.chain_id] = p;
-              const priceValues = i.prices.map((p) => p.price);
-              return {
-                id: i.product_id,
-                dbId: i.db_id,
-                name_he: i.name_he,
-                name_en: i.name_en,
-                category: i.category,
-                barcode: i.barcode,
-                prices: productPrices,
-                min_price: priceValues.length > 0 ? Math.min(...priceValues) : null,
-                quantity: i.quantity_value ?? 1,
-              };
-            });
-            setBasket(rehydrated);
+            setBasket(items.map(rowToBasketItem));
             showToast(t.basketRestoredToast);
           }
         } else {
@@ -1682,6 +1540,24 @@ export default function SmartGroceryDashboard() {
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
+
+  // ── Household + its product edits (phase 2) ─────────────────────────────────
+  // Every signed-in user belongs to a household (created on first use), so
+  // edits to catalog products are shared with everyone in it.
+
+  useEffect(() => {
+    if (!currentUser?.id || !supabase) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.rpc('get_or_create_own_household').single();
+      if (cancelled || !data) return;
+      const h = data as { id: string; name: string; invite_code: string | null };
+      setHousehold(h);
+      const map = await loadOverrides(supabase, h.id);
+      if (!cancelled) setOverrides(map);
+    })();
+    return () => { cancelled = true; };
+  }, [currentUser?.id]);
 
   // ── Product search (debounced) ───────────────────────────────────────────────
 
@@ -1725,18 +1601,16 @@ export default function SmartGroceryDashboard() {
     setSearchQuery('');
     setShowPredictions(false);
 
-    const existing = basket.find((i) => i.id === product.id);
+    const existing = basket.find((i) => i.productId === product.id);
     if (existing) {
-      // Just increment locally
       const newQ = existing.quantity + 1;
-      setBasket((prev) => prev.map((i) => i.id === product.id ? { ...i, quantity: newQ } : i));
+      setBasket((prev) => prev.map((i) => i.id === existing.id ? { ...i, quantity: newQ, checked: false } : i));
       if (supabase && existing.dbId) {
-        await supabase.from('basket_items').update({ quantity_value: newQ }).eq('id', existing.dbId);
+        await supabase.from('basket_items').update({ quantity_value: newQ, checked: false }).eq('id', existing.dbId);
       }
       return;
     }
 
-    // New item
     let dbId: string | undefined;
     if (supabase && activeBasketId) {
       const { data } = await supabase.from('basket_items').insert({
@@ -1744,22 +1618,77 @@ export default function SmartGroceryDashboard() {
         product_id: product.id,
         product_name: product.name_he,
         quantity_value: 1,
-      }).select().single();
+      }).select('id').single();
+      dbId = data?.id;
+    }
+
+    const values = Object.values(product.prices).map((p) => Number(p.price));
+    setBasket((prev) => [
+      ...prev,
+      {
+        id: product.id,
+        dbId,
+        productId: product.id,
+        name_he: product.name_he,
+        name_en: product.name_en,
+        category: product.category,
+        barcode: product.barcode,
+        prices: product.prices,
+        min_price: values.length > 0 ? Math.min(...values) : null,
+        quantity: 1,
+        checked: false,
+        customPrice: null,
+        imageUrl: null,
+      },
+    ]);
+  };
+
+  // Free-text item ("tomatoes"): no catalog product, so no price or photo until
+  // the household adds one. Its aisle is guessed with the same rules the
+  // catalog uses (categorize_product, migration 018).
+  const handleAddFreeText = async (rawName: string) => {
+    const name = rawName.trim();
+    if (!name) return;
+    setSearchQuery('');
+    setShowPredictions(false);
+
+    const dup = basket.find((i) => !i.productId && i.name_he === name);
+    if (dup) { await updateQuantity(dup.id, 1); return; }
+
+    let category = 'other';
+    if (supabase) {
+      const { data } = await supabase.rpc('categorize_product', { p_name: name });
+      if (typeof data === 'string') category = data;
+    }
+
+    let dbId: string | undefined;
+    if (supabase && activeBasketId) {
+      const { data } = await supabase.from('basket_items').insert({
+        basket_id: activeBasketId,
+        product_id: null,
+        product_name: name,
+        quantity_value: 1,
+        category,
+      }).select('id').single();
       dbId = data?.id;
     }
 
     setBasket((prev) => [
       ...prev,
       {
-        id: product.id,
+        id: `free:${dbId ?? crypto.randomUUID()}`,
         dbId,
-        name_he: product.name_he,
-        name_en: product.name_en,
-        category: product.category,
-        barcode: product.barcode,
-        prices: product.prices,
-        min_price: product.min_price,
+        productId: null,
+        name_he: name,
+        name_en: null,
+        category,
+        barcode: null,
+        prices: {},
+        min_price: null,
         quantity: 1,
+        checked: false,
+        customPrice: null,
+        imageUrl: null,
       },
     ]);
   };
@@ -1781,6 +1710,111 @@ export default function SmartGroceryDashboard() {
     if (supabase && item?.dbId) {
       await supabase.from('basket_items').delete().eq('id', item.dbId);
     }
+  };
+
+  const toggleChecked = async (id: string) => {
+    const item = basket.find((i) => i.id === id);
+    if (!item) return;
+    const checked = !item.checked;
+    setBasket((prev) => prev.map((i) => i.id === id ? { ...i, checked } : i));
+    if (supabase && item.dbId) {
+      await supabase.from('basket_items').update({ checked }).eq('id', item.dbId);
+    }
+  };
+
+  const setAllChecked = async (checked: boolean) => {
+    setBasket((prev) => prev.map((i) => ({ ...i, checked })));
+    if (supabase && activeBasketId) {
+      await supabase.from('basket_items').update({ checked }).eq('basket_id', activeBasketId);
+    }
+  };
+
+  // Catalog product → household-wide edit (product_overrides); free-text item →
+  // saved on the list item itself. Only values that differ from the catalog
+  // are stored, so "back to catalog" is just deleting the override.
+  const saveItemEdit = async (item: BasketItem, v: ItemEditValues) => {
+    if (!supabase) return;
+    if (item.productId) {
+      if (!household) throw new Error(lang === 'he' ? 'משק הבית עדיין נטען, נסו שוב' : 'Household is still loading, try again');
+      const row = {
+        household_id: household.id,
+        product_id: item.productId,
+        name: v.name !== item.name_he ? v.name : null,
+        category: v.category !== normalizeCategory(item.category) ? v.category : null,
+        price: v.price,
+        image_url: v.image,
+      };
+      if (row.name == null && row.category == null && row.price == null && row.image_url == null) {
+        await resetOverride(item);
+      } else {
+        const { error } = await supabase.from('product_overrides').upsert({ ...row, updated_at: new Date().toISOString() });
+        if (error) throw error;
+        const productId = item.productId;
+        setOverrides((prev) => ({ ...prev, [productId]: { product_id: productId, name: row.name, category: row.category, price: row.price, image_url: row.image_url } }));
+      }
+    } else {
+      if (item.dbId) {
+        const { error } = await supabase.from('basket_items')
+          .update({ product_name: v.name, category: v.category, custom_price: v.price, image_url: v.image })
+          .eq('id', item.dbId);
+        if (error) throw error;
+      }
+      setBasket((prev) => prev.map((i) => i.id === item.id ? { ...i, name_he: v.name, category: v.category, customPrice: v.price, imageUrl: v.image } : i));
+    }
+    showToast(lang === 'he' ? 'הפריט עודכן' : 'Item updated');
+  };
+
+  const resetOverride = async (item: BasketItem) => {
+    if (!supabase || !household || !item.productId) return;
+    const { error } = await supabase.from('product_overrides').delete().eq('household_id', household.id).eq('product_id', item.productId);
+    if (error) throw error;
+    const productId = item.productId;
+    setOverrides((prev) => {
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
+  };
+
+  // "Done shopping at …": the items in the cart become a saved trip with an
+  // ESTIMATED total (prices at that chain, or the household's own prices),
+  // then leave the list. Unchecked items stay for next time.
+  const finishTrip = async (chainId: string | null, label: string) => {
+    if (!supabase || !currentUser?.id) return;
+    const cart = basket.filter((i) => i.checked);
+    if (cart.length === 0) return;
+    const est = estimate(cart, overrides, chainId);
+    const failed = lang === 'he' ? 'שמירת הקנייה נכשלה' : 'Could not save the trip';
+
+    const { data: trip, error } = await supabase.from('shopping_trips').insert({
+      household_id: household?.id ?? null,
+      chain_id: chainId,
+      store_label: label,
+      est_total: est.total,
+      item_count: est.count,
+      priced_count: est.priced,
+    }).select('id').single();
+    if (error || !trip) { showToast(failed); throw error ?? new Error(failed); }
+
+    const rows = cart.map((i) => {
+      const e = effective(i, overrides);
+      const p = unitPrice(i, overrides, chainId);
+      return { trip_id: trip.id, product_id: i.productId, name: e.name, category: e.category, quantity: i.quantity, unit_price: p.price, price_source: p.source };
+    });
+    const { error: itemsError } = await supabase.from('trip_items').insert(rows);
+    if (itemsError) {
+      await supabase.from('shopping_trips').delete().eq('id', trip.id);
+      showToast(failed);
+      throw itemsError;
+    }
+
+    const ids = cart.map((i) => i.dbId).filter((x): x is string => !!x);
+    if (ids.length > 0) await supabase.from('basket_items').delete().in('id', ids);
+    setBasket((prev) => prev.filter((i) => !i.checked));
+    setTripsRefreshKey((k) => k + 1);
+    showToast(lang === 'he'
+      ? `נשמרה קנייה ב${label}: ₪${est.total.toFixed(2)} משוער`
+      : `Trip saved at ${label}: ₪${est.total.toFixed(2)} estimated`);
   };
 
   const handleSaveList = async () => {
@@ -1815,14 +1849,7 @@ export default function SmartGroceryDashboard() {
     }).select().single();
 
     if (newBasket) {
-      await supabase.from('basket_items').insert(
-        basket.map((item) => ({
-          basket_id: newBasket.id,
-          product_id: item.id,
-          product_name: item.name_he,
-          quantity_value: item.quantity,
-        }))
-      );
+      await supabase.from('basket_items').insert(basket.map((item) => itemToRow(item, newBasket.id)));
     }
 
     showToast(t.listSavedToast);
@@ -1837,14 +1864,7 @@ export default function SmartGroceryDashboard() {
     setDuplicateListPrompt(null);
 
     await supabase.from('basket_items').delete().eq('basket_id', existingId);
-    await supabase.from('basket_items').insert(
-      basket.map((item) => ({
-        basket_id: existingId,
-        product_id: item.id,
-        product_name: item.name_he,
-        quantity_value: item.quantity,
-      }))
-    );
+    await supabase.from('basket_items').insert(basket.map((item) => itemToRow(item, existingId)));
     await supabase.from('baskets').update({ updated_at: new Date().toISOString() }).eq('id', existingId);
 
     showToast(t.listSavedToast);
@@ -1864,89 +1884,14 @@ export default function SmartGroceryDashboard() {
     handleSaveList();
   };
 
-  // Loads a saved (is_archived=true) basket into the working view: rebuilds
-  // full BasketItem rows (current prices, not the prices at save time) from
-  // its basket_items, same reconstruction the login-time rehydration effect
-  // does for the active basket. Items missing product_id (legacy rows) are
-  // matched by product_name instead.
+  // Loads a saved (is_archived=true) list into the working view with current
+  // estimated prices — same route as the login-time rehydration.
   const handleLoadSavedList = async (sb: SavedBasket) => {
-    if (!supabase) return;
-    const items = sb.basket_items ?? [];
-    if (items.length === 0) {
-      setActiveBasketId(sb.id);
-      setBasket([]);
-      setCurrentView('HOME');
-      showToast(t.listLoadedToast);
-      return;
-    }
-
-    const withProductId = items.filter((i) => i.product_id);
-    const withoutProductId = items.filter((i) => !i.product_id);
-
-    const [{ data: products }, { data: prices }] = await Promise.all([
-      withProductId.length > 0
-        ? supabase.from('products').select('id, name_he, name_en, category, barcode').in('id', withProductId.map((i) => i.product_id as string))
-        : Promise.resolve({ data: [] as Array<{ id: string; name_he: string; name_en: string | null; category: string | null; barcode: string | null }> }),
-      withProductId.length > 0
-        ? supabase.from('active_chain_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', withProductId.map((i) => i.product_id as string))
-        : Promise.resolve({ data: [] as Array<{ product_id: string } & ChainPrice> }),
-    ]);
-
-    const pricesByProduct: Record<string, Record<string, ChainPrice>> = {};
-    for (const p of prices ?? []) {
-      if (!pricesByProduct[p.product_id]) pricesByProduct[p.product_id] = {};
-      pricesByProduct[p.product_id][p.chain_id] = p as ChainPrice;
-    }
-
-    const rehydrated: BasketItem[] = withProductId.map((i) => {
-      const product = products?.find((p) => p.id === i.product_id);
-      const productPrices = pricesByProduct[i.product_id as string] ?? {};
-      const priceValues = Object.values(productPrices).map((p) => p.price);
-      return {
-        id: i.product_id as string,
-        dbId: i.id,
-        name_he: product?.name_he ?? i.product_name,
-        name_en: product?.name_en ?? null,
-        category: product?.category ?? null,
-        barcode: product?.barcode ?? null,
-        prices: productPrices,
-        min_price: priceValues.length > 0 ? Math.min(...priceValues) : null,
-        quantity: i.quantity_value ?? 1,
-      };
-    });
-
-    // Legacy rows with no product_id: look each one up by name so it still
-    // shows real current prices instead of nothing.
-    for (const i of withoutProductId) {
-      const { data: match } = await supabase
-        .from('products')
-        .select('id, name_he, name_en, category, barcode')
-        .ilike('name_he', i.product_name)
-        .limit(1)
-        .maybeSingle();
-      if (!match) continue;
-      const { data: matchPrices } = await supabase
-        .from('active_chain_prices')
-        .select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at')
-        .eq('product_id', match.id);
-      const productPrices: Record<string, ChainPrice> = {};
-      for (const p of matchPrices ?? []) productPrices[p.chain_id] = p as ChainPrice;
-      const priceValues = Object.values(productPrices).map((p) => p.price);
-      rehydrated.push({
-        id: match.id,
-        dbId: i.id,
-        name_he: match.name_he,
-        name_en: match.name_en,
-        category: match.category,
-        barcode: match.barcode,
-        prices: productPrices,
-        min_price: priceValues.length > 0 ? Math.min(...priceValues) : null,
-        quantity: i.quantity_value ?? 1,
-      });
-    }
-
+    if (!currentUser?.id) return;
+    const res = await fetch(`/api/baskets/${sb.id}/items?user_id=${currentUser.id}`);
+    const { items } = res.ok ? (await res.json() as { items: BasketItemRow[] }) : { items: [] as BasketItemRow[] };
     setActiveBasketId(sb.id);
-    setBasket(rehydrated);
+    setBasket(items.map(rowToBasketItem));
     setCurrentView('HOME');
     showToast(t.listLoadedToast);
   };
@@ -1968,9 +1913,6 @@ export default function SmartGroceryDashboard() {
     }
     setBasket([]);
   };
-
-  // Estimated list total: each item at its cheapest active chain.
-  const basketTotal = () => basket.reduce((acc, item) => acc + ((item.min_price ?? 0) * item.quantity), 0);
 
   // ── Scan: manual barcode search ──────────────────────────────────────────────
 
@@ -2384,6 +2326,15 @@ export default function SmartGroceryDashboard() {
                           </div>
                         </button>
                       ))}
+                      {searchQuery.trim() && (
+                        <button
+                          onClick={() => handleAddFreeText(searchQuery)}
+                          className="w-full flex items-center gap-2 p-4 hover:bg-[var(--color-bg-hover)]/50 transition-colors text-start text-sm font-semibold text-[var(--color-accent)]"
+                        >
+                          <Plus className="w-4 h-4 shrink-0" />
+                          <span className="truncate">{lang === 'he' ? `הוסף "${searchQuery.trim()}" כפריט משלך` : `Add “${searchQuery.trim()}” as your own item`}</span>
+                        </button>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -2396,49 +2347,18 @@ export default function SmartGroceryDashboard() {
               <div className="flex-1 bg-[var(--color-bg-panel)]/40 backdrop-blur-sm border border-[var(--color-border)]/80 rounded-3xl p-4 sm:p-6 overflow-y-auto min-h-[300px]">
                 {isBasketLoading ? (
                   <BasketSkeleton />
-                ) : basket.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-[var(--color-text-muted)] min-h-[200px]">
-                    <ShoppingCart className="w-12 h-12 mb-4 opacity-40" />
-                    <p className="text-sm">{t.emptyList}</p>
-                  </div>
                 ) : (
-                  <div className="space-y-3">
-                    {basket.map((item) => (
-                      <BasketRow
-                        key={item.id}
-                        item={item}
-                        chains={chains}
-                        lang={lang}
-                        t={t}
-                        isExpanded={expandedPriceItemId === item.id}
-                        onToggleExpand={() => setExpandedPriceItemId(expandedPriceItemId === item.id ? null : item.id)}
-                        onUpdateQuantity={(delta) => updateQuantity(item.id, delta)}
-                        onRemove={() => removeProduct(item.id)}
-                      />
-                    ))}
-
-                    {/* Estimated total */}
-                    <div className="mt-6 pt-5 border-t border-[var(--color-border)] flex justify-between items-end">
-                      <span className="text-[var(--color-text-muted)]">{lang === 'he' ? 'סה״כ משוער' : 'Estimated total'}</span>
-                      <span className="text-3xl font-bold font-mono text-[var(--color-text-primary)]">₪{basketTotal().toFixed(2)}</span>
-                    </div>
-
-                    {/* Save List / Clear List */}
-                    <div className="flex gap-3">
-                      <button
-                        onClick={handleSaveList}
-                        className="flex-1 min-h-[44px] bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-[var(--color-accent)]/20"
-                      >
-                        {t.saveList}
-                      </button>
-                      <button
-                        onClick={handleClearList}
-                        className="flex-1 min-h-[44px] bg-[var(--color-bg-subtle)] hover:bg-[var(--color-danger)]/10 text-[var(--color-text-secondary)] hover:text-[var(--color-danger)] border border-[var(--color-border)] hover:border-[var(--color-danger)]/30 rounded-xl text-sm font-semibold transition-colors"
-                      >
-                        {t.clearList}
-                      </button>
-                    </div>
-                  </div>
+                  <ShoppingList
+                    items={basket}
+                    overrides={overrides}
+                    lang={lang}
+                    onToggle={toggleChecked}
+                    onQuantity={updateQuantity}
+                    onEdit={setEditingItemId}
+                    onDone={() => setIsDoneSheetOpen(true)}
+                    onSave={handleSaveList}
+                    onClear={handleClearList}
+                  />
                 )}
               </div>
 
@@ -2449,6 +2369,7 @@ export default function SmartGroceryDashboard() {
         {/* ═══ SAVED LISTS ═══ */}
         {currentView === 'SAVED_LISTS' && (
           <motion.div key="SAVED_LISTS" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1 max-w-4xl mx-auto w-full flex flex-col gap-6 text-start mt-6">
+            <RecentTrips chains={chains} lang={lang} refreshKey={tripsRefreshKey} />
             <h2 className="text-3xl font-bold text-[var(--color-text-primary)]">{t.savedBasketsTitle}</h2>
             {isLoadingSaved ? (
               <div className="flex justify-center py-10"><Loader2 className="w-8 h-8 text-[var(--color-accent)] animate-spin" /></div>
@@ -2960,6 +2881,34 @@ export default function SmartGroceryDashboard() {
 
       <Toast message={toastMsg} />
 
+      {(() => {
+        const editingItem = basket.find((i) => i.id === editingItemId);
+        return editingItem && supabase && currentUser?.id ? (
+          <ItemEditSheet
+            item={editingItem}
+            overrides={overrides}
+            chains={chains}
+            lang={lang}
+            onUploadPhoto={(file) => uploadItemPhoto(supabase!, currentUser.id!, file)}
+            onSave={(v) => saveItemEdit(editingItem, v)}
+            onReset={() => resetOverride(editingItem)}
+            onRemove={() => removeProduct(editingItem.id)}
+            onClose={() => setEditingItemId(null)}
+          />
+        ) : null;
+      })()}
+
+      {isDoneSheetOpen && (
+        <DoneShoppingSheet
+          items={basket.filter((i) => i.checked)}
+          overrides={overrides}
+          chains={chains}
+          lang={lang}
+          onConfirm={finishTrip}
+          onClose={() => setIsDoneSheetOpen(false)}
+        />
+      )}
+
       {isDebugAllowed(currentUser?.email) && (
         <DebugPanel
           userId={currentUser?.id ?? null}
@@ -2972,6 +2921,8 @@ export default function SmartGroceryDashboard() {
           onClearBasket={async () => {
             for (const item of basket) await removeProduct(item.id);
           }}
+          onAddFreeText={handleAddFreeText}
+          onSetAllChecked={setAllChecked}
           onGoTo={(v) => setCurrentView(v as typeof currentView)}
           showToast={showToast}
         />
