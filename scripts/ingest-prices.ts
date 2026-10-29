@@ -1,28 +1,24 @@
 /**
  * Real price ingestion logic — fetches real price feeds published under
  * Israel's Food Act (2014) transparency requirement and loads them into
- * chain_prices + branch_price_overrides (migration 012). Talks to Supabase via plain REST (PostgREST) with the
- * service-role key rather than @supabase/supabase-js: the standalone-script
- * caller (scripts/run-ingest-cli.ts) runs on Node 20, and realtime-js (a
- * supabase-js dependency) requires a native WebSocket only available from
- * Node 22+, which crashes standalone scripts.
+ * chain_prices: one estimated price per product per chain (the price most of
+ * the chain's stores charge). Talks to Supabase via plain REST (PostgREST)
+ * with the service-role key rather than @supabase/supabase-js: the
+ * standalone-script caller (scripts/run-ingest-cli.ts) runs on Node 20, and
+ * realtime-js (a supabase-js dependency) requires a native WebSocket only
+ * available from Node 22+, which crashes standalone scripts.
  *
  * This module only exports runIngestion() and has no process-level side
  * effects (no requireEnv() gate, no process.exit, no auto-run) — it's
  * imported by two different callers with different needs:
  *   - scripts/run-ingest-cli.ts, the `npm run ingest` CLI entry point
- *   - app/api/prices/ingest/route.ts's GET handler (Vercel/GitHub Actions
- *     cron target, Phase 6) — a process.exit() here would kill the whole
- *     serverless function, not just fail one request
+ *     (what the daily GitHub Action runs)
+ *   - app/api/prices/ingest/route.ts's GET handler (manual calls only; it
+ *     can't finish within Vercel's 300s function limit)
  *
- * Phase 18 (branch-level pricing): every chain feed is a set of per-branch
- * files (one file = one physical store), not one flat catalog — each
- * fetchAndParse() now returns items grouped by the store that published
- * them (ParsedBranchFeed[] / an equivalent per-chain shape). Every
- * branch observation gets a real branch_id: resolveBranchId()
- * looks up (chain_id, external_id) in branches (as already seeded by
- * scripts/seed-branches.ts) and, if a store isn't there yet, creates a
- * placeholder branch row on the fly so no price is ever silently dropped.
+ * Every chain feed is a set of per-store files. The store id (externalId) is
+ * only used to count how many stores carry a product and to pick the most
+ * common price; stores themselves are not stored (Plan v2, phase 1).
  */
 import { restFetch, chunk, mapWithConcurrency, rollupMonthlyPrices } from './supabase-rest';
 import { fetchShufersalTotalPages, fetchShufersalFileLinks, fetchShufersalFileLinksPage, fetchAndParseShufersalFile } from './shufersal-feed';
@@ -39,16 +35,6 @@ import { fetchAndParse as fetchAndParseRamiLevy } from './parsers/rami-levy';
 // with a real number via env var for a bounded/faster test run.
 const SHUFERSAL_STORE_LIMIT = Number(process.env.SHUFERSAL_STORE_LIMIT || Infinity);
 const SHUFERSAL_DOWNLOAD_CONCURRENCY = 8;
-
-const CHAIN_NAME_HE: Record<string, string> = {
-  shufersal: 'שופרסל',
-  rami_levy: 'רמי לוי',
-  victory: 'ויקטורי',
-  mahsanei_hashuk: 'מחסני השוק',
-  yohananof: 'יוחננוף',
-  osher_ad: 'אושר עד',
-  keshet_teamim: 'קשת טעמים',
-};
 
 // ─── Shared types ───────────────────────────────────────────────────────────
 
@@ -70,81 +56,7 @@ interface IngestResult {
   fetched: number;
   matched: number;
   inserted: number;
-  overridesWritten: number;
-  branchesResolved: number;
-  branchesCreated: number;
   errorText: string | null;
-}
-
-// ─── Branch resolution (shared by every chain) ─────────────────────────────
-// One physical store per feed file — resolves to the real branches row
-// scripts/seed-branches.ts already seeded, keyed on (chain_id, external_id).
-// If a store shows up in the price feed that seeding hasn't caught yet (e.g.
-// a brand-new store, or a chain seed-branches.ts doesn't cover), it creates a
-// minimal placeholder branch (no address/lat/lng) rather than dropping the
-// price or leaving branch_id null — a later scripts/seed-branches.ts run can
-// still enrich it since it upserts on the same (chain_id, external_id) key.
-
-async function findBranchId(chainId: string, externalId: string): Promise<string | null> {
-  const res = await restFetch(
-    `branches?chain_id=eq.${encodeURIComponent(chainId)}&external_id=eq.${encodeURIComponent(externalId)}&select=id&limit=1`
-  );
-  if (!res.ok) throw new Error(`Branch lookup failed for ${chainId}/${externalId}: HTTP ${res.status} ${await res.text()}`);
-  const rows = (await res.json()) as Array<{ id: string }>;
-  return rows[0]?.id ?? null;
-}
-
-async function createPlaceholderBranch(chainId: string, externalId: string): Promise<string | null> {
-  const res = await restFetch('branches', {
-    method: 'POST',
-    headers: { Prefer: 'return=representation' },
-    body: JSON.stringify({
-      chain_id: chainId,
-      external_id: externalId,
-      name_he: `${CHAIN_NAME_HE[chainId] ?? chainId} - סניף ${externalId}`,
-      city_he: null,
-      address: null,
-      lat: null,
-      lng: null,
-      is_active: true,
-    }),
-  });
-  if (res.ok) {
-    const [created] = (await res.json()) as Array<{ id: string }>;
-    return created?.id ?? null;
-  }
-  // Likely a concurrent insert raced us on the (chain_id, external_id) unique
-  // index (007_branches_external_id.sql) — re-fetch instead of failing.
-  const text = await res.text();
-  if (text.includes('duplicate key') || res.status === 409) {
-    return findBranchId(chainId, externalId);
-  }
-  throw new Error(`Failed to create placeholder branch ${chainId}/${externalId}: HTTP ${res.status} ${text}`);
-}
-
-async function resolveOrCreateBranchId(
-  chainId: string,
-  externalId: string,
-  cache: Map<string, string>,
-  stats: { resolved: number; created: number }
-): Promise<string | null> {
-  const key = `${chainId}:${externalId}`;
-  const cached = cache.get(key);
-  if (cached) return cached;
-
-  const existing = await findBranchId(chainId, externalId);
-  if (existing) {
-    cache.set(key, existing);
-    stats.resolved++;
-    return existing;
-  }
-
-  const created = await createPlaceholderBranch(chainId, externalId);
-  if (created) {
-    cache.set(key, created);
-    stats.created++;
-  }
-  return created;
 }
 
 // ─── Matching + insert (shared by every chain) ─────────────────────────────
@@ -166,15 +78,11 @@ async function buildBarcodeToProductId(items: FeedItem[]): Promise<Map<string, s
   return map;
 }
 
-// ─── Price model (migration 012) ────────────────────────────────────────────
-// price_history was dropped (710 MB — over the free tier). One row per
-// product x branch would be ~5-10M rows, so each chain's feed is collapsed to:
-//   chain_prices            one row per (product, chain) = the price MOST of
-//                           the chain's branches charge (mode; ties → lower)
-//   branch_price_overrides  one row per (product, branch) only where that
-//                           branch differs from the mode
-// History is kept only as monthly summaries for tracked products
-// (product_price_monthly, see rollupMonthlyPrices at the end of the run).
+// ─── Price model ─────────────────────────────────────────────────────────────
+// One row per (product, chain) in chain_prices: the price MOST of the chain's
+// stores charge in today's feed (mode; ties → lower), plus min/max across
+// stores and how many stores carry it. Monthly summaries for tracked products
+// are rolled up at the end of the run (rollupMonthlyPrices).
 
 interface ChainPriceRow {
   product_id: string;
@@ -185,15 +93,6 @@ interface ChainPriceRow {
   branch_count: number;
   unit_qty: number;
   unit_type: string;
-  is_sale: boolean;
-  captured_at: string;
-}
-
-interface OverrideRow {
-  product_id: string;
-  branch_id: string;
-  chain_id: string;
-  price: number;
   is_sale: boolean;
   captured_at: string;
 }
@@ -214,48 +113,29 @@ async function upsertRows(table: string, onConflict: string, rows: object[], bat
   return written;
 }
 
-// Overrides for the branches processed in this run that weren't re-written
-// (captured_at older than the run start) are stale: that branch now charges
-// the chain price again, or no longer carries the product. Scoped to the
-// branches actually fetched, so a partial feed (e.g. some FTP files failed)
-// never wipes overrides of branches this run didn't see.
-async function deleteStaleOverrides(chainId: string, branchIds: string[], runStartedAt: string): Promise<void> {
-  for (const batch of chunk(branchIds, 100)) {
-    const res = await restFetch(
-      `branch_price_overrides?chain_id=eq.${encodeURIComponent(chainId)}&branch_id=in.(${batch.join(',')})&captured_at=lt.${encodeURIComponent(runStartedAt)}`,
-      { method: 'DELETE', headers: { Prefer: 'return=minimal' } }
-    );
-    if (!res.ok) {
-      console.warn(`  (failed to delete stale overrides for ${chainId}: HTTP ${res.status} ${await res.text()})`);
-    }
-  }
-}
-
-// Pure: collapses per-branch observations into chain rows + override rows.
+// Pure: collapses per-store observations into one chain row per product.
 export function collapseToChainPrices(
   chainId: string,
-  observations: Array<{ productId: string; branchId: string | null; item: FeedItem }>,
+  observations: Array<{ productId: string; storeId: string | null; item: FeedItem }>,
   now: string
-): { chainRows: ChainPriceRow[]; overrides: OverrideRow[] } {
-  // productId -> branchKey -> observation (last one wins for duplicate lines
-  // in the same branch file). Feeds with no store id use a single '_' key.
-  const byProduct = new Map<string, Map<string, { branchId: string | null; item: FeedItem }>>();
+): ChainPriceRow[] {
+  // productId -> storeKey -> item (last one wins for duplicate lines in the
+  // same store file). Feeds with no store id use a single '_' key.
+  const byProduct = new Map<string, Map<string, FeedItem>>();
   for (const obs of observations) {
     if (!Number.isFinite(obs.item.price) || obs.item.price <= 0) continue;
-    let perBranch = byProduct.get(obs.productId);
-    if (!perBranch) byProduct.set(obs.productId, (perBranch = new Map()));
-    perBranch.set(obs.branchId ?? '_', { branchId: obs.branchId, item: obs.item });
+    let perStore = byProduct.get(obs.productId);
+    if (!perStore) byProduct.set(obs.productId, (perStore = new Map()));
+    perStore.set(obs.storeId ?? '_', obs.item);
   }
 
   const chainRows: ChainPriceRow[] = [];
-  const overrides: OverrideRow[] = [];
-
-  for (const [productId, perBranch] of byProduct) {
-    const entries = [...perBranch.values()];
+  for (const [productId, perStore] of byProduct) {
+    const items = [...perStore.values()];
     const counts = new Map<number, number>();
     let min = Infinity;
     let max = -Infinity;
-    for (const { item } of entries) {
+    for (const item of items) {
       const p = Math.round(item.price * 100) / 100;
       counts.set(p, (counts.get(p) ?? 0) + 1);
       if (p < min) min = p;
@@ -269,71 +149,45 @@ export function collapseToChainPrices(
         modeCount = c;
       }
     }
-    const sample = entries.find((e) => Math.round(e.item.price * 100) / 100 === mode)!.item;
+    const sample = items.find((i) => Math.round(i.price * 100) / 100 === mode)!;
     chainRows.push({
       product_id: productId,
       chain_id: chainId,
       price: mode,
       min_price: min,
       max_price: max,
-      branch_count: entries.length,
+      branch_count: items.length,
       unit_qty: sample.unitQty,
       unit_type: sample.unitType,
       is_sale: sample.isSale,
       captured_at: now,
     });
-
-    for (const { branchId, item } of entries) {
-      const p = Math.round(item.price * 100) / 100;
-      if (!branchId || p === mode) continue;
-      overrides.push({ product_id: productId, branch_id: branchId, chain_id: chainId, price: p, is_sale: item.isSale, captured_at: now });
-    }
   }
-
-  return { chainRows, overrides };
+  return chainRows;
 }
 
-// Shared by every chain: flattens barcode matching across all of a chain's
-// branch groups (one batched lookup instead of one per branch), resolves/
-// creates a branch per group, then writes chain_prices + overrides.
+// Shared by every chain: one batched barcode lookup across all of a chain's
+// store files, then one chain_prices upsert.
 async function matchAndInsertGrouped(
   chainId: string,
   groups: BranchGroup[]
-): Promise<{ matched: number; inserted: number; overridesWritten: number; branchesResolved: number; branchesCreated: number }> {
+): Promise<{ matched: number; inserted: number }> {
   const barcodeToProductId = await buildBarcodeToProductId(groups.flatMap((g) => g.items));
-  const branchCache = new Map<string, string>();
-  const branchStats = { resolved: 0, created: 0 };
   const runStartedAt = new Date().toISOString();
-  const observations: Array<{ productId: string; branchId: string | null; item: FeedItem }> = [];
+  const observations: Array<{ productId: string; storeId: string | null; item: FeedItem }> = [];
 
   for (const group of groups) {
-    const branchId = group.externalId
-      ? await resolveOrCreateBranchId(chainId, group.externalId, branchCache, branchStats)
-      : null;
-
     for (const item of group.items) {
       const productId = barcodeToProductId.get(item.barcode);
       if (!productId) continue;
-      observations.push({ productId, branchId, item });
+      observations.push({ productId, storeId: group.externalId, item });
     }
   }
 
-  const { chainRows, overrides } = collapseToChainPrices(chainId, observations, runStartedAt);
-  console.log(
-    `[${chainId}] ${observations.length} matched observations → ${chainRows.length} chain prices + ${overrides.length} branch overrides`
-  );
-
+  const chainRows = collapseToChainPrices(chainId, observations, runStartedAt);
+  console.log(`[${chainId}] ${observations.length} matched observations → ${chainRows.length} chain prices`);
   const inserted = await upsertRows('chain_prices', 'product_id,chain_id', chainRows);
-  const overridesWritten = await upsertRows('branch_price_overrides', 'product_id,branch_id', overrides);
-  await deleteStaleOverrides(chainId, [...new Set(branchCache.values())], runStartedAt);
-
-  return {
-    matched: observations.length,
-    inserted,
-    overridesWritten,
-    branchesResolved: branchStats.resolved,
-    branchesCreated: branchStats.created,
-  };
+  return { matched: observations.length, inserted };
 }
 
 // Never allowed to throw: this used to be an unprotected `await restFetch(...)`
@@ -358,7 +212,6 @@ async function writeIngestLog(result: IngestResult, startedAt: string): Promise<
         products_fetched: result.fetched,
         products_matched: result.matched,
         products_inserted: result.inserted,
-        overrides_written: result.overridesWritten,
         error_text: result.errorText,
       }),
     });
@@ -384,9 +237,6 @@ async function ingestShufersal(): Promise<IngestResult> {
   let fetched = 0;
   let matched = 0;
   let inserted = 0;
-  let overridesWritten = 0;
-  let branchesResolved = 0;
-  let branchesCreated = 0;
   let errorText: string | null = null;
 
   try {
@@ -409,9 +259,8 @@ async function ingestShufersal(): Promise<IngestResult> {
     const groups: BranchGroup[] = await mapWithConcurrency(filesToProcess, SHUFERSAL_DOWNLOAD_CONCURRENCY, async (url) => {
       const { storeId, items } = await fetchAndParseShufersalFile(url);
       // Normalize: the PriceFull feed zero-pads StoreID ("001") but the
-      // Stores feed (catID=5, what scripts/seed-branches.ts seeds
-      // branches.external_id from) publishes it unpadded ("1") — see
-      // scripts/shufersal-feed.ts's ShufersalBranchFeed doc comment.
+      // Stores feed publishes it unpadded ("1"); normalized so the same store
+      // always counts once.
       const externalId = storeId ? String(parseInt(storeId, 10)) : null;
       console.log(`[shufersal]   ${items.length} items from ${url.split('/').pop()?.split('?')[0]} (store ${externalId ?? 'unknown'})`);
       return {
@@ -421,20 +270,17 @@ async function ingestShufersal(): Promise<IngestResult> {
     });
     fetched = groups.reduce((sum, g) => sum + g.items.length, 0);
 
-    console.log(`[shufersal] Matching ${fetched} fetched items against products.barcode, resolving branches...`);
+    console.log(`[shufersal] Matching ${fetched} fetched items against products.barcode...`);
     const result = await matchAndInsertGrouped(chainId, groups);
     matched = result.matched;
     inserted = result.inserted;
-    overridesWritten = result.overridesWritten;
-    branchesResolved = result.branchesResolved;
-    branchesCreated = result.branchesCreated;
 
   } catch (err) {
     errorText = err instanceof Error ? err.message : String(err);
     console.error(`[shufersal] ERROR: ${errorText}`);
   }
 
-  const result: IngestResult = { chainId, fetched, matched, inserted, overridesWritten, branchesResolved, branchesCreated, errorText };
+  const result: IngestResult = { chainId, fetched, matched, inserted, errorText };
   await writeIngestLog(result, startedAt);
   return result;
 }
@@ -461,9 +307,6 @@ export async function ingestFromParser(chainId: string, fetchAndParse: () => Pro
   let fetched = 0;
   let matched = 0;
   let inserted = 0;
-  let overridesWritten = 0;
-  let branchesResolved = 0;
-  let branchesCreated = 0;
   let errorText: string | null = null;
 
   try {
@@ -477,20 +320,17 @@ export async function ingestFromParser(chainId: string, fetchAndParse: () => Pro
       items: feed.items.map((p) => ({ barcode: p.barcode, price: p.price, unitQty: p.unit_qty ?? 1, unitType: p.unit_type ?? 'unit', isSale: false })),
     }));
 
-    console.log(`[${chainId}] Matching ${fetched} fetched items against products.barcode, resolving branches...`);
+    console.log(`[${chainId}] Matching ${fetched} fetched items against products.barcode...`);
     const result = await matchAndInsertGrouped(chainId, groups);
     matched = result.matched;
     inserted = result.inserted;
-    overridesWritten = result.overridesWritten;
-    branchesResolved = result.branchesResolved;
-    branchesCreated = result.branchesCreated;
 
   } catch (err) {
     errorText = err instanceof Error ? err.message : String(err);
     console.error(`[${chainId}] ERROR: ${errorText}`);
   }
 
-  const result: IngestResult = { chainId, fetched, matched, inserted, overridesWritten, branchesResolved, branchesCreated, errorText };
+  const result: IngestResult = { chainId, fetched, matched, inserted, errorText };
   await writeIngestLog(result, startedAt);
   return result;
 }
@@ -520,7 +360,7 @@ export async function runIngestion(): Promise<IngestResult[]> {
       results.push(await run());
     } catch (err) {
       console.error(`[${chainId}] UNEXPECTED ERROR outside its own try/catch, continuing to next chain:`, err instanceof Error ? err.message : err);
-      results.push({ chainId, fetched: 0, matched: 0, inserted: 0, overridesWritten: 0, branchesResolved: 0, branchesCreated: 0, errorText: err instanceof Error ? err.message : String(err) });
+      results.push({ chainId, fetched: 0, matched: 0, inserted: 0, errorText: err instanceof Error ? err.message : String(err) });
     }
   }
 

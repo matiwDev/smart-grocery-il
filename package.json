@@ -11,11 +11,8 @@
     "env:link": "cp ~/.config/smartgrocery/.env.local .env.local",
     "ingest": "ts-node --project scripts/tsconfig.json scripts/run-ingest-cli.ts",
     "seed:products": "ts-node --project scripts/tsconfig.json scripts/seed-products-from-feed.ts",
-    "seed:branches": "ts-node --project scripts/tsconfig.json scripts/seed-branches.ts",
     "enrich:names": "ts-node --project scripts/tsconfig.json scripts/enrich-product-names.ts",
-    "probe:chains": "ts-node --project scripts/tsconfig.json scripts/probe-chain-feeds.ts",
-    "geocode:branches": "ts-node --project scripts/tsconfig.json scripts/geocode-branch-cities.ts",
-    "geocode:branches:address": "ts-node --project scripts/tsconfig.json scripts/geocode-branches.ts"
+    "probe:chains": "ts-node --project scripts/tsconfig.json scripts/probe-chain-feeds.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",
@@ -28,14 +25,12 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "fast-xml-parser": "^5.10.0",
-    "leaflet": "^1.9.4",
     "lucide-react": "^0.553.0",
     "motion": "^12.23.24",
     "next": "^15.4.9",
     "postcss": "^8.5.6",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
-    "react-leaflet": "^5.0.0",
     "recharts": "^3.10.1",
     "tailwind-merge": "^3.3.1"
   },
@@ -43,7 +38,6 @@
     "@eslint/eslintrc": "^3.3.6",
     "@tailwindcss/postcss": "4.1.11",
     "@tailwindcss/typography": "^0.5.19",
-    "@types/leaflet": "^1.9.21",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

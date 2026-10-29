@@ -37,30 +37,6 @@ function writeJson(key: string, value: unknown) {
   } catch {}
 }
 
-// ─── Fake location ──────────────────────────────────────────────────────────
-
-export interface FakeLocation {
-  label: string;
-  lat: number;
-  lng: number;
-}
-
-const FAKE_LOCATION_KEY = 'sg_debug_location';
-
-export const LOCATION_PRESETS: FakeLocation[] = [
-  { label: 'Tel Aviv — Dizengoff Center', lat: 32.0753, lng: 34.7748 },
-  { label: 'Jerusalem — Center', lat: 31.7833, lng: 35.2167 },
-  { label: 'Haifa — Hadar', lat: 32.8104, lng: 34.9984 },
-  { label: "Be'er Sheva", lat: 31.2518, lng: 34.7913 },
-  { label: "Modi'in", lat: 31.8969, lng: 35.0104 },
-  { label: 'Rishon LeZion', lat: 31.9642, lng: 34.8044 },
-  { label: 'Eilat (few branches)', lat: 29.5577, lng: 34.9519 },
-  { label: 'Middle of the sea (no branches)', lat: 32.5, lng: 33.5 },
-];
-
-export const getFakeLocation = () => readJson<FakeLocation>(FAKE_LOCATION_KEY);
-export const setFakeLocation = (loc: FakeLocation | null) => writeJson(FAKE_LOCATION_KEY, loc);
-
 // ─── Network cheats + API inspector ─────────────────────────────────────────
 
 export interface NetworkCheats {

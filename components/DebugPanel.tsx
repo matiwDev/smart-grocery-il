@@ -6,13 +6,9 @@
  * Open with the floating bug button or Ctrl/Cmd + Shift + D.
  */
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { Bug, X, RefreshCw, MapPin, ShoppingBasket, Wifi, Database, Trash2, Copy, ChevronDown } from 'lucide-react';
+import { Bug, X, RefreshCw, ShoppingBasket, Wifi, Database, Trash2, Copy, ChevronDown } from 'lucide-react';
 import { supabase } from '@/utils/supabase';
 import {
-  LOCATION_PRESETS,
-  FakeLocation,
-  getFakeLocation,
-  setFakeLocation,
   getNetworkCheats,
   setNetworkCheats,
   NetworkCheats,
@@ -25,7 +21,7 @@ import {
 } from '@/lib/debug';
 
 const STAPLE_QUERIES = ['חלב', 'לחם', 'ביצים', 'עגבניות', 'קוטג', 'שמן', 'אורז', 'פסטה', 'קפה', 'סוכר', 'מלפפון', 'טונה'];
-const VIEWS = ['HOME', 'SCAN', 'COUPONS', 'LOCATION', 'ANALYTICS', 'SAVED_LISTS', 'CHAT', 'PROFILE'] as const;
+const VIEWS = ['HOME', 'SCAN', 'SAVED_LISTS', 'ANALYTICS', 'CHAT', 'PROFILE'] as const;
 
 export interface DebugPanelProps {
   userId: string | null;
@@ -33,8 +29,6 @@ export interface DebugPanelProps {
   lang: 'he' | 'en';
   onToggleLang: () => void;
   onToggleTheme: () => void;
-  userPosition: { lat: number; lng: number } | null;
-  onFakeLocationChange: (loc: FakeLocation | null) => void;
   basketCount: number;
   onAddProduct: (product: unknown) => Promise<void>;
   onClearBasket: () => Promise<void>;
@@ -46,9 +40,6 @@ interface ChainStatus {
   id: string;
   status: string;
   prices: number;
-  overrides: number;
-  branches: number;
-  branches_with_coords: number;
   last_price_at: string | null;
   last_ingest: { started_at: string; fetched: number; matched: number; error: string | null } | null;
 }
@@ -112,7 +103,6 @@ export function DebugPanel(props: DebugPanelProps) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('cheats');
   const [buttonHidden, setButtonHidden] = useState(false);
-  const [fakeLoc, setFakeLoc] = useState<FakeLocation | null>(null);
   const [net, setNet] = useState<NetworkCheats>({ delayMs: 0, failApi: false });
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState<DbStatus | null>(null);
@@ -126,7 +116,6 @@ export function DebugPanel(props: DebugPanelProps) {
 
   useEffect(() => {
     installFetchInspector();
-    setFakeLoc(getFakeLocation());
     setNet(getNetworkCheats());
     try { setButtonHidden(localStorage.getItem(PANEL_HIDDEN_KEY) === '1'); } catch {}
     const onKey = (e: KeyboardEvent) => {
@@ -161,13 +150,6 @@ export function DebugPanel(props: DebugPanelProps) {
     setBusy(null);
   };
 
-  const chooseLocation = (loc: FakeLocation | null) => {
-    setFakeLocation(loc);
-    setFakeLoc(loc);
-    props.onFakeLocationChange(loc);
-    props.showToast(loc ? `📍 Fake location: ${loc.label}` : '📍 Using real GPS');
-  };
-
   const updateNet = (next: NetworkCheats) => {
     setNetworkCheats(next);
     setNet(next);
@@ -178,10 +160,7 @@ export function DebugPanel(props: DebugPanelProps) {
       let added = 0;
       for (const q of STAPLE_QUERIES) {
         if (added >= count) break;
-        const url = props.userPosition
-          ? `/api/products/nearby?lat=${props.userPosition.lat}&lng=${props.userPosition.lng}&q=${encodeURIComponent(q)}&limit=5`
-          : `/api/products/search?q=${encodeURIComponent(q)}&limit=5`;
-        const res = await fetch(url);
+        const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&limit=5`);
         const json = await res.json();
         const product = (json.products ?? []).find((p: { prices?: Record<string, unknown> }) => p.prices && Object.keys(p.prices).length > 0);
         if (!product) continue;
@@ -198,7 +177,7 @@ export function DebugPanel(props: DebugPanelProps) {
     props.showToast('Debug button hidden — Ctrl/Cmd+Shift+D to open');
   };
 
-  const cheatsActive = !!fakeLoc || net.delayMs > 0 || net.failApi;
+  const cheatsActive = net.delayMs > 0 || net.failApi;
 
   return (
     <>
@@ -242,18 +221,6 @@ export function DebugPanel(props: DebugPanelProps) {
             <div className="flex-1 overflow-y-auto p-4 space-y-5 text-sm">
               {tab === 'cheats' && (
                 <>
-                  <Section title="Location" icon={MapPin}>
-                    <p className="text-xs text-[var(--color-text-secondary)]">
-                      {fakeLoc ? `Faking: ${fakeLoc.label}` : props.userPosition ? `Real GPS: ${props.userPosition.lat.toFixed(4)}, ${props.userPosition.lng.toFixed(4)}` : 'No location yet'}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {LOCATION_PRESETS.map((loc) => (
-                        <Btn key={loc.label} onClick={() => chooseLocation(loc)}>{fakeLoc?.label === loc.label ? '✓ ' : ''}{loc.label}</Btn>
-                      ))}
-                      <Btn onClick={() => chooseLocation(null)} disabled={!fakeLoc}>Use real GPS</Btn>
-                    </div>
-                  </Section>
-
                   <Section title={`Basket (${props.basketCount} items)`} icon={ShoppingBasket}>
                     <div className="flex flex-wrap gap-2">
                       <Btn onClick={() => fillBasket(5)} disabled={!!busy}>{busy === 'Fill 5' ? 'Adding…' : '+5 staples'}</Btn>
@@ -359,15 +326,13 @@ export function DebugPanel(props: DebugPanelProps) {
                         <div className="overflow-x-auto">
                           <table className="w-full text-[11px]">
                             <thead className="text-[var(--color-text-secondary)] text-start">
-                              <tr><th className="text-start py-1">Chain</th><th>Prices</th><th>Overrides</th><th>Branches</th><th>Updated</th><th>Last ingest</th></tr>
+                              <tr><th className="text-start py-1">Chain</th><th>Prices</th><th>Updated</th><th>Last ingest</th></tr>
                             </thead>
                             <tbody>
                               {status.chains.map((c) => (
                                 <tr key={c.id} className={`border-t border-[var(--color-border)] ${c.status !== 'active' ? 'opacity-60' : ''}`}>
                                   <td className="py-1.5 font-semibold">{c.id}{c.status !== 'active' && <span className="block font-normal">in dev</span>}</td>
                                   <td className="text-center tabular-nums">{c.prices.toLocaleString()}</td>
-                                  <td className="text-center tabular-nums">{c.overrides.toLocaleString()}</td>
-                                  <td className="text-center tabular-nums">{c.branches_with_coords}/{c.branches}</td>
                                   <td className="text-center">{ago(c.last_price_at)}</td>
                                   <td className="text-center">{c.last_ingest ? (c.last_ingest.error ? <span className="text-red-600" title={c.last_ingest.error}>error</span> : `${c.last_ingest.matched.toLocaleString()} ok`) : '—'}</td>
                                 </tr>
@@ -375,7 +340,7 @@ export function DebugPanel(props: DebugPanelProps) {
                             </tbody>
                           </table>
                         </div>
-                        <p className="text-[11px] text-[var(--color-text-secondary)]">Branches = with coordinates / total. Updated = newest chain price.</p>
+                        <p className="text-[11px] text-[var(--color-text-secondary)]">Prices = products with an estimated price. Updated = newest price.</p>
                       </Section>
                       <p className="text-[11px] text-[var(--color-text-secondary)]">
                         Server: {status.server.vercel_env ?? status.server.node_env} · commit {status.server.commit ?? 'local'}{status.server.region ? ` · ${status.server.region}` : ''}
