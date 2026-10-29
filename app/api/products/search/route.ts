@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 
     // Fetch latest prices for all matched products across all chains in one query
     const { data: prices, error: priceError } = await supabase
-      .from('chain_prices')
+      .from('active_chain_prices')
       .select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at')
       .in('product_id', productIds);
 
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
     // Fetch chain metadata for display
     const { data: chains } = await supabase
       .from('chains')
-      .select('id, name_he, name_en, color_hex');
+      .select('id, name_he, name_en, color_hex, status');
 
     // Group prices by product_id
     const pricesByProduct: Record<string, Record<string, typeof prices[0]>> = {};

@@ -19,6 +19,8 @@ import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
 import { BranchMapContainer } from '@/components/BranchMapContainer';
 import { AuthModal, AuthMode } from '@/components/AuthModal';
 import { supabase } from '@/utils/supabase';
+import { DebugPanel } from '@/components/DebugPanel';
+import { isDebugAllowed, getFakeLocation } from '@/lib/debug';
 
 type Lang = 'he' | 'en';
 type View = 'HOME' | 'PROFILE' | 'SAVED_LISTS' | 'ANALYTICS' | 'COMMUNITY' | 'LOCATION' | 'CHAT' | 'SCAN' | 'COUPONS';
@@ -75,7 +77,12 @@ interface ChainMeta {
   name_he: string;
   name_en: string;
   color_hex: string;
+  // 'in_development' = feed integration not finished: shown greyed out with a
+  // badge, never selectable, never priced (see active_chain_prices view).
+  status?: 'active' | 'in_development';
 }
+
+const isChainActive = (c: Pick<ChainMeta, 'status'> | undefined) => c?.status !== 'in_development';
 
 interface BasketItem {
   id: string;          // product_id (UUID from products table)
@@ -314,6 +321,8 @@ const DICTIONARY = {
     navScan: 'סריקה', navCoupons: 'קופונים',
     chainsLabel: 'רשתות להשוואה',
     maxChainsToast: 'ניתן לבחור עד 4 רשתות',
+    chainInDevelopment: 'בפיתוח',
+    chainInDevelopmentToast: 'רשת זו עדיין בפיתוח ותתווסף בקרוב',
     selectChainsLabel: 'בחר רשתות',
     pricePerUnit: 'ליח׳',
     scanTitle: 'סריקת ברקוד',
@@ -490,6 +499,8 @@ const DICTIONARY = {
     navScan: 'Scan', navCoupons: 'Coupons',
     chainsLabel: 'Chains to compare',
     maxChainsToast: 'Maximum 4 chains selected',
+    chainInDevelopment: 'In development',
+    chainInDevelopmentToast: 'This chain is still in development and coming soon',
     selectChainsLabel: 'Select chains',
     pricePerUnit: '/ unit',
     scanTitle: 'Barcode Scanner',
@@ -842,17 +853,24 @@ function ChainSelectorStrip({ chains, selectedChains, onToggle, lang, t }: {
             transition={{ duration: 0.2 }}
             className="overflow-hidden absolute top-full start-0 end-0 z-30 bg-[var(--color-bg-panel)] border-b border-[var(--color-border)] shadow-2xl"
           >
-            {chains.map((chain) => {
+            {[...chains].sort((a, b) => Number(!isChainActive(a)) - Number(!isChainActive(b))).map((chain) => {
               const isSelected = selectedChains.includes(chain.id);
               const name = lang === 'he' ? chain.name_he : chain.name_en;
+              const inDev = !isChainActive(chain);
               return (
                 <button
                   key={chain.id}
                   onClick={() => onToggle(chain.id)}
-                  className="w-full flex items-center gap-3 px-4 md:px-6 lg:px-8 min-h-[48px] hover:bg-[var(--color-bg-hover)] transition-colors text-start"
+                  aria-disabled={inDev}
+                  className={`w-full flex items-center gap-3 px-4 md:px-6 lg:px-8 min-h-[48px] transition-colors text-start ${inDev ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[var(--color-bg-hover)]'}`}
                 >
                   <span className="w-5 h-5 rounded-full shrink-0" style={{ backgroundColor: chain.color_hex || CHAIN_COLOR_FALLBACKS[chain.id] }} />
                   <span className="flex-1 text-sm font-medium text-[var(--color-text-primary)]">{name}</span>
+                  {inDev && (
+                    <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-dashed border-[var(--color-border)] text-[var(--color-text-secondary)]">
+                      {t.chainInDevelopment}
+                    </span>
+                  )}
                   {isSelected && <Check className="w-4 h-4 text-[var(--color-accent)] shrink-0" />}
                 </button>
               );
@@ -2009,7 +2027,7 @@ export default function SmartGroceryDashboard() {
 
   useEffect(() => {
     if (!supabase) return;
-    supabase.from('chains').select('id, name_he, name_en, color_hex').then(({ data }) => {
+    supabase.from('chains').select('id, name_he, name_en, color_hex, status').then(({ data }) => {
       if (data) setChains(data);
     });
   }, []);
@@ -2023,11 +2041,11 @@ export default function SmartGroceryDashboard() {
       const raw = localStorage.getItem(CHAIN_SELECTION_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as string[];
-        const valid = saved.filter((id) => chains.some((c) => c.id === id));
+        const valid = saved.filter((id) => chains.some((c) => c.id === id && isChainActive(c)));
         if (valid.length > 0) { setSelectedChains(valid); return; }
       }
     } catch {}
-    setSelectedChains(chains.map((c) => c.id));
+    setSelectedChains(chains.filter(isChainActive).map((c) => c.id).slice(0, MAX_SELECTED_CHAINS));
   }, [chains]);
 
   useEffect(() => {
@@ -2118,6 +2136,10 @@ export default function SmartGroceryDashboard() {
   }, []);
 
   const toggleChainSelection = (id: string) => {
+    if (!isChainActive(chains.find((c) => c.id === id))) {
+      showToast(t.chainInDevelopmentToast);
+      return;
+    }
     setSelectedChains((prev) => {
       if (prev.includes(id)) {
         if (prev.length === 1) return prev; // keep at least one chain selected
@@ -2500,7 +2522,7 @@ export default function SmartGroceryDashboard() {
         ? supabase.from('products').select('id, name_he, name_en, category, barcode').in('id', withProductId.map((i) => i.product_id as string))
         : Promise.resolve({ data: [] as Array<{ id: string; name_he: string; name_en: string | null; category: string | null; barcode: string | null }> }),
       withProductId.length > 0
-        ? supabase.from('chain_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', withProductId.map((i) => i.product_id as string))
+        ? supabase.from('active_chain_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', withProductId.map((i) => i.product_id as string))
         : Promise.resolve({ data: [] as Array<{ product_id: string } & ChainPrice> }),
     ]);
 
@@ -2538,7 +2560,7 @@ export default function SmartGroceryDashboard() {
         .maybeSingle();
       if (!match) continue;
       const { data: matchPrices } = await supabase
-        .from('chain_prices')
+        .from('active_chain_prices')
         .select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at')
         .eq('product_id', match.id);
       const productPrices: Record<string, ChainPrice> = {};
@@ -2796,6 +2818,17 @@ export default function SmartGroceryDashboard() {
     return () => { cancelled = true; };
   }, [currentView, lang, chains]);
 
+  // ── Debug: apply a fake location from the debug panel on load, so search and
+  // compare use it before the Location tab is ever opened.
+  useEffect(() => {
+    if (!isDebugAllowed(currentUser?.email)) return;
+    const fake = getFakeLocation();
+    if (fake) {
+      setUserPosition({ lat: fake.lat, lng: fake.lng });
+      setLocationStatus('granted');
+    }
+  }, [currentUser?.email]);
+
   // ── GPS geolocation request ──────────────────────────────────────────────────
 
   useEffect(() => {
@@ -2810,6 +2843,14 @@ export default function SmartGroceryDashboard() {
           if (pref.city) setCityQuery(pref.city);
         }
       } catch {}
+    }
+
+    // Debug cheat: a fake location set in the debug panel wins over GPS.
+    const fake = isDebugAllowed(currentUser?.email) ? getFakeLocation() : null;
+    if (fake) {
+      setUserPosition({ lat: fake.lat, lng: fake.lng });
+      setLocationStatus('granted');
+      return;
     }
 
     if (!navigator.geolocation) {
@@ -2831,7 +2872,7 @@ export default function SmartGroceryDashboard() {
       },
       { enableHighAccuracy: false, timeout: 8000 }
     );
-  }, [currentView]);
+  }, [currentView, currentUser?.email]);
 
   // Persist the manually-chosen city once the user types one after being denied
   useEffect(() => {
@@ -4137,6 +4178,34 @@ export default function SmartGroceryDashboard() {
       </AnimatePresence>
 
       <Toast message={toastMsg} />
+
+      {isDebugAllowed(currentUser?.email) && (
+        <DebugPanel
+          userId={currentUser?.id ?? null}
+          userEmail={currentUser?.email ?? null}
+          lang={lang}
+          onToggleLang={() => setLang((l) => (l === 'he' ? 'en' : 'he'))}
+          onToggleTheme={toggleTheme}
+          userPosition={userPosition}
+          onFakeLocationChange={(loc) => {
+            if (loc) {
+              setUserPosition({ lat: loc.lat, lng: loc.lng });
+              setLocationStatus('granted');
+            } else {
+              setUserPosition(null);
+              setLocationStatus('idle');
+              hasLoadedLocationPrefRef.current = false;
+            }
+          }}
+          basketCount={basket.length}
+          onAddProduct={(p) => handleAddProduct(p as ProductResult)}
+          onClearBasket={async () => {
+            for (const item of basket) await removeProduct(item.id);
+          }}
+          onGoTo={(v) => setCurrentView(v as typeof currentView)}
+          showToast={showToast}
+        />
+      )}
 
       {/* ── About sheet ── */}
       <AnimatePresence>

@@ -47,7 +47,7 @@ async function minPriceByProduct(
 ): Promise<Record<string, number>> {
   if (productIds.length === 0) return {};
   const { data, error } = await supabase
-    .from('chain_prices')
+    .from('active_chain_prices')
     .select('product_id, price')
     .in('product_id', productIds);
   if (error) throw error;
@@ -128,7 +128,7 @@ export async function GET(req: NextRequest) {
         }
 
         const { data: prices, error: pricesErr } = await supabase
-          .from('chain_prices')
+          .from('active_chain_prices')
           .select('product_id, price')
           .in('product_id', productIds);
         if (pricesErr) throw pricesErr;
@@ -157,11 +157,11 @@ export async function GET(req: NextRequest) {
       case 'chain_ranking': {
         const { data: chains, error: chainsErr } = await supabase
           .from('chains')
-          .select('id, name_he, name_en, color_hex');
+          .select('id, name_he, name_en, color_hex, status');
         if (chainsErr) throw chainsErr;
 
         const prices = await fetchAllPages<{ chain_id: string; price: number }>(
-          (from, to) => supabase.from('chain_prices').select('chain_id, price').range(from, to),
+          (from, to) => supabase.from('active_chain_prices').select('chain_id, price').range(from, to),
           1000,
           60000
         );
@@ -205,6 +205,9 @@ export async function GET(req: NextRequest) {
           .in('month', [lastMonthIso, thisMonthIso]);
         if (rowsErr) throw rowsErr;
 
+        const { data: devChains } = await supabase.from('chains').select('id').eq('status', 'in_development');
+        const devChainIds = new Set((devChains ?? []).map((c) => c.id as string));
+
         const prevAvg = new Map<string, number>();
         const current = new Map<string, number>();
         for (const r of rows ?? []) {
@@ -218,6 +221,7 @@ export async function GET(req: NextRequest) {
           const oldPrice = prevAvg.get(key);
           if (oldPrice == null || oldPrice <= newPrice) continue;
           const [product_id, chain_id] = key.split('|');
+          if (devChainIds.has(chain_id)) continue;
           drops.push({
             product_id,
             chain_id,
@@ -236,7 +240,7 @@ export async function GET(req: NextRequest) {
             ? supabase.from('products').select('id, name_he, name_en').in('id', productIds)
             : Promise.resolve({ data: [] as Array<{ id: string; name_he: string; name_en: string | null }> }),
           chainIds.length > 0
-            ? supabase.from('chains').select('id, name_he, name_en, color_hex').in('id', chainIds)
+            ? supabase.from('chains').select('id, name_he, name_en, color_hex, status').in('id', chainIds)
             : Promise.resolve({ data: [] as Array<{ id: string; name_he: string; name_en: string; color_hex: string }> }),
         ]);
 
@@ -289,7 +293,7 @@ export async function GET(req: NextRequest) {
 
         const [{ data: products }, { data: prices }] = await Promise.all([
           supabase.from('products').select('id, name_he, name_en').in('id', topIds),
-          supabase.from('chain_prices').select('product_id, price').in('product_id', topIds),
+          supabase.from('active_chain_prices').select('product_id, price').in('product_id', topIds),
         ]);
 
         const minPriceByProduct: Record<string, number> = {};
@@ -328,11 +332,14 @@ export async function GET(req: NextRequest) {
             .eq('product_id', productId)
             .gte('month', since.toISOString().slice(0, 10))
             .order('month', { ascending: true }),
-          supabase.from('chains').select('id, name_he, name_en, color_hex'),
+          supabase.from('chains').select('id, name_he, name_en, color_hex, status'),
         ]);
         if (rowsErr) throw rowsErr;
 
-        const history = (rows ?? []).map((r) => ({ chain_id: r.chain_id, price: Number(r.avg_price), captured_at: r.month as string }));
+        const activeChainIds = new Set((chains ?? []).filter((c) => c.status !== 'in_development').map((c) => c.id as string));
+        const history = (rows ?? [])
+          .filter((r) => activeChainIds.has(r.chain_id))
+          .map((r) => ({ chain_id: r.chain_id, price: Number(r.avg_price), captured_at: r.month as string }));
         const monthsPerChain: Record<string, number> = {};
         for (const h of history) monthsPerChain[h.chain_id] = (monthsPerChain[h.chain_id] ?? 0) + 1;
 
@@ -493,8 +500,8 @@ export async function GET(req: NextRequest) {
         if (productIds.length === 0) return NextResponse.json({ ranking: [] });
 
         const [{ data: prices, error: pricesErr }, { data: chains, error: chainsErr }] = await Promise.all([
-          supabase.from('chain_prices').select('product_id, chain_id, price').in('product_id', productIds),
-          supabase.from('chains').select('id, name_he, name_en, color_hex'),
+          supabase.from('active_chain_prices').select('product_id, chain_id, price').in('product_id', productIds),
+          supabase.from('chains').select('id, name_he, name_en, color_hex, status'),
         ]);
         if (pricesErr) throw pricesErr;
         if (chainsErr) throw chainsErr;

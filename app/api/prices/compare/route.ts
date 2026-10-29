@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     const chainIdFilter = Array.isArray(chainIdFilterRaw) && chainIdFilterRaw.length > 0 ? chainIdFilterRaw : null;
     const hasLocation = typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng);
 
-    const { data: chains } = await supabase.from('chains').select('id, name_he, name_en, color_hex');
+    const { data: chains } = await supabase.from('chains').select('id, name_he, name_en, color_hex, status');
     const chainById = new Map((chains ?? []).map((c) => [c.id, c]));
 
     // Chain-level prices are always fetched — they're both the no-location
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
     let chainLevelRows: ChainLevelRow[] = [];
     try {
       chainLevelRows = await fetchAllPages<ChainLevelRow>((from, to) =>
-        supabase.from('chain_prices').select('product_id, chain_id, price').in('product_id', productIds).range(from, to)
+        supabase.from('active_chain_prices').select('product_id, chain_id, price').in('product_id', productIds).range(from, to)
       );
     } catch (err) {
       if (!isMissingColumn(err)) throw err;
@@ -112,6 +112,9 @@ export async function POST(req: NextRequest) {
     for (const chainId of nearestBranchByChain.keys()) scopedChainIds.add(chainId);
     let chainIds = [...scopedChainIds];
     if (chainIdFilter) chainIds = chainIds.filter((id) => chainIdFilter.includes(id));
+    // Chains still being integrated (chains.status = 'in_development') never
+    // take part in a comparison, even when a branch of theirs is nearby.
+    chainIds = chainIds.filter((id) => chainById.get(id)?.status !== 'in_development');
 
     const comparison: Array<{
       chain_id: string;

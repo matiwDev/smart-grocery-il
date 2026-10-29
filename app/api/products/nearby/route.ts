@@ -68,10 +68,11 @@ export async function GET(req: NextRequest) {
     const nearestByChain = nearestBranchPerChain(nearbyBranches);
 
     // 2. Chain metadata.
-    const { data: chains, error: chainsError } = await supabase.from('chains').select('id, name_he, name_en, color_hex');
+    const { data: chains, error: chainsError } = await supabase.from('chains').select('id, name_he, name_en, color_hex, status');
     if (chainsError) throw chainsError;
     const chainById = new Map((chains ?? []).map((c) => [c.id, c]));
-    const chainScope = chainIdFilter ?? [...nearestByChain.keys()];
+    // In-development chains (chains.status) are excluded from results.
+    const chainScope = (chainIdFilter ?? [...nearestByChain.keys()]).filter((id) => chainById.get(id)?.status !== 'in_development');
 
     if (chainScope.length === 0) {
       return NextResponse.json({ products: [], nearby_branch_count: 0, radius_km: radiusKm, branch_pricing_available: true, chains: chains ?? [] });
@@ -90,7 +91,7 @@ export async function GET(req: NextRequest) {
       productRows = data ?? [];
     } else {
       const { data: popular, error } = await supabase
-        .from('chain_prices')
+        .from('active_chain_prices')
         .select('product_id')
         .in('chain_id', chainScope)
         .order('branch_count', { ascending: false })
@@ -112,7 +113,7 @@ export async function GET(req: NextRequest) {
     const productIds = productRows.map((p) => p.id);
     const chainRows = await fetchAllPages<ChainPriceRow>((from, to) =>
       supabase
-        .from('chain_prices')
+        .from('active_chain_prices')
         .select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at')
         .in('product_id', productIds)
         .in('chain_id', chainScope)

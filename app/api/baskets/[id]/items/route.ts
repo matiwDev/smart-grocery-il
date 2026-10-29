@@ -51,7 +51,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         ? supabase.from('products').select('id, name_he, name_en, category, barcode').in('id', productIds)
         : Promise.resolve({ data: [], error: null }),
       productIds.length > 0
-        ? supabase.from('chain_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', productIds)
+        ? supabase.from('active_chain_prices').select('product_id, chain_id, price, unit_qty, unit_type, is_sale, captured_at').in('product_id', productIds)
         : Promise.resolve({ data: [], error: null }),
     ]);
 

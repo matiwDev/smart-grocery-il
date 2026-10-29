@@ -73,6 +73,49 @@ and queries directly. Record applied migrations in `public.schema_migrations`.
 
 ---
 
+### Chain status (migration 015)
+`chains.status` is `active` or `in_development`. In-development chains (currently
+yohananof, osher_ad, keshet_teamim — their feeds return only a few hundred items) are still
+ingested, but never priced or compared: every app read goes through the
+`active_chain_prices` view, and the chain selector shows them greyed out with an
+"In development" badge. Promote one with
+`UPDATE chains SET status = 'active' WHERE id = '...'`. The ingest writes `chain_prices`.
+
+---
+
+## Debug tools (components/DebugPanel.tsx, lib/debug.ts)
+Who sees them: everyone on `npm run dev`; in production, only signed-in users whose email
+is in the `NEXT_PUBLIC_DEBUG_EMAILS` env var (comma-separated, set in Vercel).
+Open: floating bug button (bottom corner) or Ctrl/Cmd+Shift+D.
+- **Cheats:** fake location presets (Tel Aviv … "middle of the sea"), +5/+12 staple
+  products to the basket, clear basket, jump to any view, toggle lang/theme, test toast,
+  copy user id, reset all `sg_*` localStorage keys.
+- **Network:** add 0.5/2/5s delay to /api/* calls, force every /api/* call to fail (500),
+  live API call log with status/timing and expandable JSON bodies.
+- **Status:** `GET /api/debug/status` (server re-checks the email list against the
+  verified Supabase session; 404 otherwise) → DB size vs the 500 MB limit, per-chain
+  prices/overrides/branches/last ingest, tracked products, monthly rows; button to run
+  the monthly rollup now (`POST {action:'rollup'}`). Backed by `debug_db_stats()`
+  (migration 016, service role only).
+- Existing: "Dev Login" on the sign-in screen (dev server only, `app/api/dev/login`).
+
+---
+
+## Costs (reviewed 2026-10-29)
+Everything runs on free tiers today. Watch:
+- **Supabase Free:** 500 MB DB (~210 MB used, mostly branch_price_overrides), 5 GB egress,
+  pauses after 7 days idle (the daily ingest keeps it awake).
+- **Vercel Hobby:** free but **non-commercial only**. Commercial launch → Pro ($20/mo).
+  Function max 300s, so the ingest can't run on Vercel; the Vercel cron was removed and
+  GitHub Actions is the only scheduler.
+- **GitHub Actions:** ~35 min/day of ingest ≈ 1,050 min/month. Free for public repos;
+  private repos on a free account include 2,000 min/month.
+- **Anthropic API:** only `npm run enrich:names` (Claude Haiku), pay-per-use, run manually.
+- **Resend:** key exists for auth emails (Supabase SMTP); free tier 3,000 emails/month.
+- Free/no key: government price feeds, Nominatim (geocoding scripts, 1 req/s), OSM tiles.
+
+---
+
 ## Chain feeds (how prices are ingested)
 All chains publish prices publicly under Israel's Food Act (2014) — no scraping needed.
 
@@ -88,7 +131,9 @@ All chains publish prices publicly under Israel's Food Act (2014) — no scrapin
 
 Mega and Co-op have NO working public feed and are NOT supported.
 
-Ingest script: `scripts/ingest-prices.ts`
+Ingest script: `scripts/ingest-prices.ts`. Scheduled ONLY by GitHub Actions
+(`.github/workflows/ingest-prices.yml`, 03:00 UTC, also runnable manually). `/api/prices/ingest`
+still exists for manual calls but can't finish within Vercel's 300s limit.
 All parsers in: `scripts/parsers/`
 
 ---
@@ -129,4 +174,5 @@ All parsers in: `scripts/parsers/`
 001_products_and_prices, 002_price_alerts, 003_household_invite, 004_ingest_log,
 005_waitlist, 006_online_branches, 007_branches_external_id, 008_analytics_indexes,
 009_custom_markets, 010_basket_items_fk, 010_promotions
-011_branch_pricing_views, 012_chain_prices, 013_drop_price_history (all recorded in public.schema_migrations)
+011_branch_pricing_views, 012_chain_prices, 013_drop_price_history, 014_lock_tracked_products,
+015_chain_status, 016_debug_stats (all recorded in public.schema_migrations)
