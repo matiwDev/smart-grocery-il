@@ -11,13 +11,13 @@
 import React, { useRef, useState } from 'react';
 import { X, Camera, Trash2, RotateCcw, Loader2, Barcode } from 'lucide-react';
 import { CATEGORIES, normalizeCategory } from '@/lib/categories';
-import { BasketItem, ChainMeta, OverrideMap, effective } from '@/lib/list';
+import { BasketItem, ChainMeta, OverrideMap, QuantityUnit, effective } from '@/lib/list';
 
 type Lang = 'he' | 'en';
 
 const TEXT = {
   he: {
-    title: 'עריכת פריט', name: 'שם', category: 'מחלקה', myPrice: 'המחיר שלי (₪)', photo: 'תמונה',
+    title: 'עריכת פריט', name: 'שם', amount: 'כמות', units: 'יחידות', kg: 'ק״ג', amountHint: 'כמה יחידות, או משקל בקילו (למשל 1.5)', perKg: 'המחיר הוא לק״ג', category: 'מחלקה', myPrice: 'המחיר שלי (₪)', photo: 'תמונה',
     addPhoto: 'הוסף תמונה', changePhoto: 'החלף תמונה', removePhoto: 'הסר תמונה',
     priceHint: (p: string) => `השאירו ריק כדי להשתמש בהערכה (${p})`, noEstimate: 'אין הערכת מחיר לפריט הזה',
     estimates: 'מחיר משוער ברשתות', householdNote: 'השינויים נשמרים למוצר הזה בכל משק הבית.',
@@ -25,7 +25,7 @@ const TEXT = {
     save: 'שמור', remove: 'הסר מהרשימה', reset: 'חזור לפרטי הקטלוג', uploading: 'מעלה…', photoError: 'העלאת התמונה נכשלה',
   },
   en: {
-    title: 'Edit item', name: 'Name', category: 'Aisle', myPrice: 'My price (₪)', photo: 'Photo',
+    title: 'Edit item', name: 'Name', amount: 'Amount', units: 'Units', kg: 'kg', amountHint: 'How many, or the weight in kilos (e.g. 1.5)', perKg: 'Price is per kg', category: 'Aisle', myPrice: 'My price (₪)', photo: 'Photo',
     addPhoto: 'Add photo', changePhoto: 'Change photo', removePhoto: 'Remove photo',
     priceHint: (p: string) => `Leave empty to use the estimate (${p})`, noEstimate: 'No price estimate for this item',
     estimates: 'Estimated price by chain', householdNote: 'Changes are saved for this product across your household.',
@@ -39,6 +39,9 @@ export interface ItemEditValues {
   category: string;
   price: number | null;
   image: string | null;
+  /** On this list only (not saved to the product). */
+  quantity: number;
+  unit: QuantityUnit;
 }
 
 export interface ItemEditSheetProps {
@@ -60,6 +63,8 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
   const [category, setCategory] = useState<string>(eff.category);
   const [price, setPrice] = useState(eff.myPrice != null ? String(eff.myPrice) : '');
   const [image, setImage] = useState<string | null>(eff.image);
+  const [qty, setQty] = useState(String(item.quantity));
+  const [unit, setUnit] = useState<QuantityUnit>(item.unit ?? 'unit');
   const [busy, setBusy] = useState<'save' | 'photo' | 'other' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -98,6 +103,8 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
 
   const parsedPrice = price.trim() === '' ? null : Number(price.replace(',', '.'));
   const priceInvalid = parsedPrice != null && (!Number.isFinite(parsedPrice) || parsedPrice < 0);
+  const parsedQty = Number(qty.replace(',', '.'));
+  const qtyInvalid = !Number.isFinite(parsedQty) || parsedQty <= 0 || (unit === 'unit' && !Number.isInteger(parsedQty));
 
   const label = 'block text-xs font-semibold text-[var(--color-text-secondary)] mb-1.5';
   const input = 'w-full min-h-[44px] bg-[var(--color-bg-subtle)]/60 border border-[var(--color-border)] rounded-xl px-3 text-[var(--color-text-primary)] outline-none focus:ring-2 focus:ring-[var(--color-accent)]';
@@ -147,6 +154,35 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
         </div>
 
         <div>
+          <label className={label} htmlFor="item-qty">{tx.amount}</label>
+          <div className="flex gap-2">
+            <input
+              id="item-qty"
+              className={`${input} font-mono flex-1 min-w-0 ${qtyInvalid ? 'ring-2 ring-[var(--color-danger)]' : ''}`}
+              inputMode="decimal"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              dir="ltr"
+            />
+            <div role="radiogroup" aria-label={tx.amount} className="flex shrink-0 rounded-xl border border-[var(--color-border)] overflow-hidden">
+              {(['unit', 'kg'] as const).map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  role="radio"
+                  aria-checked={unit === u}
+                  onClick={() => setUnit(u)}
+                  className={`min-h-[44px] px-4 text-sm font-semibold ${unit === u ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)]' : 'text-[var(--color-text-secondary)]'}`}
+                >
+                  {u === 'kg' ? tx.kg : tx.units}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{unit === 'kg' ? `${tx.amountHint} · ${tx.perKg}` : tx.amountHint}</p>
+        </div>
+
+        <div>
           <label className={label} htmlFor="item-price">{tx.myPrice}</label>
           <input
             id="item-price"
@@ -183,8 +219,8 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
 
         <button
           type="button"
-          disabled={!name.trim() || priceInvalid || busy !== null}
-          onClick={() => run('save', () => onSave({ name: name.trim(), category: normalizeCategory(category), price: parsedPrice, image }))}
+          disabled={!name.trim() || priceInvalid || qtyInvalid || busy !== null}
+          onClick={() => run('save', () => onSave({ name: name.trim(), category: normalizeCategory(category), price: parsedPrice, image, quantity: parsedQty, unit }))}
           className="w-full min-h-[48px] bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] text-[var(--color-accent-text)] rounded-xl font-bold disabled:opacity-50 flex items-center justify-center gap-2"
         >
           {busy === 'save' && <Loader2 className="w-4 h-4 animate-spin" />} {tx.save}

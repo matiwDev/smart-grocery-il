@@ -10,7 +10,7 @@
 import React, { useState } from 'react';
 import { Check, ChevronDown, ShoppingCart, Pencil, TrendingDown } from 'lucide-react';
 import { CATEGORIES } from '@/lib/categories';
-import { BasketItem, ChainMeta, OverrideMap, cheaperElsewhere, effective, estimate, unitPrice } from '@/lib/list';
+import { BasketItem, ChainMeta, OverrideMap, cheaperElsewhere, effective, estimate, formatQty, unitPrice } from '@/lib/list';
 
 type Lang = 'he' | 'en';
 
@@ -105,7 +105,10 @@ function Row({ item, overrides, chains, homeChainId, lang, onToggle, onQuantity,
 
       <div className="flex items-center bg-[var(--color-bg-panel)] rounded-lg border border-[var(--color-border)] shrink-0">
         <button type="button" onClick={() => onQuantity(-1)} aria-label="−" className="w-7 h-9 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-lg">−</button>
-        <span className="w-5 text-center font-mono text-sm font-medium text-[var(--color-text-primary)]">{item.quantity}</span>
+        <span className="min-w-[22px] px-0.5 text-center font-mono text-sm font-medium leading-tight text-[var(--color-text-primary)]">
+          {formatQty(item.quantity, undefined, lang)}
+          {item.unit === 'kg' && <span className="block text-[9px] font-sans text-[var(--color-text-muted)]">{lang === 'he' ? 'ק״ג' : 'kg'}</span>}
+        </span>
         <button type="button" onClick={() => onQuantity(1)} aria-label="+" className="w-7 h-9 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] rounded-lg">+</button>
       </div>
 

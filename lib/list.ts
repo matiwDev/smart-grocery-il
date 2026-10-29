@@ -42,10 +42,30 @@ export interface BasketItem {
   /** Cheapest active chain's price, or null when no chain carries it. */
   min_price: number | null;
   quantity: number;
+  /** How the amount is counted: units ("6 apples", default) or kilograms ("1.5 kg"). */
+  unit?: QuantityUnit;
   checked: boolean;
   /** Own price/photo of a household product (custom_products) or older free-text row. */
   customPrice: number | null;
   imageUrl: string | null;
+}
+
+export type QuantityUnit = 'unit' | 'kg';
+
+/** +/- step on the list: one unit, or half a kilo. */
+export function qtyStep(unit: QuantityUnit | undefined): number {
+  return unit === 'kg' ? 0.5 : 1;
+}
+
+/** Smallest amount the +/- buttons go down to. */
+export function qtyMin(unit: QuantityUnit | undefined): number {
+  return unit === 'kg' ? 0.1 : 1;
+}
+
+/** "6", "1.5 ק״ג" / "1.5 kg" (no trailing zeros). */
+export function formatQty(quantity: number, unit: QuantityUnit | undefined, lang: 'he' | 'en'): string {
+  const n = String(Math.round(quantity * 1000) / 1000);
+  return unit === 'kg' ? `${n} ${lang === 'he' ? 'ק״ג' : 'kg'}` : n;
 }
 
 /** A household's edits to a catalog product (table product_overrides). */
@@ -129,6 +149,7 @@ export interface BasketItemRow {
   product_id: string | null;
   custom_product_id: string | null;
   quantity_value: number;
+  quantity_unit?: QuantityUnit;
   checked: boolean;
   name_he: string;
   name_en: string | null;
@@ -155,6 +176,7 @@ export function rowToBasketItem(row: BasketItemRow): BasketItem {
     prices,
     min_price: values.length > 0 ? Math.min(...values) : null,
     quantity: Number(row.quantity_value ?? 1),
+    unit: row.quantity_unit === 'kg' ? 'kg' : 'unit',
     checked: !!row.checked,
     customPrice: row.custom_price != null ? Number(row.custom_price) : null,
     imageUrl: row.image_url,
@@ -169,6 +191,7 @@ export function itemToRow(item: BasketItem, basketId: string) {
     custom_product_id: item.customProductId,
     product_name: item.name_he,
     quantity_value: item.quantity,
+    quantity_unit: item.unit ?? 'unit',
     category: item.productId ? null : item.category,
     custom_price: item.productId ? null : item.customPrice,
     image_url: item.productId ? null : item.imageUrl,

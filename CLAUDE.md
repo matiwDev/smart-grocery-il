@@ -94,6 +94,12 @@ ingested but never shown. Promote one with
   (`unitPrice()` in `lib/list.ts`). Same function feeds the list, the done-shopping sheet
   and the saved trip, so they always agree.
 
+### Amount per item (migration 023)
+`basket_items.quantity_unit` / `trip_items.quantity_unit`: `unit` (default, whole numbers)
+or `kg` (decimals, e.g. 1.5). Set in the edit sheet (Amount + Units/kg toggle); the list's
++/- step is 1 unit or 0.5 kg (min 0.1 kg). Line estimate = price × amount, so a kg item's
+price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts.
+
 ### Chain choice + My products (migration 020)
 - `profiles.preferred_chain_id`: the user's chain. Picker opens by itself until set
   (components/ChainPickerSheet.tsx); the "Shopping at" chip on Home changes it.
@@ -245,7 +251,8 @@ Everything runs on free tiers. Watch:
 009_custom_markets, 010_basket_items_fk, 010_promotions, 011_branch_pricing_views,
 012_chain_prices, 013_drop_price_history, 014_lock_tracked_products, 015_chain_status,
 016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions,
-020_home_chain_custom_products, 021_household_sharing_chat, 022_household_members_fix
+020_home_chain_custom_products, 021_household_sharing_chat, 022_household_members_fix,
+023_quantity_unit
 (all recorded in public.schema_migrations)
 
 Security note (019): `generate_household_invite(p_user_id)` and

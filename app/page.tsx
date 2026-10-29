@@ -29,7 +29,7 @@ import { ChainPickerSheet } from '@/components/ChainPickerSheet';
 import { HouseholdChat } from '@/components/HouseholdChat';
 import {
   BasketItem, BasketItemRow, ChainMeta, ChainPrice, CustomProduct, OverrideMap,
-  effective, unitPrice, estimate, rowToBasketItem, itemToRow, loadOverrides, uploadItemPhoto,
+  effective, unitPrice, estimate, rowToBasketItem, itemToRow, loadOverrides, uploadItemPhoto, qtyStep, qtyMin,
 } from '@/lib/list';
 import { categoryLabel, normalizeCategory } from '@/lib/categories';
 
@@ -1610,7 +1610,7 @@ export default function SmartGroceryDashboard() {
 
     const existing = basket.find((i) => i.productId === product.id);
     if (existing) {
-      const newQ = existing.quantity + 1;
+      const newQ = Math.round((existing.quantity + qtyStep(existing.unit)) * 100) / 100;
       setBasket((prev) => prev.map((i) => i.id === existing.id ? { ...i, quantity: newQ, checked: false } : i));
       if (supabase && existing.dbId) {
         await supabase.from('basket_items').update({ quantity_value: newQ, checked: false }).eq('id', existing.dbId);
@@ -1657,7 +1657,7 @@ export default function SmartGroceryDashboard() {
     setShowPredictions(false);
     const existing = basket.find((i) => i.customProductId === cp.id);
     if (existing) {
-      const newQ = existing.quantity + 1;
+      const newQ = Math.round((existing.quantity + qtyStep(existing.unit)) * 100) / 100;
       setBasket((prev) => prev.map((i) => i.id === existing.id ? { ...i, quantity: newQ, checked: false } : i));
       if (supabase && existing.dbId) {
         await supabase.from('basket_items').update({ quantity_value: newQ, checked: false }).eq('id', existing.dbId);
@@ -1727,7 +1727,7 @@ export default function SmartGroceryDashboard() {
   const updateQuantity = async (id: string, delta: number) => {
     const item = basket.find((i) => i.id === id);
     if (!item) return;
-    const newQ = Math.max(1, item.quantity + delta);
+    const newQ = Math.max(qtyMin(item.unit), Math.round((item.quantity + delta * qtyStep(item.unit)) * 100) / 100);
     if (newQ === item.quantity) return;
     setBasket((prev) => prev.map((i) => i.id === id ? { ...i, quantity: newQ } : i));
     if (supabase && item.dbId) {
@@ -1765,6 +1765,15 @@ export default function SmartGroceryDashboard() {
   // are stored, so "back to catalog" is just deleting the override.
   const saveItemEdit = async (item: BasketItem, v: ItemEditValues) => {
     if (!supabase) return;
+    // Amount (units or kg) belongs to this list item only.
+    if (v.quantity !== item.quantity || v.unit !== (item.unit ?? 'unit')) {
+      if (item.dbId) {
+        const { error } = await supabase.from('basket_items')
+          .update({ quantity_value: v.quantity, quantity_unit: v.unit }).eq('id', item.dbId);
+        if (error) throw error;
+      }
+      setBasket((prev) => prev.map((i) => i.id === item.id ? { ...i, quantity: v.quantity, unit: v.unit } : i));
+    }
     if (item.productId) {
       if (!household) throw new Error(lang === 'he' ? 'משק הבית עדיין נטען, נסו שוב' : 'Household is still loading, try again');
       const row = {
@@ -1837,7 +1846,7 @@ export default function SmartGroceryDashboard() {
     const rows = cart.map((i) => {
       const e = effective(i, overrides);
       const p = unitPrice(i, overrides, chainId);
-      return { trip_id: trip.id, product_id: i.productId, custom_product_id: i.customProductId, name: e.name, category: e.category, quantity: i.quantity, unit_price: p.price, price_source: p.source };
+      return { trip_id: trip.id, product_id: i.productId, custom_product_id: i.customProductId, name: e.name, category: e.category, quantity: i.quantity, quantity_unit: i.unit ?? 'unit', unit_price: p.price, price_source: p.source };
     });
     const { error: itemsError } = await supabase.from('trip_items').insert(rows);
     if (itemsError) {
@@ -1929,7 +1938,7 @@ export default function SmartGroceryDashboard() {
     if (!supabase || !activeBasketId || sb.id === activeBasketId) return;
     if (basket.length > 0 && !window.confirm(t.loadListReplaceConfirm)) return;
     const { data: rows, error } = await supabase.from('basket_items')
-      .select('product_id, custom_product_id, product_name, quantity_value, category, custom_price, image_url')
+      .select('product_id, custom_product_id, product_name, quantity_value, quantity_unit, category, custom_price, image_url')
       .eq('basket_id', sb.id);
     if (error) { showToast(lang === 'he' ? 'טעינת הרשימה נכשלה' : 'Could not load the list'); return; }
     await supabase.from('basket_items').delete().eq('basket_id', activeBasketId);

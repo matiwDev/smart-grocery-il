@@ -49,7 +49,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const { data: items, error: itemsError } = await supabase
       .from('basket_items')
-      .select('id, product_id, custom_product_id, quantity_value, product_name, checked, category, custom_price, image_url, created_at, custom_products(name, category, price, image_url)')
+      .select('id, product_id, custom_product_id, quantity_value, quantity_unit, product_name, checked, category, custom_price, image_url, created_at, custom_products(name, category, price, image_url)')
       .eq('basket_id', basketId)
       .order('created_at', { ascending: true });
 
@@ -89,6 +89,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         product_id: i.product_id,
         custom_product_id: i.custom_product_id ?? null,
         quantity_value: i.quantity_value,
+        quantity_unit: i.quantity_unit === 'kg' ? 'kg' : 'unit',
         checked: !!i.checked,
         name_he: product?.name_he ?? custom?.name ?? i.product_name,
         name_en: product?.name_en ?? null,

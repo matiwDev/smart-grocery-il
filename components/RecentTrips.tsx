@@ -9,7 +9,7 @@ import React, { useEffect, useState } from 'react';
 import { ChevronDown, Receipt, Loader2 } from 'lucide-react';
 import { supabase } from '@/utils/supabase';
 import { categoryInfo } from '@/lib/categories';
-import type { ChainMeta } from '@/lib/list';
+import { formatQty, type ChainMeta, type QuantityUnit } from '@/lib/list';
 
 type Lang = 'he' | 'en';
 
@@ -28,6 +28,7 @@ interface TripItem {
   name: string;
   category: string | null;
   quantity: number;
+  quantity_unit: QuantityUnit | null;
   unit_price: number | null;
   price_source: string;
 }
@@ -56,7 +57,7 @@ export function RecentTrips({ chains, lang, refreshKey }: { chains: ChainMeta[];
   const toggle = async (id: string) => {
     setOpenId((cur) => (cur === id ? null : id));
     if (items[id] || !supabase) return;
-    const { data } = await supabase.from('trip_items').select('id, name, category, quantity, unit_price, price_source').eq('trip_id', id);
+    const { data } = await supabase.from('trip_items').select('id, name, category, quantity, quantity_unit, unit_price, price_source').eq('trip_id', id);
     setItems((prev) => ({ ...prev, [id]: (data ?? []).map((i) => ({ ...i, unit_price: i.unit_price != null ? Number(i.unit_price) : null })) }));
   };
 
@@ -96,7 +97,7 @@ export function RecentTrips({ chains, lang, refreshKey }: { chains: ChainMeta[];
                   {(items[t.id] ?? []).map((i) => (
                     <li key={i.id} className="flex justify-between gap-2 text-xs py-1 border-t border-[var(--color-border)]/50">
                       <span className="min-w-0 truncate text-[var(--color-text-secondary)]">
-                        <span aria-hidden>{categoryInfo(i.category).icon}</span> {i.name} × {i.quantity}
+                        <span aria-hidden>{categoryInfo(i.category).icon}</span> {i.name} × {formatQty(Number(i.quantity), i.quantity_unit ?? 'unit', lang)}
                       </span>
                       <span className="font-mono shrink-0 text-[var(--color-text-primary)]">
                         {i.unit_price != null ? `₪${(i.unit_price * i.quantity).toFixed(2)}` : tx.none}
