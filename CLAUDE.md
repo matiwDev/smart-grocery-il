@@ -30,7 +30,10 @@ lack names/photos/categories; it blew the free-tier database).
    recipes (Hebrew), TheMealDB ideas (English) browse + save, week grid (days × breakfast /
    lunch / dinner) with servings and who eats, "Add week to list" (scaled, merged, topped
    up, never added twice). New tabs: List, Meals, Recipes, Analytics. See "Recipes & meal plan".
-5. Product photo + health grade (Open Food Facts, cached; measure coverage first).
+5. Product photo + health grade — BUILT, migration 025 NOT YET APPLIED (phase5/photos-grades).
+   Coverage measured 1 Nov (`npm run off:coverage`, 168 retail barcodes): OFF knows 17% of
+   products (25% of food), photo 10%, Nutri-Score 3%, nutrition 14% (22% of food). So no
+   bulk job: looked up on demand for list items and cached. See "Product info".
 6. What can I cook?
 7. Daily nutrition, per person (age, sex, activity → target ranges). Planned meals only,
    NOT a food diary.
@@ -174,6 +177,28 @@ price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts
   RecipeEditor.tsx (ingredients as written; "⋯" = list name, product link, skip),
   PlanMealSheet.tsx (recipe, day, slot, who eats, servings follow eaters until changed).
 
+### Product info: photo + health grade (migration 025, phase 5)
+- `product_info` (product_id PK → products): status found | not_found, fetched_at, off_name,
+  image_url (OFF front, 200px; `largerOffImage()` → 400px), is_beverage, per100 jsonb (kcal,
+  sugars, sat_fat, salt, sodium_mg, protein, fiber, fvl, sweeteners), nutriscore a–e +
+  nutriscore_source off | calc, red_flags text[] (sodium | sugar | sat_fat). Shared catalog
+  data: signed-in users read, only the service role writes.
+- `POST /api/products/info {ids}` (Bearer token): answers from the cache, looks up at most 6
+  new/stale products per call on OFF (`world.openfoodfacts.org/api/v2/product/<barcode>`,
+  User-Agent `OFF_USER_AGENT`), returns `{info, pending}`. Non-retail barcodes are cached as
+  not_found without a call. Recheck: not_found after 45 days, found after 180.
+  `hooks/useProductInfo.ts` asks for the list's catalog items, re-asks while pending (≤6 rounds).
+- `lib/health.ts`: Israel's red labels, stage 2 (solids per 100 g: sodium > 400 mg, sugars
+  > 10 g, sat fat > 4 g; liquids per 100 ml: > 300 mg, > 5 g, > 3 g) and Nutri-Score 2023
+  (general foods + beverages). OFF's own grade always wins; for fats/oils/nuts, cheese and
+  red meat we never calculate one. `lib/off.ts` turns an OFF product into a row.
+- UI: list row shows the household photo, else OFF's; a Nutri-Score chip and a red octagon
+  with the number of red labels. Item sheet: `HealthPanel` (components/HealthBadge.tsx) with
+  grade, red labels, nutrition table and the ODbL attribution line. The OFF photo is shown,
+  never saved as the household's.
+- Coverage script: `npm run off:coverage` (resumable, results in scripts/.off-coverage.jsonl,
+  git-ignored). OFF is NOT on Claude's network allowlist: run it on your own machine.
+
 ### Categories (migration 018)
 `categorize_product(name)` (SQL, Hebrew keyword rules, first match wins) sets
 `products.category` via trigger on insert/rename; also callable as an RPC (free-text items).
@@ -265,7 +290,7 @@ Everything runs on free tiers. Watch:
 - **GitHub Actions:** ~1,050 min/month; free while the repo is public.
 - **Anthropic API:** only `npm run enrich:names`, pay-per-use, manual.
 - **Resend:** auth emails via Supabase SMTP (verify it is connected); 3,000 emails/month.
-- Planned, free: Open Food Facts (15 reads/min, attribution), TheMealDB (£10 one-time
+- Open Food Facts (on-demand, ~100 reads/min allowed, ODbL attribution), TheMealDB (£10 one-time
   production key at launch), USDA FoodData Central (free key).
 
 ---
@@ -286,7 +311,7 @@ Everything runs on free tiers. Watch:
 016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions,
 020_home_chain_custom_products, 021_household_sharing_chat, 022_household_members_fix,
 023_quantity_unit, 024_recipes_meal_plan
-(all recorded in public.schema_migrations)
+(all recorded in public.schema_migrations). Written, not yet applied: 025_product_info.
 
 Security note (019): `generate_household_invite(p_user_id)` and
 `join_household_by_code(p_user_id, p_code)` took any user id and were callable without

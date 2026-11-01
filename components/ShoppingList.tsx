@@ -11,6 +11,9 @@ import React, { useState } from 'react';
 import { Check, ChevronDown, ShoppingCart, Pencil, TrendingDown, ChefHat } from 'lucide-react';
 import { CATEGORIES } from '@/lib/categories';
 import { BasketItem, ChainMeta, OverrideMap, cheaperElsewhere, effective, estimate, formatQty, unitPrice } from '@/lib/list';
+import type { ProductInfoMap } from '@/hooks/useProductInfo';
+import type { Grade } from '@/lib/health';
+import { NutriChip, RedCount } from '@/components/HealthBadge';
 
 type Lang = 'he' | 'en';
 
@@ -35,6 +38,8 @@ export interface ShoppingListProps {
   chains: ChainMeta[];
   /** The user's chain: every price is shown at this chain. */
   homeChainId: string | null;
+  /** Open Food Facts photo + health grade per catalog product (phase 5). */
+  productInfo?: ProductInfoMap;
   lang: Lang;
   onToggle: (id: string) => void;
   onQuantity: (id: string, delta: number) => void;
@@ -44,12 +49,14 @@ export interface ShoppingListProps {
   onClear: () => void;
 }
 
-function Row({ item, overrides, chains, homeChainId, lang, onToggle, onQuantity, onEdit }: {
-  item: BasketItem; overrides: OverrideMap; chains: ChainMeta[]; homeChainId: string | null; lang: Lang;
+function Row({ item, overrides, chains, homeChainId, info, lang, onToggle, onQuantity, onEdit }: {
+  item: BasketItem; overrides: OverrideMap; chains: ChainMeta[]; homeChainId: string | null; info?: ProductInfoMap[string]; lang: Lang;
   onToggle: () => void; onQuantity: (d: number) => void; onEdit: () => void;
 }) {
   const tx = TEXT[lang];
   const eff = effective(item, overrides);
+  // The household's own photo wins; otherwise Open Food Facts' photo.
+  const photo = eff.image || info?.image_url || null;
   const { price, source } = unitPrice(item, overrides, homeChainId);
   const line = price != null ? price * item.quantity : null;
   const chainName = (id: string | null) => {
@@ -80,15 +87,17 @@ function Row({ item, overrides, chains, homeChainId, lang, onToggle, onQuantity,
       </button>
 
       <button type="button" onClick={onEdit} className="flex-1 min-w-0 flex items-center gap-2 text-start py-2">
-        {eff.image && (
+        {photo && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={eff.image} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0 bg-[var(--color-bg-subtle)]" />
+          <img src={photo} alt="" loading="lazy" className="w-8 h-8 rounded-lg object-cover shrink-0 bg-[var(--color-bg-subtle)]" />
         )}
         <span className="min-w-0">
           <span className={`block text-sm font-semibold leading-snug line-clamp-2 break-words ${item.checked ? 'line-through text-[var(--color-text-muted)]' : 'text-[var(--color-text-primary)]'}`}>
             {eff.name}
           </span>
           <span className="flex items-center gap-1 text-[11px] text-[var(--color-text-muted)]">
+            {info?.nutriscore && <NutriChip grade={info.nutriscore as Grade} />}
+            {info && <RedCount flags={info.red_flags} lang={lang} />}
             {item.fromMeals && item.fromMeals.length > 0 && (
               <span title={`${tx.forMeals}: ${item.fromMeals.join(', ')}`} aria-label={`${tx.forMeals}: ${item.fromMeals.join(', ')}`} className="inline-flex items-center gap-0.5 px-1.5 rounded-full bg-[var(--color-success)]/10 text-[var(--color-success)] font-semibold">
                 <ChefHat className="w-3 h-3" />{item.fromMeals.length > 1 ? item.fromMeals.length : ''}
@@ -124,7 +133,7 @@ function Row({ item, overrides, chains, homeChainId, lang, onToggle, onQuantity,
   );
 }
 
-export function ShoppingList({ items, overrides, chains, homeChainId, lang, onToggle, onQuantity, onEdit, onDone, onSave, onClear }: ShoppingListProps) {
+export function ShoppingList({ items, overrides, chains, homeChainId, productInfo, lang, onToggle, onQuantity, onEdit, onDone, onSave, onClear }: ShoppingListProps) {
   const tx = TEXT[lang];
   const [cartOpen, setCartOpen] = useState(true);
 
@@ -151,6 +160,7 @@ export function ShoppingList({ items, overrides, chains, homeChainId, lang, onTo
       overrides={overrides}
       chains={chains}
       homeChainId={homeChainId}
+      info={item.productId ? productInfo?.[item.productId] : undefined}
       lang={lang}
       onToggle={() => onToggle(item.id)}
       onQuantity={(d) => onQuantity(item.id, d)}

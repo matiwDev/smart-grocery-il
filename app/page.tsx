@@ -22,6 +22,7 @@ import { authFetch } from '@/utils/authFetch';
 import { DebugPanel } from '@/components/DebugPanel';
 import { isDebugAllowed } from '@/lib/debug';
 import { ShoppingList } from '@/components/ShoppingList';
+import { useProductInfo } from '@/hooks/useProductInfo';
 import { ItemEditSheet, ItemEditValues } from '@/components/ItemEditSheet';
 import { DoneShoppingSheet } from '@/components/DoneShoppingSheet';
 import { RecentTrips } from '@/components/RecentTrips';
@@ -1359,6 +1360,11 @@ export default function SmartGroceryDashboard() {
 
   // Basket state
   const [basket, setBasket] = useState<BasketItem[]>([]);
+  // Phase 5: Open Food Facts photo + health grade for catalog items on the list.
+  const productInfo = useProductInfo(
+    basket.map((i) => i.productId).filter((id): id is string => !!id),
+    !!currentUser?.id && currentUser.id !== '00000000-0000-0000-0000-000000000000',
+  );
   const [activeBasketId, setActiveBasketId] = useState<string | null>(null);
   const [isBasketLoading, setIsBasketLoading] = useState(true);
 
@@ -2472,6 +2478,7 @@ export default function SmartGroceryDashboard() {
                     overrides={overrides}
                     chains={chains}
                     homeChainId={homeChainId}
+                    productInfo={productInfo}
                     lang={lang}
                     onToggle={toggleChecked}
                     onQuantity={updateQuantity}
@@ -2990,6 +2997,7 @@ export default function SmartGroceryDashboard() {
             item={editingItem}
             overrides={overrides}
             chains={chains}
+            info={editingItem.productId ? productInfo[editingItem.productId] : undefined}
             lang={lang}
             onUploadPhoto={(file) => uploadItemPhoto(supabase!, currentUser.id!, file)}
             onSave={(v) => saveItemEdit(editingItem, v)}

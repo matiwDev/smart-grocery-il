@@ -12,6 +12,9 @@ import React, { useRef, useState } from 'react';
 import { X, Camera, Trash2, RotateCcw, Loader2, Barcode } from 'lucide-react';
 import { CATEGORIES, normalizeCategory } from '@/lib/categories';
 import { BasketItem, ChainMeta, OverrideMap, QuantityUnit, effective } from '@/lib/list';
+import type { ProductInfoRow } from '@/lib/off';
+import { largerOffImage } from '@/lib/off';
+import { HealthPanel } from '@/components/HealthBadge';
 
 type Lang = 'he' | 'en';
 
@@ -48,6 +51,8 @@ export interface ItemEditSheetProps {
   item: BasketItem;
   overrides: OverrideMap;
   chains: ChainMeta[];
+  /** Open Food Facts photo + health grade (catalog products, phase 5). */
+  info?: ProductInfoRow;
   lang: Lang;
   onUploadPhoto: (file: File) => Promise<string>;
   onSave: (values: ItemEditValues) => Promise<void>;
@@ -56,7 +61,7 @@ export interface ItemEditSheetProps {
   onClose: () => void;
 }
 
-export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, onSave, onReset, onRemove, onClose }: ItemEditSheetProps) {
+export function ItemEditSheet({ item, overrides, chains, info, lang, onUploadPhoto, onSave, onReset, onRemove, onClose }: ItemEditSheetProps) {
   const tx = TEXT[lang];
   const eff = effective(item, overrides);
   const [name, setName] = useState(eff.name);
@@ -69,6 +74,9 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
   const [error, setError] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Shown when the household has no photo of its own (never saved as theirs).
+  const offPhoto = largerOffImage(info?.image_url ?? null);
+  const shown = image ?? offPhoto;
 
   const estimates = Object.values(item.prices)
     .map((cp) => ({ cp, chain: chains.find((c) => c.id === cp.chain_id) }))
@@ -132,13 +140,13 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
           <div className="shrink-0 flex flex-col items-center gap-1.5">
             <button
               type="button"
-              onClick={() => (image ? setPreviewOpen(true) : fileRef.current?.click())}
-              aria-label={image ? tx.viewPhoto : tx.addPhoto}
+              onClick={() => (shown ? setPreviewOpen(true) : fileRef.current?.click())}
+              aria-label={shown ? tx.viewPhoto : tx.addPhoto}
               className="w-20 h-20 rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-bg-subtle)] flex items-center justify-center overflow-hidden text-[var(--color-text-muted)]"
             >
-              {busy === 'photo' ? <Loader2 className="w-5 h-5 animate-spin" /> : image ? (
+              {busy === 'photo' ? <Loader2 className="w-5 h-5 animate-spin" /> : shown ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={image} alt="" className="w-full h-full object-cover" />
+                <img src={shown} alt="" className="w-full h-full object-cover" />
               ) : <Camera className="w-6 h-6" />}
             </button>
             <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { pickPhoto(e.target.files?.[0]); e.target.value = ''; }} />
@@ -214,6 +222,8 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
           </div>
         )}
 
+        <HealthPanel info={info} lang={lang} />
+
         {item.barcode && (
           <p className="flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)] font-mono"><Barcode className="w-3.5 h-3.5" /> {item.barcode}</p>
         )}
@@ -251,7 +261,7 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
         </div>
       </div>
 
-      {previewOpen && image && (
+      {previewOpen && shown && (
         <div
           role="dialog"
           aria-label={tx.viewPhoto}
@@ -259,16 +269,18 @@ export function ItemEditSheet({ item, overrides, chains, lang, onUploadPhoto, on
           onClick={(e) => { e.stopPropagation(); setPreviewOpen(false); }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={image} alt={name} className="max-w-full max-h-[72vh] rounded-2xl object-contain shadow-2xl" onClick={(e) => e.stopPropagation()} />
+          <img src={shown} alt={name} className="max-w-full max-h-[72vh] rounded-2xl object-contain shadow-2xl" onClick={(e) => e.stopPropagation()} />
           <div className="flex gap-3 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
             <button type="button" onClick={() => fileRef.current?.click()} disabled={busy === 'photo'}
               className="flex-1 min-h-[48px] rounded-xl bg-white text-black font-semibold flex items-center justify-center gap-2">
               {busy === 'photo' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />} {tx.changePhoto}
             </button>
-            <button type="button" onClick={() => { setImage(null); setPreviewOpen(false); }}
-              className="flex-1 min-h-[48px] rounded-xl border border-white/40 text-white font-semibold flex items-center justify-center gap-2">
-              <Trash2 className="w-4 h-4" /> {tx.removePhoto}
-            </button>
+            {image && (
+              <button type="button" onClick={() => { setImage(null); setPreviewOpen(false); }}
+                className="flex-1 min-h-[48px] rounded-xl border border-white/40 text-white font-semibold flex items-center justify-center gap-2">
+                <Trash2 className="w-4 h-4" /> {tx.removePhoto}
+              </button>
+            )}
           </div>
           <button type="button" onClick={() => setPreviewOpen(false)} className="text-white/80 text-sm underline min-h-[44px]">{tx.close}</button>
         </div>
