@@ -35,3 +35,5 @@ pnpm-debug.log*
 # system file artifacts
 .DS_Store
 Thumbs.db
+# Open Food Facts coverage run (phase 5)
+scripts/.off-coverage.jsonl
