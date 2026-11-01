@@ -1,4 +1,4 @@
--- 024 — APPLIED 2026-10-29. Plan v2, phase 4: recipes and the meal plan that fills the list.
+-- 024 — APPLIED 2026-11-01. Plan v2, phase 4: recipes and the meal plan that fills the list.
 --
 --   * recipes: the household's recipes. Own recipes (usually Hebrew) and ones
 --     imported from TheMealDB (English, as published; source = 'mealdb',
@@ -92,6 +92,7 @@ CREATE POLICY "household meal plan" ON public.meal_plan_entries FOR ALL TO authe
               AND EXISTS (SELECT 1 FROM public.recipes r WHERE r.id = recipe_id AND r.household_id = meal_plan_entries.household_id));
 
 -- ─── Realtime ───────────────────────────────────────────────────────────────
+ALTER TABLE public.recipes REPLICA IDENTITY FULL;
 ALTER TABLE public.meal_plan_entries REPLICA IDENTITY FULL;
 DO $$
 DECLARE t text;
