@@ -26,7 +26,7 @@ lack names/photos/categories; it blew the free-tier database).
 3. Shared live list + household chat — DONE (phase3/household, migrations 021–022): the
    household has ONE current list that every member sees and edits, live; saved lists are
    the household's; real chat per household with photos, live. See "Household sharing".
-4. Recipes + meal plan → list — BUILT (phase4/recipes-meals, migration 024): household
+4. Recipes + meal plan → list — BUILT (phase4/recipes-meals, migration 024 applied 1 Nov): household
    recipes (Hebrew), TheMealDB ideas (English) browse + save, week grid (days × breakfast /
    lunch / dinner) with servings and who eats, "Add week to list" (scaled, merged, topped
    up, never added twice). New tabs: List, Meals, Recipes, Analytics. See "Recipes & meal plan".
@@ -151,7 +151,7 @@ price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts
 - `recipe_ingredients` (recipe_id, position, name + measure AS WRITTEN; for the list:
   amount + unit `unit`|`kg`|`none`, list_name, product_id / custom_product_id link,
   skip_list). `none` = "need some": counts as 1 and is never summed. `parseMeasure()` in
-  lib/recipes.ts reads "1 ק״ג", "500 גרם", "2 large", "1 lb" → kg/units; tsp/cup/cloves → none.
+  lib/recipes.ts reads "1 ק״ג", "500 גרם", "חצי ק״ג", "2 large", "1 lb" → kg/units; tsp/cup/cloves → none.
   TheMealDB imports get a Hebrew list_name from the `EN_HE` table when known; water,
   salt and pepper default to skip_list.
 - `meal_plan_entries` (household_id, plan_date, slot breakfast|lunch|dinner, recipe_id,

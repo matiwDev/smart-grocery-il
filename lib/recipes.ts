@@ -133,8 +133,15 @@ const COUNT_WORDS = new Set([
 
 /** What a written measure means for the shopping list. */
 export function parseMeasure(measure: string | null | undefined): { amount: number | null; unit: ListUnit } {
-  const s = (measure ?? '').trim();
+  let s = (measure ?? '').trim();
   if (!s) return { amount: null, unit: 'none' };
+  // Hebrew number words at the start: "חצי ק״ג", "רבע קילו", "שני בצלים"
+  const HE_WORDS: Record<string, string> = {
+    'חצי': '0.5', 'רבע': '0.25', 'אחד': '1', 'אחת': '1', 'שני': '2', 'שתי': '2', 'שניים': '2', 'שתיים': '2',
+    'שלושה': '3', 'שלוש': '3', 'ארבעה': '4', 'ארבע': '4', 'חמישה': '5', 'חמש': '5',
+  };
+  const first = s.split(/\s+/)[0];
+  if (HE_WORDS[first]) s = HE_WORDS[first] + s.slice(first.length);
   // Glued forms: "200g", "1kg", "500גרם"
   const spaced = s.replace(/^(\d+(?:[.,]\d+)?)(?=[^\d\s.,/])/, '$1 ');
   const n = readNumber(spaced);
