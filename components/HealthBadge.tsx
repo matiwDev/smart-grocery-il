@@ -8,6 +8,7 @@
 import React from 'react';
 import { GRADE_COLOR, Grade, Per100, RED_FLAG_TEXT, RedFlag } from '@/lib/health';
 import type { ProductInfoRow } from '@/lib/off';
+import { Collapsible } from '@/components/Collapsible';
 
 type Lang = 'he' | 'en';
 
@@ -66,13 +67,11 @@ function fmt(v: number | undefined, digits = 1) {
 export function HealthPanel({ info, lang }: { info: ProductInfoRow | undefined; lang: Lang }) {
   const tx = TEXT[lang];
   if (!info) return null;
-  const label = 'block text-xs font-semibold text-[var(--color-text-secondary)] mb-1.5';
   if (info.status === 'not_found') {
     return (
-      <div>
-        <p className={label}>{tx.health}</p>
+      <Collapsible id="item-health" title={tx.health}>
         <p className="text-[11px] text-[var(--color-text-muted)]">{tx.notFound}</p>
-      </div>
+      </Collapsible>
     );
   }
   const p: Per100 = info.per100 ?? {};
@@ -87,9 +86,16 @@ export function HealthPanel({ info, lang }: { info: ProductInfoRow | undefined; 
     [tx.fiber, fmt(p.fiber), false],
   ];
 
+  const summary = (info.nutriscore || info.red_flags.length > 0) ? (
+    <>
+      {info.nutriscore && <NutriChip grade={info.nutriscore as Grade} />}
+      <RedCount flags={info.red_flags} lang={lang} />
+    </>
+  ) : null;
+
   return (
+    <Collapsible id="item-health" title={tx.health} summary={summary}>
     <div className="flex flex-col gap-2">
-      <p className={label}>{tx.health}</p>
       {info.nutriscore && (
         <div className="flex items-center gap-3">
           <NutriChip grade={info.nutriscore as Grade} size="lg" />
@@ -127,5 +133,6 @@ export function HealthPanel({ info, lang }: { info: ProductInfoRow | undefined; 
       )}
       <p className="text-[10px] text-[var(--color-text-muted)]">{tx.source}</p>
     </div>
+    </Collapsible>
   );
 }

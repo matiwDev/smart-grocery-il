@@ -15,6 +15,7 @@ import { BasketItem, ChainMeta, OverrideMap, QuantityUnit, effective } from '@/l
 import type { ProductInfoRow } from '@/lib/off';
 import { largerOffImage } from '@/lib/off';
 import { HealthPanel } from '@/components/HealthBadge';
+import { Collapsible } from '@/components/Collapsible';
 
 type Lang = 'he' | 'en';
 
@@ -209,8 +210,7 @@ export function ItemEditSheet({ item, overrides, chains, info, lang, onUploadPho
         </div>
 
         {estimates.length > 0 && (
-          <div>
-            <p className={label}>{tx.estimates}</p>
+          <Collapsible id="item-prices" title={tx.estimates} summary={cheapest ? <span className="font-mono">{cheapest}</span> : null}>
             <ul className="flex flex-col gap-1">
               {estimates.map(({ cp, chain }) => (
                 <li key={cp.chain_id} className="flex justify-between text-xs px-3 py-2 rounded-lg bg-[var(--color-bg-subtle)]/60">
@@ -219,7 +219,7 @@ export function ItemEditSheet({ item, overrides, chains, info, lang, onUploadPho
                 </li>
               ))}
             </ul>
-          </div>
+          </Collapsible>
         )}
 
         <HealthPanel info={info} lang={lang} />

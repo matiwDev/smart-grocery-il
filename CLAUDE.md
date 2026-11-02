@@ -196,6 +196,9 @@ price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts
   with the number of red labels. Item sheet: `HealthPanel` (components/HealthBadge.tsx) with
   grade, red labels, nutrition table and the ODbL attribution line. The OFF photo is shown,
   never saved as the household's.
+- Item sheet sections are collapsible (components/Collapsible.tsx): "Estimated price by chain"
+  (closed: cheapest price) and "Health & nutrition" (closed: grade chip + red-label count).
+  Open/closed is remembered per browser in localStorage `sg_open_<id>`.
 - Coverage script: `npm run off:coverage` (resumable, results in scripts/.off-coverage.jsonl,
   git-ignored). OFF is NOT on Claude's network allowlist: run it on your own machine.
 
