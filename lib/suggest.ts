@@ -48,10 +48,15 @@ export function combinePrefs(list: FoodPrefs[]): FoodPrefs {
 
 export async function loadPrefs(supabase: SupabaseClient, userIds: string[]): Promise<Record<string, FoodPrefs>> {
   if (userIds.length === 0) return {};
-  const { data, error } = await supabase.from('person_profiles').select('user_id, diet, kosher, avoid, dislikes, goals').in('user_id', userIds);
-  if (error) throw error;
+  // Members' rows (person_profiles) and people without an account (household_people, phase 7).
+  const [a, b] = await Promise.all([
+    supabase.from('person_profiles').select('user_id, diet, kosher, avoid, dislikes, goals').in('user_id', userIds),
+    supabase.from('household_people').select('id, diet, kosher, avoid, dislikes, goals').in('id', userIds),
+  ]);
+  if (a.error) throw a.error;
+  const rows = [...(a.data ?? []), ...(b.data ?? []).map((r) => ({ ...r, user_id: r.id }))];
   const out: Record<string, FoodPrefs> = {};
-  for (const r of data ?? []) {
+  for (const r of rows) {
     out[r.user_id as string] = {
       diet: (r.diet as Diet) ?? 'any', kosher: !!r.kosher,
       avoid: (r.avoid as Avoid[]) ?? [], dislikes: (r.dislikes as string[]) ?? [], goals: (r.goals as Goal[]) ?? [],

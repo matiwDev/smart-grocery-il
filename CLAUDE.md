@@ -40,7 +40,10 @@ lack names/photos/categories; it blew the free-tier database).
    (per person, in Profile), ranked by overlap + a health estimate + goals; less healthy
    dishes rank lower with a badge (not hidden). See "What can I cook?".
 7. Daily nutrition, per person (age, sex, activity → target ranges). Planned meals only,
-   NOT a food diary.
+   NOT a food diary. IN PROGRESS (phase7/nutrition, branched from phase 6): 7A people +
+   body data + targets DONE (migration 027). 7B Health Ministry food table (צמרת) +
+   recipe nutrition: waiting for the CSV in data/tzameret/ (data.gov.il is not reachable
+   from Claude's side). See "Nutrition".
 8. Insights (spend by month/chain, most-bought, health-grade mix).
 
 ## Stack
@@ -221,6 +224,27 @@ price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts
   / Dessert chips via `HealthChip`). RecipesView gets `listItems` (current list names via
   `effective()`) and `onEditPrefs` (→ Profile) from app/page.tsx.
 
+### Nutrition (phase 7, migration 027)
+- `person_body` (user_id PK): birth_year, sex male|female, activity sedentary|light|active|
+  very_active, height_cm, weight_kg. PRIVATE (own row only). `person_profiles.targets` jsonb =
+  the ranges computed from it, readable by the household (the body numbers never are).
+- `household_people`: people without an account (children…): name, the same body fields,
+  food preferences (as person_profiles) and targets, one row, RLS = household members.
+  app/page.tsx loads them (id, name) next to the members and passes `eaterList` (members +
+  people, role 'person') wherever "who eats" is chosen; their ids go in
+  meal_plan_entries.eaters. `deletePerson()` also removes the id from planned meals.
+  `loadPrefs()` reads both tables.
+- `lib/nutrition.ts` `targetsFor(body)`: energy = IOM 2005 EER equations (age, sex, height,
+  weight, PA coefficient; children 3–18 + growth; 2-year-olds 89×kg−80), ±10% range,
+  rounded to 50; missing height/weight → typical values by age (`approx: true`); under 2 →
+  null. AMDR shares for protein/fat/carbs (by age), protein never under the RDA (g/kg);
+  fiber 14 g/1000 kcal; sodium CDRR by age (1200/1500/1800/2300 mg); sat fat and sugars
+  < 10% of kcal. Targets are computed in the browser and stored on save.
+- UI (Profile): components/PeopleSections.tsx — `BodySection` (own, autosave, "Private"
+  badge, shows the targets), `HouseholdPeopleSection` (list + edit sheet with BodyFields,
+  TargetsSummary, FoodPrefsEditor). components/FoodPrefsSection.tsx now exports the
+  controlled `FoodPrefsEditor`, `SaveState`, `pillCls`, `fieldLabelCls`.
+
 ### Product info: photo + health grade (migration 025, phase 5)
 - `product_info` (product_id PK → products): status found | not_found, fetched_at, off_name,
   image_url (OFF front, 200px; `largerOffImage()` → 400px), is_beverage, per100 jsonb (kcal,
@@ -357,7 +381,8 @@ Everything runs on free tiers. Watch:
 012_chain_prices, 013_drop_price_history, 014_lock_tracked_products, 015_chain_status,
 016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions,
 020_home_chain_custom_products, 021_household_sharing_chat, 022_household_members_fix,
-023_quantity_unit, 024_recipes_meal_plan, 025_product_info, 026_person_profiles
+023_quantity_unit, 024_recipes_meal_plan, 025_product_info, 026_person_profiles,
+027_people_body_targets
 (all recorded in public.schema_migrations)
 
 Security note (019): `generate_household_invite(p_user_id)` and

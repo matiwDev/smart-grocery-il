@@ -31,6 +31,7 @@ import { HouseholdChat } from '@/components/HouseholdChat';
 import { MealPlanView } from '@/components/MealPlanView';
 import { RecipesView } from '@/components/RecipesView';
 import { FoodPrefsSection } from '@/components/FoodPrefsSection';
+import { BodySection, HouseholdPeopleSection } from '@/components/PeopleSections';
 import { ListNeed, addNeedsToList, seedSampleRecipes, fillWeekWithMeals, weekStart, isoDate, addDays } from '@/lib/recipes';
 import {
   BasketItem, BasketItemRow, ChainMeta, ChainPrice, CustomProduct, OverrideMap,
@@ -1388,6 +1389,9 @@ export default function SmartGroceryDashboard() {
   const [isLoadingSaved, setIsLoadingSaved] = useState(false);
   // Household members (for the chat header and the profile card)
   const [householdMembers, setHouseholdMembers] = useState<{ user_id: string; nickname: string; role: string }[]>([]);
+  // People without an account (phase 7): they eat meals too, so they join the members as "eaters".
+  const [householdPeople, setHouseholdPeople] = useState<{ user_id: string; nickname: string; role: string }[]>([]);
+  const eaterList = React.useMemo(() => [...householdMembers, ...householdPeople], [householdMembers, householdPeople]);
   // Refs for the live-update handlers (realtime callbacks outlive renders)
   const listIdsRef = useRef<Set<string>>(new Set());
   const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1518,12 +1522,14 @@ export default function SmartGroceryDashboard() {
     if (!data) return;
     const h = data as { id: string; name: string; invite_code: string | null };
     setHousehold(h);
-    const [map, members] = await Promise.all([
+    const [map, members, people] = await Promise.all([
       loadOverrides(supabase, h.id),
       supabase.rpc('get_household_members'),
+      supabase.from('household_people').select('id, name').eq('household_id', h.id).order('created_at'),
     ]);
     setOverrides(map);
     setHouseholdMembers((members.data ?? []) as { user_id: string; nickname: string; role: string }[]);
+    setHouseholdPeople(((people.data ?? []) as { id: string; name: string }[]).map((p) => ({ user_id: p.id, nickname: p.name, role: 'person' })));
   }, []);
 
   useEffect(() => {
@@ -2586,6 +2592,10 @@ export default function SmartGroceryDashboard() {
 
             {/* Food preferences (phase 6): per person, read by the household */}
             {currentUser?.id && <FoodPrefsSection userId={currentUser.id} lang={lang} />}
+            {/* Body data (phase 7): private; only the daily targets are shared */}
+            {currentUser?.id && <BodySection userId={currentUser.id} lang={lang} />}
+            {/* People without an account, e.g. children (phase 7) */}
+            {currentUser?.id && household?.id && <HouseholdPeopleSection householdId={household.id} lang={lang} onChanged={refreshHousehold} />}
 
             {/* Household invite */}
             {currentUser && (
@@ -2707,7 +2717,7 @@ export default function SmartGroceryDashboard() {
             <MealPlanView
               householdId={household?.id ?? null}
               lang={lang}
-              members={householdMembers}
+              members={eaterList}
               onAddNeeds={addMealNeedsToList}
               onGoToRecipes={() => setCurrentView('RECIPES')}
               showToast={showToast}
@@ -2722,7 +2732,7 @@ export default function SmartGroceryDashboard() {
               householdId={household?.id ?? null}
               userId={currentUser?.id ?? null}
               lang={lang}
-              members={householdMembers}
+              members={eaterList}
               homeChainId={homeChainId}
               listItems={basket.map((i) => ({ label: effective(i, overrides).name, productId: i.productId, customProductId: i.customProductId }))}
               onEditPrefs={() => setCurrentView('PROFILE')}
