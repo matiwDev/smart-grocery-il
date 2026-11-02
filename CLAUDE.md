@@ -258,8 +258,10 @@ price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts
   food_checked_at (migration 028). `POST /api/nutrition/recipes {ids}` (Bearer; household's
   recipes only) matches/weighs never-tried ingredients once, saves them, returns per-serving
   nutrients + coverage (share of ingredients counted) + unmatched names. Editing a recipe
-  re-inserts its ingredients, so they are matched again. No UI yet to correct a match
-  (food_set_by 'user' is reserved for it).
+  re-inserts its ingredients: automatic matches are redone, hand-chosen ones (food_set_by
+  'user') are carried over by saveRecipe. RecipeEditor "⋯" → FoodMatch: shows the match,
+  search the table (`GET /api/nutrition/foods?q=&name=&measure=` → up to 10 foods with a
+  grams estimate; `?codes=` → names), pick one, edit grams, "Back to automatic".
 - Meals tab → Plan | Nutrition (components/DayNutrition.tsx): day chips + "Week average";
   per eater (members + household people): planned meals where they eat × ONE serving each,
   against their targets (low / in range / high bars). Notes: partial days, coverage < 80%,
@@ -406,7 +408,7 @@ Everything runs on free tiers. Watch:
 016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions,
 020_home_chain_custom_products, 021_household_sharing_chat, 022_household_members_fix,
 023_quantity_unit, 024_recipes_meal_plan, 025_product_info, 026_person_profiles,
-027_people_body_targets, 028_ingredient_food_link
+027_people_body_targets, 028_ingredient_food_link, 029_security_leftovers
 (all recorded in public.schema_migrations)
 
 Security note (019): `generate_household_invite(p_user_id)` and
@@ -418,6 +420,11 @@ Security notes (021, phase 3): `messages` was readable and writable by ANY signe
 (policy "Authenticated users read and write messages"); now household members only. The
 unused `/api/baskets/sync` route (service role, trusted a client-sent userId) was deleted;
 `/api/analytics` personal reports used a `user_id` parameter (anyone could read anyone's
-data) — now the access token. Open advisor items (low risk, not yet fixed):
-`handle_new_user()` is executable via RPC (trigger function), a few functions lack a fixed
-search_path, leaked-password protection is off (Auth settings).
+data) — now the access token.
+
+Security notes (029, 2 Nov): fixed search_path everywhere; trigger functions no longer
+callable via RPC; anon can't call the household functions. Still flagged on purpose:
+get_household_members, get_or_create_own_household, is_household_member,
+join_household_by_code(text), shares_household (signed-in users need them; all act on
+auth.uid()); pg_trgm in public (search indexes). Leaked-password protection: Auth setting
+in the Supabase dashboard (turn on there).
