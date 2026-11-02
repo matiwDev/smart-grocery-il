@@ -157,7 +157,7 @@ export function parseMeasure(measure: string | null | undefined): { amount: numb
 // The recipe itself stays in English, as published; only what goes on the
 // (Hebrew) shopping list is translated. Unknown ingredients keep their name.
 
-const EN_HE: Record<string, string> = {
+export const EN_HE: Record<string, string> = {
   'chicken': 'עוף', 'chicken breast': 'חזה עוף', 'chicken breasts': 'חזה עוף', 'chicken thighs': 'ירכיים עוף', 'chicken legs': 'שוקי עוף',
   'chicken stock': 'ציר עוף', 'beef': 'בשר בקר', 'minced beef': 'בשר טחון', 'beef mince': 'בשר טחון', 'ground beef': 'בשר טחון',
   'lamb': 'בשר כבש', 'lamb mince': 'בשר כבש טחון', 'pork': 'חזיר', 'bacon': 'בייקון', 'sausages': 'נקניקיות', 'turkey': 'הודו',

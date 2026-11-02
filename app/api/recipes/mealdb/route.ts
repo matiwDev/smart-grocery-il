@@ -7,6 +7,11 @@ import type { MealFull, MealSummary } from '@/lib/recipes';
 //   ?i=<idMeal>        one meal with ingredients
 //   ?list=categories   category names
 //   ?random=1          one random meal
+//   ?ing=a|b,c         "What can I cook?": meals using our ingredients. Each comma
+//                      group is one thing we have, with its English candidates
+//                      ("chicken breast|chicken"); the first one TheMealDB knows is
+//                      used. One filter call per group (the free key filters by a
+//                      single ingredient), at most 6; meals ranked by groups used.
 // Proxied (and cached for a day) so the key stays on the server. The free
 // development key is "1"; a public launch needs the £10 production key in
 // THEMEALDB_API_KEY.
@@ -41,9 +46,49 @@ async function get(path: string): Promise<Record<string, unknown>> {
   return res.json();
 }
 
+const MAX_GROUPS = 6;
+
+/** TheMealDB's ingredient names, lower-cased → as published (cached a day). */
+async function knownIngredients(): Promise<Map<string, string>> {
+  const data = await get('list.php?i=list');
+  const rows = (data.meals as RawMeal[] | null) ?? [];
+  return new Map(rows.map((r) => String(r.strIngredient ?? '').trim()).filter(Boolean).map((n) => [n.toLowerCase(), n]));
+}
+
+async function byIngredients(groups: string[][]) {
+  // If the ingredient list can't be read, try each group's first candidate as is.
+  const known = await knownIngredients().catch(() => null);
+  const used: Array<{ group: number; name: string }> = [];
+  groups.slice(0, MAX_GROUPS).forEach((cands, group) => {
+    const hit = known && known.size > 0 ? cands.map((c) => known.get(c.toLowerCase())).find(Boolean) : cands[0];
+    if (hit) used.push({ group, name: hit });
+  });
+  const results = await Promise.all(used.map(async (u) => {
+    const data = await get(`filter.php?i=${encodeURIComponent(u.name.replace(/\s+/g, '_'))}`).catch(() => ({ meals: null }));
+    return { ...u, meals: (data.meals as RawMeal[] | null) ?? [] };
+  }));
+  const byId = new Map<string, MealSummary & { uses: string[] }>();
+  for (const r of results) {
+    for (const m of r.meals) {
+      const id = String(m.idMeal);
+      const row = byId.get(id) ?? { ...summary(m), uses: [] };
+      if (!row.uses.includes(r.name)) row.uses.push(r.name);
+      byId.set(id, row);
+    }
+  }
+  const meals = [...byId.values()]
+    .sort((a, b) => b.uses.length - a.uses.length || a.title.localeCompare(b.title))
+    .slice(0, 40);
+  return { meals, used: used.map((u) => u.name), unknown: groups.slice(0, MAX_GROUPS).length - used.length };
+}
+
 export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams;
   try {
+    if (p.get('ing')) {
+      const groups = p.get('ing')!.split(',').map((g) => g.split('|').map((c) => c.trim()).filter(Boolean)).filter((g) => g.length > 0);
+      return NextResponse.json(await byIngredients(groups));
+    }
     if (p.get('list') === 'categories') {
       const data = await get('list.php?c=list');
       const meals = (data.meals as RawMeal[] | null) ?? [];

@@ -34,7 +34,10 @@ lack names/photos/categories; it blew the free-tier database).
    Coverage measured 1 Nov (`npm run off:coverage`, 168 retail barcodes): OFF knows 17% of
    products (25% of food), photo 10%, Nutri-Score 3%, nutrition 14% (22% of food). So no
    bulk job: looked up on demand for list items and cached. See "Product info".
-6. What can I cook?
+6. What can I cook? — BUILT (phase6/what-can-i-cook, no migration): third tab in Recipes.
+   Chips you pick + "Use my list" → our recipes ranked by fewest missing ingredients
+   ("Add missing to list"), TheMealDB ideas ranked by how many of yours they use.
+   See "What can I cook?".
 7. Daily nutrition, per person (age, sex, activity → target ranges). Planned meals only,
    NOT a food diary.
 8. Insights (spend by month/chain, most-bought, health-grade mix).
@@ -176,6 +179,25 @@ price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts
   Ideas tabs), RecipeSheet.tsx (detail: plan, add to list, save idea, edit, delete),
   RecipeEditor.tsx (ingredients as written; "⋯" = list name, product link, skip),
   PlanMealSheet.tsx (recipe, day, slot, who eats, servings follow eaters until changed).
+
+### What can I cook? (phase 6, no DB changes)
+- `lib/cook.ts`: `words()` folds names to comparable words (no niqqud, numbers, units,
+  geresh; Hebrew ים/ות/ה/ת and English plurals folded; יי→י). Something you have covers an
+  ingredient when one's words are all in the other's ("עוף" covers "חזה עוף"; "חלב תנובה
+  3%" covers "חלב"), except products MADE WITH it ("שוקולד חלב" is not milk; `MADE_WITH`
+  first words). A linked product_id / custom_product_id always matches.
+- Staples never count as missing: skip_list ingredients plus salt, pepper, oil, olive oil,
+  sugar, water (`isStaple`). `matchRecipes()` keeps recipes with ≥1 match, sorted by fewest
+  missing, then most used. "Add missing to list" = `needsFor()` on the recipe with only the
+  missing ingredients (`withOnly`), through the usual addNeedsToList.
+- TheMealDB: `/api/recipes/mealdb?ing=a|b,c` — each comma group is one thing we have with its
+  English candidates (`englishCandidates()` = reverse EN_HE, most specific first, only names
+  wholly inside ours); the server picks the first name in `list.php?i=list`, calls
+  `filter.php?i=` once per group (free key = one ingredient per call; max 6 groups), ranks
+  by groups used. Returns `{meals[{…, uses[]}], used[], unknown}`.
+- UI: components/CookView.tsx (chips with Hebrew/English suggestions, "Use my list" toggle;
+  both remembered in localStorage `sg_cook_have`, `sg_cook_use_list`). RecipesView gets
+  `listItems` (current list names via `effective()`) from app/page.tsx.
 
 ### Product info: photo + health grade (migration 025, phase 5)
 - `product_info` (product_id PK → products): status found | not_found, fetched_at, off_name,

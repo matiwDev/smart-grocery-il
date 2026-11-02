@@ -2720,6 +2720,7 @@ export default function SmartGroceryDashboard() {
               lang={lang}
               members={householdMembers}
               homeChainId={homeChainId}
+              listItems={basket.map((i) => ({ label: effective(i, overrides).name, productId: i.productId, customProductId: i.customProductId }))}
               onAddNeeds={addMealNeedsToList}
               showToast={showToast}
             />

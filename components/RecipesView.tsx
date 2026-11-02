@@ -5,10 +5,11 @@
  * and ideas from TheMealDB (English, as published). From a recipe: add it to
  * the meal plan, send its ingredients to the list, edit or delete it. Ideas can
  * be saved to the household's recipes. Recipe changes by anyone in the
- * household arrive live.
+ * household arrive live. Phase 6 adds a third tab, "What can I cook?"
+ * (components/CookView.tsx).
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { Plus, Search, Loader2, ChefHat, Globe2, BookOpen, Check } from 'lucide-react';
+import { Plus, Search, Loader2, ChefHat, Globe2, BookOpen, Check, CookingPot } from 'lucide-react';
 import { supabase } from '@/utils/supabase';
 import {
   ListNeed, MealFull, MealSummary, Recipe, importMeal, isoDate, loadRecipes, needsFor,
@@ -16,19 +17,21 @@ import {
 import { PlanMealSheet, Member, RecipeThumb, recipeMeta } from '@/components/PlanMealSheet';
 import { RecipeSheet } from '@/components/RecipeSheet';
 import { RecipeEditor } from '@/components/RecipeEditor';
+import { CookView } from '@/components/CookView';
+import { Have, withOnly } from '@/lib/cook';
 
 type Lang = 'he' | 'en';
 
 const TEXT = {
   he: {
-    title: 'מתכונים', ours: 'המתכונים שלנו', ideas: 'רעיונות (TheMealDB)', newRecipe: 'מתכון חדש', search: 'חיפוש במתכונים שלנו…',
+    title: 'מתכונים', ours: 'המתכונים שלנו', ideas: 'רעיונות', cook: 'מה לבשל?', newRecipe: 'מתכון חדש', search: 'חיפוש במתכונים שלנו…',
     emptyOurs: 'עוד אין מתכונים. כתבו מתכון משלכם, או שמרו רעיון מ-TheMealDB.', ideasSearch: 'חיפוש באנגלית (למשל chicken)…',
     ideasNote: 'מתכונים מ-TheMealDB מוצגים באנגלית, כפי שפורסמו.', noIdeas: 'לא נמצאו מתכונים', ideasError: 'לא הצלחנו לטעון רעיונות כרגע',
     all: 'הכול', saved: 'שמור', added: (a: number, u: number) => `נוספו ${a} פריטים לרשימה${u ? `, ${u} עודכנו` : ''}`, nothing: 'אין מה להוסיף לרשימה',
     deleted: 'המתכון נמחק', planned: 'נוסף לתכנון הארוחות', savedToast: 'המתכון נשמר',
   },
   en: {
-    title: 'Recipes', ours: 'Our recipes', ideas: 'Ideas (TheMealDB)', newRecipe: 'New recipe', search: 'Search our recipes…',
+    title: 'Recipes', ours: 'Our recipes', ideas: 'Ideas', cook: 'What can I cook?', newRecipe: 'New recipe', search: 'Search our recipes…',
     emptyOurs: 'No recipes yet. Write your own, or save an idea from TheMealDB.', ideasSearch: 'Search (e.g. chicken)…',
     ideasNote: 'TheMealDB recipes are shown in English, as published.', noIdeas: 'No recipes found', ideasError: "Couldn't load ideas right now",
     all: 'All', saved: 'Saved', added: (a: number, u: number) => `${a} items added to the list${u ? `, ${u} updated` : ''}`, nothing: 'Nothing to add to the list',
@@ -42,13 +45,15 @@ export interface RecipesViewProps {
   lang: Lang;
   members: Member[];
   homeChainId: string | null;
+  /** Items on the household's current list (for "What can I cook?"). */
+  listItems: Have[];
   onAddNeeds: (needs: ListNeed[]) => Promise<{ added: number; updated: number }>;
   showToast: (msg: string) => void;
 }
 
-export function RecipesView({ householdId, userId, lang, members, homeChainId, onAddNeeds, showToast }: RecipesViewProps) {
+export function RecipesView({ householdId, userId, lang, members, homeChainId, listItems, onAddNeeds, showToast }: RecipesViewProps) {
   const tx = TEXT[lang];
-  const [tab, setTab] = useState<'ours' | 'ideas'>('ours');
+  const [tab, setTab] = useState<'ours' | 'ideas' | 'cook'>('ours');
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
@@ -147,6 +152,13 @@ export function RecipesView({ householdId, userId, lang, members, homeChainId, o
     showToast(tx.added(added, updated));
   };
 
+  const addMissingToList = async (r: Recipe, missing: Recipe['recipe_ingredients']) => {
+    const needs = needsFor([{ servings: r.servings, recipe: withOnly(r, missing ?? []) }]);
+    if (needs.length === 0) { showToast(tx.nothing); return; }
+    const { added, updated } = await onAddNeeds(needs);
+    showToast(tx.added(added, updated));
+  };
+
   const deleteRecipe = async (r: Recipe) => {
     const { error } = await supabase.from('recipes').delete().eq('id', r.id);
     if (error) throw error;
@@ -159,7 +171,7 @@ export function RecipesView({ householdId, userId, lang, members, homeChainId, o
   const savedIds = new Set(recipes.filter((r) => r.source === 'mealdb').map((r) => r.source_id));
 
   const tabBtn = (active: boolean) =>
-    `flex-1 min-h-[44px] rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors ${active
+    `flex-1 min-w-0 min-h-[44px] px-1 rounded-xl text-[13px] font-semibold flex items-center justify-center gap-1 transition-colors ${active
       ? 'bg-[var(--color-bg-panel)] text-[var(--color-text-primary)] shadow-sm'
       : 'text-[var(--color-text-muted)]'}`;
   const searchInput = 'w-full min-h-[48px] bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-2xl ps-11 pe-4 text-sm text-[var(--color-text-primary)] outline-none focus:ring-2 focus:ring-[var(--color-accent)]';
@@ -185,6 +197,9 @@ export function RecipesView({ householdId, userId, lang, members, homeChainId, o
         </button>
         <button type="button" role="tab" aria-selected={tab === 'ideas'} onClick={() => setTab('ideas')} className={tabBtn(tab === 'ideas')}>
           <Globe2 className="w-4 h-4" /> {tx.ideas}
+        </button>
+        <button type="button" role="tab" aria-selected={tab === 'cook'} onClick={() => setTab('cook')} className={tabBtn(tab === 'cook')}>
+          <CookingPot className="w-4 h-4" /> {tx.cook}
         </button>
       </div>
 
@@ -284,6 +299,19 @@ export function RecipesView({ householdId, userId, lang, members, homeChainId, o
             Recipe ideas and photos: <a className="underline" href="https://www.themealdb.com" target="_blank" rel="noopener noreferrer">TheMealDB</a>
           </p>
         </>
+      )}
+
+      {tab === 'cook' && (
+        <CookView
+          lang={lang}
+          recipes={recipes}
+          listItems={listItems}
+          savedIdeaIds={savedIds}
+          openingIdea={openingIdea}
+          onOpenRecipe={(r) => setOpen({ recipe: r })}
+          onOpenIdea={openIdea}
+          onAddMissing={addMissingToList}
+        />
       )}
 
       {open && (
