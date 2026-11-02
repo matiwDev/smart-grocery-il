@@ -27,6 +27,7 @@ import { HouseholdChat } from '@/components/HouseholdChat';
 import { MealPlanView } from '@/components/MealPlanView';
 import { RecipesView } from '@/components/RecipesView';
 import { SplashScreen } from '@/components/SplashScreen';
+import { NotificationsSheet } from '@/components/NotificationsSheet';
 import { HomeGreeting } from '@/components/HomeGreeting';
 import { InsightsView } from '@/components/InsightsView';
 import { seedSampleTrips } from '@/lib/insights';
@@ -665,6 +666,14 @@ export default function SmartGroceryDashboard() {
   const [isAuthChecked, setIsAuthChecked] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>('NONE');
   const [currentView, setCurrentView] = useState<View>('HOME');
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  // A reminder notification can open a tab directly (/?view=MEALS).
+  useEffect(() => {
+    try {
+      const v = new URLSearchParams(window.location.search).get('view');
+      if (v === 'MEALS' || v === 'RECIPES' || v === 'ANALYTICS') setCurrentView(v);
+    } catch { /* ignore */ }
+  }, []);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>('light');
   const [isEditingCredentials, setIsEditingCredentials] = useState(false);
@@ -1633,6 +1642,9 @@ export default function SmartGroceryDashboard() {
       dir={lang === 'he' ? 'rtl' : 'ltr'}
     >
       <SplashScreen ready={!!household && !isBasketLoading} lang={lang} />
+      {isNotificationsOpen && currentUser?.id && (
+        <NotificationsSheet userId={currentUser.id} householdId={household?.id ?? null} lang={lang} onClose={() => setIsNotificationsOpen(false)} showToast={showToast} />
+      )}
 
       {/* ── Header: compact icon row ── */}
       <header className="sticky top-0 z-40 flex items-center justify-between gap-2 py-3 -mx-4 px-4 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8 bg-[var(--color-bg-base)] border-b border-[var(--color-border)]">
@@ -1665,6 +1677,7 @@ export default function SmartGroceryDashboard() {
           </button>
 
           <button
+            onClick={() => setIsNotificationsOpen(true)}
             aria-label={t.notifications}
             className="relative w-11 h-11 flex items-center justify-center bg-[var(--color-bg-subtle)] hover:bg-[var(--color-bg-hover)] transition-colors rounded-full border border-[var(--color-border)] text-[var(--color-accent)]"
           >

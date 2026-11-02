@@ -62,6 +62,9 @@ Required: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
           SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET, RESEND_API_KEY, ANTHROPIC_API_KEY
 Optional: NEXT_PUBLIC_DEBUG_EMAILS (debug panel in production), THEMEALDB_API_KEY
           (defaults to TheMealDB's free dev key "1")
+Reminders/push (feat/reminders): NEXT_PUBLIC_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY,
+          VAPID_SUBJECT (the app URL), REMINDERS_CRON_SECRET (= Vault secret
+          'reminders_cron_secret'). Without them the bell panel says "not set up yet".
 
 ## Key npm scripts
 ```
@@ -314,6 +317,22 @@ price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts
 - The old AnalyticsView (in app/page.tsx) and `/api/analytics` were removed; recharts is no
   longer imported (still in package.json).
 
+### Notifications & reminders (migration 030, feat/reminders)
+- Bell in the header → components/NotificationsSheet.tsx: turn on push on this device (iPhone:
+  only after "Add to Home Screen", iOS 16.4+), "Send a test", three personal reminders
+  (fill_list, shopping, plan_meals) with weekdays + time, "No notifications on Shabbat"
+  (Fri 15:00 – Sat 20:00), "Add to calendar" (.ics weekly event, works without push).
+- Tables: `push_subscriptions` (endpoint unique, keys; own rows), `reminders` (user_id+kind
+  unique, days int[] 0=Sun, at_time, tz Asia/Jerusalem, skip_shabbat, lang, last_sent_at;
+  own rows). public/sw.js shows pushes and opens the app (url may be /?view=MEALS, which
+  app/page.tsx reads on load).
+- Sending: Supabase pg_cron job 'reminders-run' every 10 min → pg_net POST
+  /api/reminders/run with x-cron-secret from Vault. `isDue()` (lib/reminders.ts): chosen day,
+  within 40 min after the time, not in Shabbat if paused, not sent in the last 12 h. Message
+  adds household context (unticked items on the list, meals planned for next week, tonight's
+  dinner). lib/pushServer.ts uses `web-push`; 404/410 subscriptions are deleted.
+  `POST /api/push/test` (Bearer) sends a test to your own devices.
+
 ### Categories (migration 018)
 `categorize_product(name)` (SQL, Hebrew keyword rules, first match wins) sets
 `products.category` via trigger on insert/rename; also callable as an RPC (free-text items).
@@ -439,7 +458,7 @@ Everything runs on free tiers. Watch:
 016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions,
 020_home_chain_custom_products, 021_household_sharing_chat, 022_household_members_fix,
 023_quantity_unit, 024_recipes_meal_plan, 025_product_info, 026_person_profiles,
-027_people_body_targets, 028_ingredient_food_link, 029_security_leftovers
+027_people_body_targets, 028_ingredient_food_link, 029_security_leftovers, 030_reminders_push
 (all recorded in public.schema_migrations)
 
 Security note (019): `generate_household_invite(p_user_id)` and
