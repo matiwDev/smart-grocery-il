@@ -6,10 +6,12 @@
  * "Add week to list" sends every planned meal not yet on the list: amounts
  * scaled by servings, the same product from several meals merged, items
  * already on the list topped up (lib/recipes.ts). Shared and live for the
- * whole household. (Calories and balance per day come in phase 7.)
+ * whole household. Phase 7: a "Nutrition" view per person per day from the
+ * planned meals (components/DayNutrition.tsx).
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Plus, ShoppingCart, Loader2, CalendarDays, Check, RotateCcw, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, ShoppingCart, Loader2, CalendarDays, Check, RotateCcw, Users, UtensilsCrossed, HeartPulse } from 'lucide-react';
+import { DayNutrition } from '@/components/DayNutrition';
 import { supabase } from '@/utils/supabase';
 import {
   ListNeed, MealEntry, Recipe, SLOTS, Slot, addDays, isoDate, loadRecipes, needsFor, weekStart,
@@ -25,7 +27,7 @@ const TEXT = {
     planned: (n: number, s: number) => `${n} ארוחות · ${s} מנות`, empty: 'עוד לא תוכננו ארוחות לשבוע הזה. לחצו + כדי להוסיף.',
     noRecipes: 'כדי לתכנן ארוחות, הוסיפו קודם מתכון בלשונית מתכונים.', toRecipes: 'למתכונים',
     added: (a: number, u: number) => `נוספו ${a} פריטים לרשימה${u ? `, ${u} עודכנו` : ''}`, nothing: 'אין מרכיבים להוסיף', failed: 'ההוספה לרשימה נכשלה',
-    servings: 'מנות', everyone: 'כולם', onList: 'ברשימה',
+    servings: 'מנות', everyone: 'כולם', onList: 'ברשימה', plan: 'תכנון', nutrition: 'תזונה',
   },
   en: {
     title: 'Meal plan', thisWeek: 'This week', today: 'Today', prev: 'Previous week', next: 'Next week',
@@ -33,7 +35,7 @@ const TEXT = {
     planned: (n: number, s: number) => `${n} meals · ${s} servings`, empty: 'No meals planned for this week yet. Tap + to add one.',
     noRecipes: 'To plan meals, first add a recipe in the Recipes tab.', toRecipes: 'Go to Recipes',
     added: (a: number, u: number) => `${a} items added to the list${u ? `, ${u} updated` : ''}`, nothing: 'No ingredients to add', failed: 'Could not add to the list',
-    servings: 'servings', everyone: 'Everyone', onList: 'on list',
+    servings: 'servings', everyone: 'Everyone', onList: 'on list', plan: 'Plan', nutrition: 'Nutrition',
   },
 };
 
@@ -48,10 +50,11 @@ export interface MealPlanViewProps {
   members: Member[];
   onAddNeeds: (needs: ListNeed[]) => Promise<{ added: number; updated: number }>;
   onGoToRecipes: () => void;
+  onOpenProfile?: () => void;
   showToast: (msg: string) => void;
 }
 
-export function MealPlanView({ householdId, lang, members, onAddNeeds, onGoToRecipes, showToast }: MealPlanViewProps) {
+export function MealPlanView({ householdId, lang, members, onAddNeeds, onGoToRecipes, onOpenProfile, showToast }: MealPlanViewProps) {
   const tx = TEXT[lang];
   const [start, setStart] = useState(() => weekStart(new Date()));
   const [entries, setEntries] = useState<MealEntry[]>([]);
@@ -59,6 +62,7 @@ export function MealPlanView({ householdId, lang, members, onAddNeeds, onGoToRec
   const [loading, setLoading] = useState(true);
   const [sheet, setSheet] = useState<{ date: string; slot: Slot; entry?: MealEntry } | null>(null);
   const [adding, setAdding] = useState(false);
+  const [mode, setMode] = useState<'plan' | 'nutrition'>('plan');
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(start, i)), [start]);
   const from = isoDate(start);
@@ -145,7 +149,21 @@ export function MealPlanView({ householdId, lang, members, onAddNeeds, onGoToRec
         </button>
       </div>
 
-      {!loading && recipes.length === 0 && (
+      <div className="flex gap-1 p-1 rounded-2xl bg-[var(--color-bg-subtle)]" role="tablist">
+        {(['plan', 'nutrition'] as const).map((m) => (
+          <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => setMode(m)}
+            className={`flex-1 min-h-[44px] rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors ${mode === m
+              ? 'bg-[var(--color-bg-panel)] text-[var(--color-text-primary)] shadow-sm' : 'text-[var(--color-text-muted)]'}`}>
+            {m === 'plan' ? <UtensilsCrossed className="w-4 h-4" /> : <HeartPulse className="w-4 h-4" />} {tx[m]}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'nutrition' && !loading && (
+        <DayNutrition lang={lang} days={days} entries={entries.filter((e) => recipeById.has(e.recipe_id))} members={members} onOpenProfile={onOpenProfile} />
+      )}
+
+      {mode === 'plan' && !loading && recipes.length === 0 && (
         <div className="rounded-2xl border border-dashed border-[var(--color-border)] p-4 text-center flex flex-col items-center gap-2">
           <p className="text-sm text-[var(--color-text-muted)]">{tx.noRecipes}</p>
           <button type="button" onClick={onGoToRecipes} className="min-h-[44px] px-4 rounded-xl bg-[var(--color-accent)] text-[var(--color-accent-text)] text-sm font-bold">{tx.toRecipes}</button>
@@ -154,7 +172,7 @@ export function MealPlanView({ householdId, lang, members, onAddNeeds, onGoToRec
 
       {loading ? (
         <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-[var(--color-accent)]" /></div>
-      ) : (
+      ) : mode === 'plan' && (
         <div className="flex flex-col gap-3">
           {days.map((d) => {
             const iso = isoDate(d);
@@ -219,7 +237,7 @@ export function MealPlanView({ householdId, lang, members, onAddNeeds, onGoToRec
         </div>
       )}
 
-      {entries.length > 0 && (
+      {mode === 'plan' && entries.length > 0 && (
         <div className="sticky bottom-[calc(72px+env(safe-area-inset-bottom,16px))] z-10 flex flex-col gap-1.5">
           {pending.length > 0 ? (
             <button

@@ -2720,6 +2720,7 @@ export default function SmartGroceryDashboard() {
               members={eaterList}
               onAddNeeds={addMealNeedsToList}
               onGoToRecipes={() => setCurrentView('RECIPES')}
+              onOpenProfile={() => setCurrentView('PROFILE')}
               showToast={showToast}
             />
           </motion.div>

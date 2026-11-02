@@ -40,10 +40,10 @@ lack names/photos/categories; it blew the free-tier database).
    (per person, in Profile), ranked by overlap + a health estimate + goals; less healthy
    dishes rank lower with a badge (not hidden). See "What can I cook?".
 7. Daily nutrition, per person (age, sex, activity → target ranges). Planned meals only,
-   NOT a food diary. IN PROGRESS (phase7/nutrition, branched from phase 6): 7A people +
-   body data + targets DONE (migration 027). 7B Health Ministry food table (צמרת) +
-   recipe nutrition: waiting for the CSV in data/tzameret/ (data.gov.il is not reachable
-   from Claude's side). See "Nutrition".
+   NOT a food diary. BUILT (phase7/nutrition, branched from phase 6; migrations 027–028
+   applied 2 Nov): people without accounts, private body data → daily targets, recipe
+   nutrition from the Health Ministry table (צמרת), Meals tab → Nutrition per person per
+   day / week average. See "Nutrition".
 8. Insights (spend by month/chain, most-bought, health-grade mix).
 
 ## Stack
@@ -224,7 +224,7 @@ price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts
   / Dessert chips via `HealthChip`). RecipesView gets `listItems` (current list names via
   `effective()`) and `onEditPrefs` (→ Profile) from app/page.tsx.
 
-### Nutrition (phase 7, migration 027)
+### Nutrition (phase 7, migrations 027–028)
 - `person_body` (user_id PK): birth_year, sex male|female, activity sedentary|light|active|
   very_active, height_cm, weight_kg. PRIVATE (own row only). `person_profiles.targets` jsonb =
   the ranges computed from it, readable by the household (the body numbers never are).
@@ -240,6 +240,30 @@ price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts
   null. AMDR shares for protein/fat/carbs (by age), protein never under the RDA (g/kg);
   fiber 14 g/1000 kcal; sodium CDRR by age (1200/1500/1800/2300 mg); sat fat and sugars
   < 10% of kcal. Targets are computed in the browser and stored on save.
+- Food table: Health Ministry צמרת (data.gov.il "nutrition-database"; raw CSVs in
+  data/tzameret/, downloaded 2 Nov 2026). NOT in the database: `npm run tzameret:build`
+  (scripts/build-tzameret.mjs) writes lib/data/tzameret.json (~850 KB, 4,624 foods:
+  code, he, en, per 100 g kcal/protein/fat/sat_fat/carbs/sugars/fiber/sodium mg; plus
+  grams per household measure for the units we use). Server-side only (API route import).
+  moh_matkonim (composite recipes) and moh_yehidot_mida (unit names) aren't used at runtime.
+- `lib/foods.ts`: `matchFood()` — `ALIAS_SRC` pins ~150 common Hebrew/English ingredient
+  names to a chosen food code (edit there when a match is wrong); otherwise every word of the
+  ingredient must be in the food name, scored for plain + raw ("טרי", "לא מבושל", "יבש")
+  over cooked/fried/canned/prepared/brand variants; `GENERIC` first words (גבינת, דג,
+  תבלינים…) are skipped; MIN_SCORE 4 or no match. `gramsFor()` — weights/ml direct;
+  tbsp/tsp/cup/clove/slice/unit/small/large/can/pack… from the food's household measure
+  (Tzameret codes 300/400/200/1211/500/103…), else typical grams; "to taste" → 1 g for
+  seasonings, 10 g oil/herbs; anything else unknown → not counted.
+- `recipe_ingredients` + food_code, grams (whole recipe), food_set_by auto|user,
+  food_checked_at (migration 028). `POST /api/nutrition/recipes {ids}` (Bearer; household's
+  recipes only) matches/weighs never-tried ingredients once, saves them, returns per-serving
+  nutrients + coverage (share of ingredients counted) + unmatched names. Editing a recipe
+  re-inserts its ingredients, so they are matched again. No UI yet to correct a match
+  (food_set_by 'user' is reserved for it).
+- Meals tab → Plan | Nutrition (components/DayNutrition.tsx): day chips + "Week average";
+  per eater (members + household people): planned meals where they eat × ONE serving each,
+  against their targets (low / in range / high bars). Notes: partial days, coverage < 80%,
+  source line (Tzameret, Ministry of Health; estimate, not dietary advice).
 - UI (Profile): components/PeopleSections.tsx — `BodySection` (own, autosave, "Private"
   badge, shows the targets), `HouseholdPeopleSection` (list + edit sheet with BodyFields,
   TargetsSummary, FoodPrefsEditor). components/FoodPrefsSection.tsx now exports the
@@ -382,7 +406,7 @@ Everything runs on free tiers. Watch:
 016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions,
 020_home_chain_custom_products, 021_household_sharing_chat, 022_household_members_fix,
 023_quantity_unit, 024_recipes_meal_plan, 025_product_info, 026_person_profiles,
-027_people_body_targets
+027_people_body_targets, 028_ingredient_food_link
 (all recorded in public.schema_migrations)
 
 Security note (019): `generate_household_invite(p_user_id)` and

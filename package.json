@@ -13,6 +13,7 @@
     "seed:products": "ts-node --project scripts/tsconfig.json scripts/seed-products-from-feed.ts",
     "enrich:names": "ts-node --project scripts/tsconfig.json scripts/enrich-product-names.ts",
     "probe:chains": "ts-node --project scripts/tsconfig.json scripts/probe-chain-feeds.ts",
+    "tzameret:build": "node scripts/build-tzameret.mjs",
     "off:coverage": "ts-node --project scripts/tsconfig.json scripts/off-coverage.ts"
   },
   "dependencies": {
