@@ -26,6 +26,8 @@ import { ChainPickerSheet } from '@/components/ChainPickerSheet';
 import { HouseholdChat } from '@/components/HouseholdChat';
 import { MealPlanView } from '@/components/MealPlanView';
 import { RecipesView } from '@/components/RecipesView';
+import { SplashScreen } from '@/components/SplashScreen';
+import { HomeGreeting } from '@/components/HomeGreeting';
 import { InsightsView } from '@/components/InsightsView';
 import { seedSampleTrips } from '@/lib/insights';
 import { FoodPrefsSection } from '@/components/FoodPrefsSection';
@@ -1582,8 +1584,8 @@ export default function SmartGroceryDashboard() {
   // there's no session — guest browsing is not supported.
   if (!isAuthChecked) {
     return (
-      <div className="w-full min-h-screen flex items-center justify-center bg-[var(--color-bg-base)]">
-        <Loader2 className="w-8 h-8 text-[var(--color-accent)] animate-spin" />
+      <div className="w-full min-h-screen bg-[var(--color-bg-base)]">
+        <SplashScreen ready={false} lang={lang} />
       </div>
     );
   }
@@ -1596,9 +1598,8 @@ export default function SmartGroceryDashboard() {
       >
         <header className="relative z-[60] flex items-center justify-between mb-6 gap-4">
           <div className="flex items-center gap-4">
-            <div className="w-10 h-10 bg-[var(--color-accent)] rounded-xl flex items-center justify-center text-[var(--color-accent-text)] font-bold shadow-lg shadow-[var(--color-accent)]/20 shrink-0">
-              <ShoppingCart className="w-5 h-5" />
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.webp" alt="" width={44} height={44} className="w-11 h-11 rounded-2xl object-cover shrink-0 shadow-md shadow-[#B93E0B]/15 ring-1 ring-[var(--color-border)]" />
             <div>
               <h1 className="text-lg font-bold text-[var(--color-text-primary)]">{t.appTitle}</h1>
               <p className="text-xs text-[var(--color-text-muted)] font-medium">{t.envLabel}</p>
@@ -1613,6 +1614,7 @@ export default function SmartGroceryDashboard() {
           </button>
         </header>
 
+        <SplashScreen ready lang={lang} />
         <AuthModal
           authMode={authMode === 'NONE' ? 'SIGN_IN' : authMode}
           setAuthMode={setAuthMode}
@@ -1630,14 +1632,17 @@ export default function SmartGroceryDashboard() {
       className="w-full min-h-screen flex flex-col font-sans p-4 md:p-6 lg:p-8 pb-[80px] overflow-x-clip relative transition-colors duration-300 bg-[var(--color-bg-base)] text-[var(--color-text-primary)]"
       dir={lang === 'he' ? 'rtl' : 'ltr'}
     >
+      <SplashScreen ready={!!household && !isBasketLoading} lang={lang} />
+
       {/* ── Header: compact icon row ── */}
       <header className="sticky top-0 z-40 flex items-center justify-between gap-2 py-3 -mx-4 px-4 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8 bg-[var(--color-bg-base)] border-b border-[var(--color-border)]">
         <button
           onClick={() => setIsAboutOpen(true)}
           aria-label={t.aboutTitle}
-          className="w-11 h-11 bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)] rounded-xl flex items-center justify-center text-[var(--color-accent-text)] shadow-lg shadow-[var(--color-accent)]/20 transition-colors shrink-0"
+          className="w-11 h-11 rounded-2xl overflow-hidden shrink-0 shadow-md shadow-[#B93E0B]/15 ring-1 ring-[var(--color-border)] hover:ring-[var(--color-accent)] transition-shadow"
         >
-          <ShoppingCart className="w-7 h-7" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.webp" alt="" width={44} height={44} className="w-full h-full object-cover" />
         </button>
 
         <div className="flex-1" />
@@ -1687,6 +1692,8 @@ export default function SmartGroceryDashboard() {
         {/* ═══ HOME ═══ */}
         {currentView === 'HOME' && (
           <motion.div key="HOME" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }} className="flex-1 flex flex-col gap-6">
+
+            {currentUser && <HomeGreeting nickname={currentUser.nickname} householdId={household?.id ?? null} lang={lang} onOpenMeals={() => setCurrentView('MEALS')} />}
 
             {/* Store chip: the one chain the user shops at */}
             {(() => {

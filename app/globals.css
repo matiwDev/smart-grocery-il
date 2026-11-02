@@ -1,61 +1,83 @@
 @import "tailwindcss";
 
+/* Tailwind's font-sans (used on the app's wrappers) = Rubik, loaded in app/layout.tsx. */
+@theme {
+  --font-sans: var(--font-rubik), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+}
+
 /*
  * Design tokens for the light/dark theme system.
  * Toggled via a `data-theme="dark"` attribute on <html> (see app/layout.tsx +
  * the theme toggle in app/page.tsx), persisted to localStorage under `sg_theme`.
  *
- * Deviations from the original spec hex values (kept as close to the intent as
- * possible, changed only where the literal value failed WCAG AA as text):
- *   - light --color-text-muted: #868E96 -> #6B7280 (as text on white/panel it was ~3.3:1)
- *   - light --color-success:    #2F9E44 -> #15803D (as text on white it was ~3.4:1)
- *   - light --color-warning:    #F08C00 -> #B45309 (as text on white it was ~2.5:1)
- *   - dark  --color-accent-hover: #60A5FA -> #2563EB (white button text on hover was ~2.5:1)
+ * Warm "home kitchen / market" palette (design refresh, 2 Nov 2026): cream paper
+ * backgrounds, tomato-terracotta accent, olive green for done/healthy, warm brown
+ * ink; dark mode is warm charcoal. Every text colour was checked for WCAG AA
+ * (4.5:1) on base, panel and subtle backgrounds. Font: Rubik (app/layout.tsx).
  */
 
 @layer base {
   :root {
-    --color-bg-base: #F8F9FA;
-    --color-bg-panel: #FFFFFF;
-    --color-bg-subtle: #F1F3F5;
-    --color-bg-hover: #E9ECEF;
-    --color-border: #DEE2E6;
-    --color-border-strong: #ADB5BD;
-    --color-text-primary: #212529;
-    --color-text-secondary: #495057;
-    --color-text-muted: #6B7280;
-    --color-accent: #2563EB;
-    --color-accent-hover: #1D4ED8;
+    --color-bg-base: #FBF7F1;
+    --color-bg-panel: #FFFDF9;
+    --color-bg-subtle: #F4EDE3;
+    --color-bg-hover: #EDE3D6;
+    --color-border: #E6DACB;
+    --color-border-strong: #BFAE98;
+    --color-text-primary: #2B2420;
+    --color-text-secondary: #574A40;
+    --color-text-muted: #76655A;
+    --color-accent: #B93E0B;
+    --color-accent-hover: #9A3412;
     --color-accent-text: #FFFFFF;
-    --color-success: #15803D;
-    --color-warning: #B45309;
-    --color-danger: #C92A2A;
-    --color-danger-bg: #FFF5F5;
-    --color-success-bg: #EBFBEE;
+    --color-success: #456F0D;
+    --color-warning: #A35208;
+    --color-danger: #B91C1C;
+    --color-danger-bg: #FDF0EC;
+    --color-success-bg: #EEF3E2;
   }
 
   [data-theme="dark"] {
-    --color-bg-base: #0F1117;
-    --color-bg-panel: #1A1D23;
-    --color-bg-subtle: #22262D;
-    --color-bg-hover: #2A2F38;
-    --color-border: #2E3440;
-    --color-border-strong: #4C566A;
-    --color-text-primary: #F8F9FA;
-    --color-text-secondary: #CED4DA;
-    --color-text-muted: #868E96;
-    --color-accent: #3B82F6;
-    --color-accent-hover: #2563EB;
-    --color-accent-text: #FFFFFF;
-    --color-success: #51CF66;
-    --color-warning: #FFD43B;
-    --color-danger: #FF6B6B;
-    --color-danger-bg: #2D1B1B;
-    --color-success-bg: #1A2E1A;
+    --color-bg-base: #1A1613;
+    --color-bg-panel: #24201C;
+    --color-bg-subtle: #2D2823;
+    --color-bg-hover: #38312B;
+    --color-border: #3D352E;
+    --color-border-strong: #5E5247;
+    --color-text-primary: #F6EFE7;
+    --color-text-secondary: #D8CCBF;
+    --color-text-muted: #A8998A;
+    --color-accent: #F0895B;
+    --color-accent-hover: #E07040;
+    --color-accent-text: #1A1613;
+    --color-success: #9BC25A;
+    --color-warning: #F2C14E;
+    --color-danger: #F87171;
+    --color-danger-bg: #33201C;
+    --color-success-bg: #232B18;
   }
 
   body {
     background: var(--color-bg-base);
     color: var(--color-text-primary);
+    font-family: var(--font-rubik), system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
   }
 }
+
+/* Aisle tints (design refresh): a soft colour per aisle for the list's section headers. */
+@layer base {
+  :root {
+    --aisle-produce: #E3EFD3; --aisle-bread: #F4E3C8; --aisle-dairy_eggs: #DCEAF4; --aisle-meat_fish: #F6DCD6;
+    --aisle-pantry: #EFE4D2; --aisle-snacks: #F3DCE6; --aisle-drinks: #D8EEEC; --aisle-frozen: #E1E6F5;
+    --aisle-baby: #F5E8F0; --aisle-personal_care: #E9E2F2; --aisle-household: #E2ECEA; --aisle-other: #ECE7E0;
+  }
+  [data-theme="dark"] {
+    --aisle-produce: #2A3320; --aisle-bread: #3A2F20; --aisle-dairy_eggs: #22303A; --aisle-meat_fish: #3A2522;
+    --aisle-pantry: #352C21; --aisle-snacks: #3A2530; --aisle-drinks: #1F3432; --aisle-frozen: #252B3A;
+    --aisle-baby: #382A33; --aisle-personal_care: #2E2838; --aisle-household: #243230; --aisle-other: #302B26;
+  }
+}
+
+@keyframes sg-pop { 0% { transform: scale(0.6); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
+.sg-pop { animation: sg-pop 260ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .sg-pop { animation: none; } }

@@ -79,7 +79,7 @@ function Row({ item, overrides, chains, homeChainId, info, lang, onToggle, onQua
         aria-pressed={item.checked}
         className="w-10 h-11 shrink-0 flex items-center justify-center"
       >
-        <span className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+        <span key={item.checked ? 'on' : 'off'} className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${item.checked ? 'sg-pop ' : ''}${
           item.checked ? 'bg-[var(--color-success)] border-[var(--color-success)] text-white' : 'border-[var(--color-border-strong,var(--color-border))]'
         }`}>
           {item.checked && <Check className="w-4 h-4" strokeWidth={3} />}
@@ -176,7 +176,7 @@ export function ShoppingList({ items, overrides, chains, homeChainId, productInf
 
       {groups.map(({ cat, items: groupItems }) => (
         <section key={cat.key} className="flex flex-col gap-2">
-          <h3 className="text-xs font-bold text-[var(--color-text-secondary)] flex items-center gap-1.5">
+          <h3 className="self-start text-xs font-bold text-[var(--color-text-secondary)] flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: `var(--aisle-${cat.key})` }}>
             <span aria-hidden>{cat.icon}</span> {cat[lang]} <span className="font-normal text-[var(--color-text-muted)]">({groupItems.length})</span>
           </h3>
           {groupItems.map(row)}

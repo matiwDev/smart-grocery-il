@@ -376,7 +376,19 @@ Vercel's 300s limit. Parsers: `scripts/parsers/`.
   Profile, Saved lists, Scan, Chat, Analytics, Community).
 - Auth: email + password with an emailed code on sign-up. No guest mode. Signing up with
   an existing email switches to Sign In (Supabase sends no code in that case).
-- Theme: light/dark via CSS variables.
+- Theme: light/dark via CSS variables. Design refresh (2 Nov, branch design/warm-theme):
+  warm "home kitchen / market" palette in app/globals.css (cream paper, terracotta accent
+  #B93E0B / dark #F0895B with dark text, olive success, warm brown ink; all text ≥ 4.5:1),
+  font Rubik (next/font/google, Hebrew + Latin; Tailwind `font-sans` mapped to it via
+  @theme), `--aisle-<key>` tints for the list's aisle headers, `.sg-pop` tick animation.
+- Images: originals in assets/images (Splash.jpeg 768×1376, Icon.jpeg 1024², painted market
+  basket). Served copies: public/splash.webp, public/logo.webp (header), public/icon-192/512.png
+  (manifest), app/icon.png + app/apple-icon.png (favicons). app/manifest.ts = installable app
+  (cream theme colour). Regenerate with ImageMagick if the originals change.
+- components/SplashScreen.tsx: the painting + "Smart Grocery" + Hebrew tagline while auth and
+  the list load (min 0.9 s, max 5 s from page load, fades; never returns until reload).
+  components/HomeGreeting.tsx: time-of-day hello + nickname + today's next planned meal
+  (tap → Meals).
 
 ## Debug tools (components/DebugPanel.tsx, lib/debug.ts)
 Who sees them: everyone on `npm run dev`; in production, only signed-in users whose email
@@ -412,7 +424,8 @@ Everything runs on free tiers. Watch:
 
 ## What NOT to build until the plan's core works
 - Coupons/promotions, price alert emails, Shufersal cart integration
-- WhatsApp support (placeholder number in code — replace 972500000000)
+- WhatsApp support: the About sheet links to wa.me/972502887700 (check it's the right
+  number before a public launch)
 - Branch/location pricing or maps (dropped by decision)
 - Full price history (monthly summaries for tracked products only)
 
