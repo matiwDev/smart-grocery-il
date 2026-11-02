@@ -4,11 +4,12 @@
  * Create or edit a household recipe (Plan v2, phase 4). Each ingredient is
  * typed as written ("עגבניות", "1 ק״ג"); the amount is read from that for the
  * shopping list. Under "⋯" an ingredient can be linked to a product (so it gets
- * a price), get a different name on the list, or be left off the list.
+ * a price), get a different name on the list, or be left off the list, and
+ * (phase 7) be matched by hand to a food in the Health Ministry table, with grams.
  * Imported TheMealDB recipes are edited the same way (their text stays English).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { X, Camera, Loader2, Plus, Trash2, MoreHorizontal, Link2, Unlink, Search, Minus } from 'lucide-react';
+import { X, Camera, Loader2, Plus, Trash2, MoreHorizontal, Link2, Unlink, Search, Minus, Apple, RotateCcw } from 'lucide-react';
 import { supabase } from '@/utils/supabase';
 import { uploadItemPhoto } from '@/lib/list';
 import {
@@ -25,6 +26,8 @@ const TEXT = {
     onList: 'על הרשימה', notOnList: 'לא יתווסף לרשימה', listName: 'שם ברשימת הקניות', skip: 'לא להוסיף לרשימה (יש בבית)',
     link: 'קישור למוצר (למחיר)', linked: 'מקושר ל:', unlink: 'בטל קישור', searchPh: 'חפשו מוצר…', mine: 'שלי', removeIng: 'הסר מרכיב',
     more: 'אפשרויות', photo: 'תמונה',
+    food: 'ערכים תזונתיים (מאגר משרד הבריאות)', foodAuto: 'מותאם אוטומטית', foodNone: 'עוד לא הותאם (יחושב כשתצפו בתזונה)', foodMine: 'נבחר ידנית',
+    foodSearch: 'חפשו מזון בטבלה…', grams: 'גרם במתכון כולו', foodReset: 'חזרה להתאמה אוטומטית', per100: 'קק״ל ל-100 ג׳',
   },
   en: {
     newTitle: 'New recipe', editTitle: 'Edit recipe', name: 'Recipe name', namePh: 'e.g. Shakshuka', servings: 'Servings',
@@ -33,6 +36,8 @@ const TEXT = {
     onList: 'On the list', notOnList: 'Not added to the list', listName: 'Name on the shopping list', skip: "Don't add to the list (we have it)",
     link: 'Link to a product (for a price)', linked: 'Linked to:', unlink: 'Unlink', searchPh: 'Search products…', mine: 'mine', removeIng: 'Remove ingredient',
     more: 'Options', photo: 'Photo',
+    food: 'Nutrition (Health Ministry table)', foodAuto: 'Matched automatically', foodNone: 'Not matched yet (worked out when you view nutrition)', foodMine: 'Chosen by hand',
+    foodSearch: 'Search the food table…', grams: 'Grams in the whole recipe', foodReset: 'Back to automatic', per100: 'kcal per 100 g',
   },
 };
 
@@ -74,6 +79,14 @@ export function RecipeEditor({ recipe, householdId, userId, homeChainId, lang, o
     withLinkedNames(supabase, sortIngredients(recipe)).then((list) => {
       if (list.length) setItems((prev) => prev.map((x, i) => ({ ...x, linked_name: list[i]?.linked_name ?? x.linked_name })));
     });
+    // Names of the matched foods (the table lives on the server).
+    const codes = [...new Set(sortIngredients(recipe).map((x) => x.food_code).filter((c): c is number => c != null))];
+    if (codes.length) {
+      fetch(`/api/nutrition/foods?codes=${codes.join(',')}`).then((r) => r.json()).then((d: { foods?: Array<{ code: number; he: string }> }) => {
+        const names = new Map((d.foods ?? []).map((f) => [f.code, f.he]));
+        setItems((prev) => prev.map((x) => (x.food_code != null ? { ...x, food_name: names.get(x.food_code) ?? x.food_name } : x)));
+      }).catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recipe?.id]);
 
@@ -335,9 +348,92 @@ function IngredientOptions({ ing, lang, householdId, homeChainId, onChange, onRe
           </div>
         </>
       )}
+      <FoodMatch ing={ing} lang={lang} onChange={onChange} />
       <button type="button" onClick={onRemove} className="self-start min-h-[36px] flex items-center gap-1.5 text-xs font-semibold text-[var(--color-danger)]">
         <Trash2 className="w-3.5 h-3.5" /> {tx.removeIng}
       </button>
+    </div>
+  );
+}
+
+interface FoodHit { code: number; he: string; en: string; kcal: number | null; grams: number | null }
+
+/** The ingredient's food in the Health Ministry table, and its grams: automatic, or chosen by hand. */
+function FoodMatch({ ing, lang, onChange }: { ing: RecipeIngredient; lang: Lang; onChange: (p: Partial<RecipeIngredient>) => void }) {
+  const tx = TEXT[lang];
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState<FoodHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [gramsText, setGramsText] = useState(ing.grams != null ? String(ing.grams) : '');
+
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) { setHits([]); return; }
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const params = new URLSearchParams({ q: term, name: ing.list_name || ing.name, measure: ing.measure ?? '' });
+        const d = await fetch(`/api/nutrition/foods?${params}`).then((r) => r.json());
+        setHits(d.foods ?? []);
+      } catch { setHits([]); }
+      setSearching(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [q, ing.list_name, ing.name, ing.measure]);
+
+  const status = ing.food_set_by === 'user' ? tx.foodMine : ing.food_code != null ? tx.foodAuto : tx.foodNone;
+  const input = 'w-full min-h-[40px] bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-xl px-3 text-sm text-[var(--color-text-primary)] outline-none focus:ring-2 focus:ring-[var(--color-accent)]';
+
+  return (
+    <div className="flex flex-col gap-1.5 pt-1 border-t border-[var(--color-border)]/60">
+      <span className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--color-text-muted)] mt-1"><Apple className="w-3.5 h-3.5" /> {tx.food}</span>
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="min-w-0 text-[var(--color-text-secondary)]" dir="auto">
+          {ing.food_name ? <b className="block truncate">{ing.food_name}</b> : null}
+          <span className="text-[11px] text-[var(--color-text-muted)]">{status}{ing.grams != null ? ` · ${ing.grams} g` : ''}</span>
+        </span>
+        {ing.food_set_by === 'user' && (
+          <button type="button" onClick={() => { onChange({ food_code: null, grams: null, food_set_by: null, food_name: null }); setGramsText(''); }}
+            className="shrink-0 min-h-[36px] px-2 flex items-center gap-1 text-[var(--color-accent)] font-semibold">
+            <RotateCcw className="w-3.5 h-3.5" /> {tx.foodReset}
+          </button>
+        )}
+      </div>
+      <div className="relative">
+        {searching
+          ? <Loader2 className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 animate-spin text-[var(--color-accent)]" />
+          : <Search className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />}
+        <input className={`${input} ps-9`} value={q} onChange={(e) => setQ(e.target.value)} placeholder={tx.foodSearch} dir="auto" />
+      </div>
+      {hits.length > 0 && (
+        <div className="flex flex-col rounded-xl border border-[var(--color-border)] overflow-hidden max-h-60 overflow-y-auto">
+          {hits.map((h) => (
+            <button key={h.code} type="button"
+              onClick={() => {
+                const grams = ing.food_set_by === 'user' && ing.grams != null ? ing.grams : h.grams != null ? Math.round(h.grams) : null;
+                onChange({ food_code: h.code, food_name: h.he, food_set_by: 'user', grams });
+                setGramsText(grams != null ? String(grams) : '');
+                setQ(''); setHits([]);
+              }}
+              className="min-h-[44px] px-3 py-1.5 flex items-center justify-between gap-2 text-start text-sm bg-[var(--color-bg-panel)] hover:bg-[var(--color-bg-hover)] border-b last:border-b-0 border-[var(--color-border)]/60">
+              <span className="min-w-0 text-[var(--color-text-primary)] line-clamp-2" dir="auto">{h.he}</span>
+              {h.kcal != null && <span className="font-mono text-[10px] text-[var(--color-text-muted)] shrink-0" title={tx.per100}>{Math.round(h.kcal)} kcal</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      {ing.food_set_by === 'user' && (
+        <label className="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
+          {tx.grams}
+          <input inputMode="decimal" value={gramsText} dir="ltr"
+            onChange={(e) => {
+              setGramsText(e.target.value);
+              const n = Number(e.target.value.replace(',', '.'));
+              onChange({ grams: e.target.value.trim() === '' || !Number.isFinite(n) || n < 0 ? null : Math.round(n * 10) / 10 });
+            }}
+            className="w-24 min-h-[40px] bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-xl px-3 text-sm text-end outline-none focus:ring-2 focus:ring-[var(--color-accent)]" />
+        </label>
+      )}
     </div>
   );
 }

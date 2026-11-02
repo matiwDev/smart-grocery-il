@@ -263,6 +263,7 @@ const ALIAS_SRC: Array<[number, string]> = [
   [1096, 'sausages'],
   [4072, 'שמרים'],
   [4072, 'yeast'],
+  [3829, 'בזיליקום'], [3829, 'basil'], [3829, 'fresh basil'], [3565, 'ג׳ינג׳ר'], [3565, 'ginger'], [3565, 'fresh ginger'],
   [4443, 'olive oil'], [4443, 'extra virgin olive oil'], [3798, 'garlic'], [3798, 'garlic clove'], [3798, 'garlic cloves'],
   [4387, 'butter'], [4387, 'unsalted butter'], [3115, 'lemon'], [3115, 'lemon juice'], [3663, 'tomato'], [3663, 'tomatoes'],
   [3626, 'carrot'], [3626, 'carrots'], [4502, 'brown sugar'], [1898, 'tahini'], [4443, 'שמן זית']
@@ -406,4 +407,28 @@ export function nutrientsFor(row: FoodRow | undefined, grams: number): Nutrients
 export function addInto(a: Nutrients, b: Nutrients, factor = 1): Nutrients {
   for (const k of NUTRIENTS) a[k] += b[k] * factor;
   return a;
+}
+
+export interface FoodHit { code: number; he: string; en: string; kcal: number | null }
+
+/**
+ * Foods for a search box (choosing a match by hand): every typed word must
+ * start a word of the food's Hebrew or English name. Plain raw foods first.
+ */
+export function searchFoods(t: FoodTable, q: string, limit = 10): FoodHit[] {
+  const qw = words(q);
+  if (qw.length === 0) return [];
+  const lang: 'he' | 'en' = /[֐-׿]/.test(q) ? 'he' : 'en';
+  const hits: Array<{ f: Indexed; s: number }> = [];
+  for (const f of index(t).list) {
+    const all = lang === 'he' ? f.heAll : f.enAll;
+    if (!qw.every((w) => all.some((x) => x.startsWith(w)))) continue;
+    const exact = score(qw, f, lang);
+    hits.push({ f, s: Number.isFinite(exact) ? exact + 20 : -all.length });
+  }
+  // The food we'd pick automatically for exactly this name goes first.
+  const pinned = ALIASES[aliasKey(q)];
+  for (const h of hits) if (h.f.row.c === pinned) h.s = Infinity;
+  return hits.sort((a, b) => b.s - a.s).slice(0, limit)
+    .map(({ f }) => ({ code: f.row.c, he: f.row.he, en: f.row.en, kcal: f.row.n[0] }));
 }

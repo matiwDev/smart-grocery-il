@@ -30,6 +30,12 @@ export interface RecipeIngredient {
   skip_list: boolean;
   /** Display name of the linked product (joined in the app, not a column). */
   linked_name?: string | null;
+  /** Health Ministry food + grams in the whole recipe (phase 7); 'user' = chosen by hand, kept on save. */
+  food_code?: number | null;
+  grams?: number | null;
+  food_set_by?: 'auto' | 'user' | null;
+  /** Display name of food_code (from /api/nutrition/foods, not a column). */
+  food_name?: string | null;
 }
 
 export interface Recipe {
@@ -62,7 +68,7 @@ export interface MealEntry {
 
 export const RECIPE_SELECT =
   'id, household_id, title, lang, servings, instructions, image_url, category, source, source_id, source_url, created_at, ' +
-  'recipe_ingredients(id, position, name, measure, amount, unit, list_name, product_id, custom_product_id, skip_list)';
+  'recipe_ingredients(id, position, name, measure, amount, unit, list_name, product_id, custom_product_id, skip_list, food_code, grams, food_set_by)';
 
 export function sortIngredients(r: Recipe): RecipeIngredient[] {
   return [...(r.recipe_ingredients ?? [])].sort((a, b) => a.position - b.position);
@@ -306,6 +312,10 @@ export async function saveRecipe(
       product_id: x.product_id,
       custom_product_id: x.custom_product_id,
       skip_list: x.skip_list,
+      // A food chosen by hand is kept; automatic matches are redone after an edit (the amount may have changed).
+      ...(x.food_set_by === 'user'
+        ? { food_code: x.food_code ?? null, grams: x.grams ?? null, food_set_by: 'user', food_checked_at: new Date().toISOString() }
+        : {}),
     }));
   if (rows.length > 0) {
     const { error } = await supabase.from('recipe_ingredients').insert(rows);
