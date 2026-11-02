@@ -8,13 +8,9 @@ import {
   LifeBuoy, MessageCircle, MessageSquare, CheckCircle, AlertCircle,
   Loader2, Bell, Copy, UserPlus, Sun, Moon,
   ScanBarcode, Camera, VideoOff, Trash2,
-  Store, Bookmark, Plus, ChefHat, CalendarDays,
+  Bookmark, Plus, ChefHat, CalendarDays,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import {
-  ResponsiveContainer, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  LineChart, Line,
-} from 'recharts';
 import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
 import { AuthModal, AuthMode } from '@/components/AuthModal';
 import { supabase } from '@/utils/supabase';
@@ -30,6 +26,8 @@ import { ChainPickerSheet } from '@/components/ChainPickerSheet';
 import { HouseholdChat } from '@/components/HouseholdChat';
 import { MealPlanView } from '@/components/MealPlanView';
 import { RecipesView } from '@/components/RecipesView';
+import { InsightsView } from '@/components/InsightsView';
+import { seedSampleTrips } from '@/lib/insights';
 import { FoodPrefsSection } from '@/components/FoodPrefsSection';
 import { BodySection, HouseholdPeopleSection } from '@/components/PeopleSections';
 import { ListNeed, addNeedsToList, seedSampleRecipes, fillWeekWithMeals, weekStart, isoDate, addDays } from '@/lib/recipes';
@@ -37,7 +35,7 @@ import {
   BasketItem, BasketItemRow, ChainMeta, ChainPrice, CustomProduct, OverrideMap,
   effective, unitPrice, estimate, rowToBasketItem, itemToRow, loadOverrides, uploadItemPhoto, qtyStep, qtyMin,
 } from '@/lib/list';
-import { categoryLabel, normalizeCategory } from '@/lib/categories';
+import { normalizeCategory } from '@/lib/categories';
 
 type Lang = 'he' | 'en';
 type View = 'HOME' | 'MEALS' | 'RECIPES' | 'PROFILE' | 'SAVED_LISTS' | 'ANALYTICS' | 'COMMUNITY' | 'CHAT' | 'SCAN';
@@ -106,7 +104,7 @@ const DICTIONARY = {
     basePrice: 'מחיר מינימלי',
     total: 'סה״כ',
     navHome: 'ראשי', navProfile: 'הגדרות פרופיל',
-    navSavedLists: 'רשימות שמורות', navAnalytics: 'אנליטיקס',
+    navSavedLists: 'רשימות שמורות', navAnalytics: 'תובנות',
     navCommunity: 'קהילת צרכנים', navChat: 'צ׳אט משפחתי',
     chatSearchPlaceholder: 'חפש בהודעות...',
     chatNoResults: 'לא נמצאו הודעות תואמות',
@@ -289,7 +287,7 @@ const DICTIONARY = {
     basePrice: 'Min Price',
     total: 'Total',
     navHome: 'Home', navProfile: 'Profile Settings',
-    navSavedLists: 'Saved Lists', navAnalytics: 'Analytics',
+    navSavedLists: 'Saved Lists', navAnalytics: 'Insights',
     navCommunity: 'Community', navChat: 'Household Chat',
     chatSearchPlaceholder: 'Search messages...',
     chatNoResults: 'No matching messages found',
@@ -634,105 +632,7 @@ function ChainPriceBreakdown({ prices, chains, lang }: { prices: Record<string, 
   );
 }
 
-// ─── Analytics ────────────────────────────────────────────────────────────────
-
-interface ChainRankingEntry {
-  chain_id: string;
-  name_he: string;
-  name_en: string;
-  color_hex: string;
-  avg_price: number;
-  product_count: number;
-}
-
-interface PersonalChainRankingEntry {
-  chain_id: string;
-  name_he: string;
-  name_en: string;
-  color_hex: string;
-  total_cost: number;
-  items_covered: number;
-}
-
-interface MonthlyBreakdownEntry {
-  month: string; // YYYY-MM
-  total: number;
-  avg_per_week: number;
-  trips: number;
-}
-
-interface SpendingOverview {
-  not_enough_data: boolean;
-  basket_total?: number;
-  custom_total?: number;
-  combined_total?: number;
-  weekly_avg?: number;
-  monthly_breakdown?: MonthlyBreakdownEntry[];
-  annual_projection?: number;
-  annual_total_to_date?: number;
-}
-
-interface MonthlyBasketProduct {
-  product_id: string;
-  name_he: string;
-  name_en: string | null;
-  category: string | null;
-  total_qty: number;
-  cheapest_price: number | null;
-}
-
-interface CustomMarketEntry {
-  id: string;
-  amount: number;
-  note: string | null;
-  spent_at: string;
-}
-
-interface MonthlyCustomEntry {
-  market_name: string;
-  amount: number;
-  note: string | null;
-  spent_at: string;
-}
-
-interface CustomMarket {
-  id: string;
-  name: string;
-  total_spent: number;
-  recent_entries: CustomMarketEntry[];
-}
-
-interface TrendSearchResult {
-  id: string;
-  name_he: string;
-  name_en: string | null;
-}
-
-interface TrendHistoryRow {
-  chain_id: string;
-  price: number;
-  captured_at: string;
-}
-
-// Groups price_trend points (monthly averages from product_price_monthly) into one row per date (recharts wants a flat
-// array with one key per line), keeping the last price seen that day per
-// chain since `history` is already ordered oldest-first.
-function buildTrendChartData(history: TrendHistoryRow[]): Array<Record<string, string | number>> {
-  const byDate = new Map<string, Record<string, string | number>>();
-  for (const h of history) {
-    const day = h.captured_at.slice(0, 10);
-    if (!byDate.has(day)) byDate.set(day, { date: day });
-    byDate.get(day)![h.chain_id] = h.price;
-  }
-  return [...byDate.values()].sort((a, b) => (a.date as string).localeCompare(b.date as string));
-}
-
-function SkeletonBlock({ height = 120 }: { height?: number }) {
-  return <div className="w-full bg-[var(--color-bg-subtle)] rounded-xl animate-pulse" style={{ height }} />;
-}
-
-// Shown in the basket panel while the login-time rehydration fetch is in
-// flight, so a reload never flashes an empty basket before the real one loads.
+// Loading placeholder for the list.
 function BasketSkeleton() {
   return (
     <div className="space-y-3">
@@ -741,10 +641,6 @@ function BasketSkeleton() {
       ))}
     </div>
   );
-}
-
-function AnalyticsEmptyState({ text }: { text: string }) {
-  return <p className="text-sm text-[var(--color-text-muted)] text-center py-6">{text}</p>;
 }
 
 // Icon + title + subtext empty state, used where a bare line of muted text
@@ -759,553 +655,6 @@ function IconEmptyState({ icon: Icon, title, subtitle }: { icon: React.Component
     </div>
   );
 }
-
-function AnalyticsView({ t, lang, currentUserId, showToast }: { t: Dictionary; lang: Lang; currentUserId: string | null; showToast: (msg: string) => void }) {
-  // Section A — spending overview
-  const [spending, setSpending] = useState<SpendingOverview | null>(null);
-  const [spendingLoading, setSpendingLoading] = useState(true);
-  const [spendingExpanded, setSpendingExpanded] = useState(false);
-
-  // Section B — chain ranking (general vs. personal)
-  const [rankingTab, setRankingTab] = useState<'personal' | 'general'>('personal');
-  const [ranking, setRanking] = useState<ChainRankingEntry[]>([]);
-  const [rankingLoading, setRankingLoading] = useState(true);
-  const [personalRanking, setPersonalRanking] = useState<PersonalChainRankingEntry[]>([]);
-  const [personalRankingLoading, setPersonalRankingLoading] = useState(true);
-
-  // Section C — monthly basket summary
-  const [monthlyBasket, setMonthlyBasket] = useState<MonthlyBasketProduct[]>([]);
-  const [monthlyBasketTotalItems, setMonthlyBasketTotalItems] = useState(0);
-  const [monthlyCustomEntries, setMonthlyCustomEntries] = useState<MonthlyCustomEntry[]>([]);
-  const [monthlyCustomTotal, setMonthlyCustomTotal] = useState(0);
-  const [monthlyBasketLoading, setMonthlyBasketLoading] = useState(true);
-  const [monthlyBasketExpanded, setMonthlyBasketExpanded] = useState(false);
-
-  // Section D — custom markets
-  const [markets, setMarkets] = useState<CustomMarket[]>([]);
-  const [marketsLoading, setMarketsLoading] = useState(true);
-  const [isAddingMarket, setIsAddingMarket] = useState(false);
-  const [newMarketName, setNewMarketName] = useState('');
-  const [expenseFormMarketId, setExpenseFormMarketId] = useState<string | null>(null);
-  const [expenseAmount, setExpenseAmount] = useState('');
-  const [expenseDate, setExpenseDate] = useState('');
-  const [expenseNote, setExpenseNote] = useState('');
-
-  const [trendQuery, setTrendQuery] = useState('');
-  const [trendResults, setTrendResults] = useState<TrendSearchResult[]>([]);
-  const [trendSelected, setTrendSelected] = useState<TrendSearchResult | null>(null);
-  const [trendData, setTrendData] = useState<Array<Record<string, string | number>>>([]);
-  const [trendChainsPresent, setTrendChainsPresent] = useState<ChainMeta[]>([]);
-  const [trendLoading, setTrendLoading] = useState(false);
-  const [trendHasEnough, setTrendHasEnough] = useState(true);
-
-  const loadMarkets = useCallback(() => {
-    if (!currentUserId) { setMarketsLoading(false); return; }
-    setMarketsLoading(true);
-    authFetch(`/api/analytics?type=custom_markets`)
-      .then((r) => r.json()).then((d) => setMarkets(d.markets ?? []))
-      .finally(() => setMarketsLoading(false));
-  }, [currentUserId]);
-
-  useEffect(() => {
-    if (!currentUserId) {
-      setSpendingLoading(false);
-      setPersonalRankingLoading(false);
-      setMonthlyBasketLoading(false);
-      return;
-    }
-    setSpendingLoading(true);
-    authFetch(`/api/analytics?type=spending_overview`)
-      .then((r) => r.json()).then((d) => setSpending(d))
-      .finally(() => setSpendingLoading(false));
-
-    setPersonalRankingLoading(true);
-    authFetch(`/api/analytics?type=personal_chain_ranking`)
-      .then((r) => r.json()).then((d) => setPersonalRanking(d.ranking ?? []))
-      .finally(() => setPersonalRankingLoading(false));
-
-    setMonthlyBasketLoading(true);
-    authFetch(`/api/analytics?type=monthly_basket`)
-      .then((r) => r.json()).then((d) => {
-        setMonthlyBasket(d.products ?? []);
-        setMonthlyBasketTotalItems(d.total_items ?? 0);
-        setMonthlyCustomEntries(d.custom_entries ?? []);
-        setMonthlyCustomTotal(d.custom_total ?? 0);
-      })
-      .finally(() => setMonthlyBasketLoading(false));
-
-    loadMarkets();
-  }, [currentUserId, loadMarkets]);
-
-  useEffect(() => {
-    setRankingLoading(true);
-    fetch('/api/analytics?type=chain_ranking')
-      .then((r) => r.json()).then((d) => setRanking(d.ranking ?? []))
-      .finally(() => setRankingLoading(false));
-  }, []);
-
-  const handleAddMarket = async () => {
-    if (!supabase || !currentUserId || !newMarketName.trim()) return;
-    const { error } = await supabase.from('custom_markets').insert({ user_id: currentUserId, name: newMarketName.trim() });
-    if (!error) {
-      setNewMarketName('');
-      setIsAddingMarket(false);
-      loadMarkets();
-    }
-  };
-
-  const handleOpenExpenseForm = (marketId: string) => {
-    setExpenseFormMarketId(marketId);
-    setExpenseAmount('');
-    setExpenseNote('');
-    setExpenseDate(new Date().toISOString().slice(0, 10));
-  };
-
-  const handleAddExpense = async () => {
-    if (!supabase || !expenseFormMarketId) return;
-    const amount = parseFloat(expenseAmount);
-    if (!Number.isFinite(amount) || amount <= 0) return;
-    const { error } = await supabase.from('custom_market_entries').insert({
-      market_id: expenseFormMarketId,
-      amount,
-      note: expenseNote.trim() || null,
-      spent_at: expenseDate || new Date().toISOString().slice(0, 10),
-    });
-    if (!error) {
-      setExpenseFormMarketId(null);
-      loadMarkets();
-    }
-  };
-
-  const handleDeleteExpense = async (entryId: string) => {
-    if (!supabase) return;
-    setMarkets((prev) => prev.map((m) => ({ ...m, recent_entries: m.recent_entries.filter((e) => e.id !== entryId) })));
-    await supabase.from('custom_market_entries').delete().eq('id', entryId);
-    loadMarkets();
-  };
-
-  const handleExportMonthlyBasket = async () => {
-    const now = new Date();
-    const monthLabel = now.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'long', year: 'numeric' });
-    const lines = [`${t.analyticsExportHeader} ${monthLabel}`];
-    for (const p of monthlyBasket) {
-      const name = lang === 'he' ? p.name_he : (p.name_en ?? p.name_he);
-      lines.push(`• ${name} x${p.total_qty}`);
-    }
-    try {
-      await navigator.clipboard.writeText(lines.join('\n'));
-      showToast(t.analyticsExportCopiedToast);
-    } catch {}
-  };
-
-  useEffect(() => {
-    if (!trendQuery.trim()) { setTrendResults([]); return; }
-    const handle = setTimeout(() => {
-      fetch(`/api/products/search?q=${encodeURIComponent(trendQuery.trim())}&limit=6`)
-        .then((r) => r.json())
-        .then((d) => setTrendResults((d.products ?? []).map((p: TrendSearchResult) => ({ id: p.id, name_he: p.name_he, name_en: p.name_en }))));
-    }, 300);
-    return () => clearTimeout(handle);
-  }, [trendQuery]);
-
-  const handleSelectTrendProduct = async (p: TrendSearchResult) => {
-    setTrendSelected(p);
-    setTrendResults([]);
-    setTrendQuery('');
-    setTrendLoading(true);
-    try {
-      const res = await fetch(`/api/analytics?type=price_trend&product_id=${p.id}&months=12`);
-      const data = await res.json();
-      const history: TrendHistoryRow[] = data.history ?? [];
-      setTrendHasEnough(!!data.has_enough_history);
-      setTrendData(buildTrendChartData(history));
-      const presentIds = new Set(history.map((h) => h.chain_id));
-      setTrendChainsPresent((data.chains ?? []).filter((c: ChainMeta) => presentIds.has(c.id)));
-    } finally {
-      setTrendLoading(false);
-    }
-  };
-
-  const cardClass = 'bg-[var(--color-bg-panel)]/60 backdrop-blur-xl border border-[var(--color-border)] rounded-3xl p-6 shadow-xl';
-
-  return (
-    <motion.div key="ANALYTICS" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}
-      className="flex-1 max-w-4xl mx-auto w-full flex flex-col gap-6 text-start mt-6">
-      <h2 className="text-3xl font-bold text-[var(--color-text-primary)]">{t.navAnalytics}</h2>
-
-      {/* A: spending overview */}
-      <div className={cardClass}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-[var(--color-text-primary)]">{t.analyticsSpendingOverviewTitle}</h3>
-          {spending && !spending.not_enough_data && (
-            <button
-              onClick={() => setSpendingExpanded((v) => !v)}
-              className="w-9 h-9 flex items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors"
-            >
-              <ChevronDown className={`w-4 h-4 transition-transform ${spendingExpanded ? 'rotate-180' : ''}`} />
-            </button>
-          )}
-        </div>
-        {spendingLoading ? (
-          <SkeletonBlock height={80} />
-        ) : !spending || spending.not_enough_data ? (
-          <IconEmptyState icon={ShoppingCart} title={t.analyticsNoPurchasesYetTitle} subtitle={t.analyticsNoPurchasesYetSubtitle} />
-        ) : (
-          <>
-            {/* Collapsed: one combined number — basket spending (cheapest chain
-                prices) + custom market entries, this month. */}
-            <div>
-              <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsMonthTotal}</p>
-              <p className="text-3xl font-bold text-[var(--color-text-primary)]">₪{(spending.combined_total ?? 0).toFixed(2)}</p>
-            </div>
-            <AnimatePresence>
-              {spendingExpanded && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                  <div className="mt-5 pt-5 border-t border-[var(--color-border)]">
-                    {/* Breakdown: chains vs. local markets vs. total, this month */}
-                    <div className="flex flex-col gap-2 mb-5">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-[var(--color-text-muted)]">{t.analyticsChainsSpendingLine}</span>
-                        <span className="text-[var(--color-text-primary)] font-medium">₪{(spending.basket_total ?? 0).toFixed(2)}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-[var(--color-text-muted)]">{t.analyticsCustomMarketsLine}</span>
-                        <span className="text-[var(--color-text-primary)] font-medium">₪{(spending.custom_total ?? 0).toFixed(2)}</span>
-                      </div>
-                      <div className="flex items-center justify-between pt-2 border-t border-[var(--color-border)]">
-                        <span className="text-[var(--color-text-primary)] font-semibold">{t.analyticsColTotal}</span>
-                        <span className="text-[var(--color-text-primary)] font-bold text-lg">₪{(spending.combined_total ?? 0).toFixed(2)}</span>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 mb-5">
-                      <div>
-                        <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsWeeklyAverage}</p>
-                        <p className="text-lg font-bold text-[var(--color-text-primary)]">₪{(spending.weekly_avg ?? 0).toFixed(2)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsAnnualProjection}</p>
-                        <p className="text-lg font-bold text-[var(--color-text-primary)]">₪{(spending.annual_projection ?? 0).toFixed(2)}</p>
-                      </div>
-                    </div>
-                    <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-2">{t.analyticsMonthlyBreakdownTitle}</p>
-                    <div className="overflow-x-auto -mx-1">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="text-[var(--color-text-muted)] text-start">
-                            <th className="font-medium text-start px-1 pb-2">{t.analyticsColMonth}</th>
-                            <th className="font-medium text-start px-1 pb-2">{t.analyticsColTotal}</th>
-                            <th className="font-medium text-start px-1 pb-2">{t.analyticsColAvgWeek}</th>
-                            <th className="font-medium text-start px-1 pb-2">{t.analyticsColTrips}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(spending.monthly_breakdown ?? []).map((m) => (
-                            <tr key={m.month} className="border-t border-[var(--color-border)]">
-                              <td className="px-1 py-2 text-[var(--color-text-primary)]">{m.month}</td>
-                              <td className="px-1 py-2 text-[var(--color-text-primary)]">₪{m.total.toFixed(2)}</td>
-                              <td className="px-1 py-2 text-[var(--color-text-muted)]">₪{m.avg_per_week.toFixed(2)}</td>
-                              <td className="px-1 py-2 text-[var(--color-text-muted)]">{m.trips}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <div className="mt-4">
-                      <p className="text-xs text-[var(--color-text-muted)] mb-1">{t.analyticsAnnualToDate}</p>
-                      <p className="text-lg font-bold text-[var(--color-text-primary)]">₪{(spending.annual_total_to_date ?? 0).toFixed(2)}</p>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </>
-        )}
-      </div>
-
-      {/* B: cheapest chain ranking — personal vs. general */}
-      <div className={cardClass}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-[var(--color-text-primary)]">{t.analyticsChainRankingTitle}</h3>
-          <div className="flex items-center gap-1 bg-[var(--color-bg-subtle)] rounded-lg p-1">
-            <button
-              onClick={() => setRankingTab('personal')}
-              className={`px-3 h-7 rounded-md text-xs font-medium transition-colors ${rankingTab === 'personal' ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)]' : 'text-[var(--color-text-muted)]'}`}
-            >
-              {t.analyticsChainRankingForYou}
-            </button>
-            <button
-              onClick={() => setRankingTab('general')}
-              className={`px-3 h-7 rounded-md text-xs font-medium transition-colors ${rankingTab === 'general' ? 'bg-[var(--color-accent)] text-[var(--color-accent-text)]' : 'text-[var(--color-text-muted)]'}`}
-            >
-              {t.analyticsChainRankingGeneral}
-            </button>
-          </div>
-        </div>
-        {rankingTab === 'personal' ? (
-          personalRankingLoading ? (
-            <SkeletonBlock height={180} />
-          ) : personalRanking.length === 0 ? (
-            <AnalyticsEmptyState text={t.analyticsEmptyRanking} />
-          ) : (
-            <div style={{ width: '100%', height: Math.max(120, personalRanking.length * 48) }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={personalRanking} layout="vertical" margin={{ top: 4, right: 24, bottom: 4, left: 4 }}>
-                  <XAxis type="number" hide />
-                  <YAxis type="category" dataKey={lang === 'he' ? 'name_he' : 'name_en'} width={90} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                  <Tooltip formatter={(value) => [`₪${value}`, '']} />
-                  <Bar dataKey="total_cost" radius={[0, 8, 8, 0]} barSize={22}>
-                    {personalRanking.map((r) => <Cell key={r.chain_id} fill={r.color_hex} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )
-        ) : rankingLoading ? (
-          <SkeletonBlock height={180} />
-        ) : ranking.length === 0 ? (
-          <AnalyticsEmptyState text={t.analyticsEmptyRanking} />
-        ) : (
-          <div style={{ width: '100%', height: Math.max(120, ranking.length * 48) }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={ranking} layout="vertical" margin={{ top: 4, right: 24, bottom: 4, left: 4 }}>
-                <XAxis type="number" hide />
-                <YAxis type="category" dataKey={lang === 'he' ? 'name_he' : 'name_en'} width={90} tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                <Tooltip formatter={(value) => [`₪${value}`, '']} />
-                <Bar dataKey="avg_price" radius={[0, 8, 8, 0]} barSize={22}>
-                  {ranking.map((r) => <Cell key={r.chain_id} fill={r.color_hex} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </div>
-
-      {/* C: monthly basket summary */}
-      <div className={cardClass}>
-        <div className="flex items-center justify-between mb-2">
-          <div>
-            <h3 className="font-semibold text-[var(--color-text-primary)]">{t.analyticsMonthlyBasketTitle}</h3>
-            {!monthlyBasketLoading && (
-              <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                {monthlyBasket.length} {t.analyticsMonthlyBasketProductsLabel}, {t.analyticsColTotal} {monthlyBasketTotalItems} {t.analyticsMonthlyBasketItemsLabel}
-              </p>
-            )}
-          </div>
-          {(monthlyBasket.length > 0 || monthlyCustomEntries.length > 0) && (
-            <button
-              onClick={() => setMonthlyBasketExpanded((v) => !v)}
-              className="w-9 h-9 flex items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
-            >
-              <ChevronDown className={`w-4 h-4 transition-transform ${monthlyBasketExpanded ? 'rotate-180' : ''}`} />
-            </button>
-          )}
-        </div>
-        {monthlyBasketLoading ? (
-          <SkeletonBlock height={60} />
-        ) : monthlyBasket.length === 0 && monthlyCustomEntries.length === 0 ? (
-          <AnalyticsEmptyState text={t.analyticsEmptyMonthlyBasket} />
-        ) : (
-          <AnimatePresence>
-            {monthlyBasketExpanded && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
-                  {Object.entries(
-                    monthlyBasket.reduce<Record<string, MonthlyBasketProduct[]>>((acc, p) => {
-                      const cat = p.category ?? 'other';
-                      (acc[cat] ??= []).push(p);
-                      return acc;
-                    }, {})
-                  ).map(([cat, products]) => (
-                    <div key={cat} className="mb-4 last:mb-0">
-                      <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-1.5">{categoryLabel(cat, lang)}</p>
-                      {products.map((p) => (
-                        <div key={p.product_id} className="flex items-center justify-between gap-3 py-1.5 text-sm">
-                          <span className="text-[var(--color-text-primary)] truncate">{lang === 'he' ? p.name_he : (p.name_en ?? p.name_he)}</span>
-                          <span className="text-[var(--color-text-muted)] shrink-0">×{p.total_qty} {p.cheapest_price != null ? `· ₪${p.cheapest_price.toFixed(2)}` : ''}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-
-                  {monthlyBasket.length > 0 && (
-                    <button
-                      onClick={handleExportMonthlyBasket}
-                      className="w-full mt-2 min-h-[40px] bg-[var(--color-accent)]/10 hover:bg-[var(--color-accent)]/20 text-[var(--color-accent)] rounded-xl text-sm font-semibold transition-colors"
-                    >
-                      {t.analyticsExportList}
-                    </button>
-                  )}
-
-                  {monthlyCustomEntries.length > 0 && (
-                    <div className={monthlyBasket.length > 0 ? 'mt-4 pt-4 border-t border-[var(--color-border)]' : ''}>
-                      <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-1.5">{t.analyticsOtherExpenses}</p>
-                      {monthlyCustomEntries.map((e, idx) => (
-                        <div key={idx} className="flex items-center justify-between gap-3 py-1.5 text-sm">
-                          <span className="text-[var(--color-text-primary)] truncate">
-                            {e.market_name} — {e.spent_at}{e.note ? ` — ${e.note}` : ''}
-                          </span>
-                          <span className="text-[var(--color-text-muted)] shrink-0">₪{Number(e.amount).toFixed(2)}</span>
-                        </div>
-                      ))}
-                      <div className="flex items-center justify-between gap-3 pt-2 mt-1 border-t border-[var(--color-border)] text-sm font-semibold">
-                        <span className="text-[var(--color-text-primary)]">{t.analyticsColTotal}</span>
-                        <span className="text-[var(--color-text-primary)]">₪{monthlyCustomTotal.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        )}
-      </div>
-
-      {/* D: custom markets */}
-      <div className={cardClass}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-[var(--color-text-primary)]">{t.analyticsCustomMarketsTitle}</h3>
-          <button
-            onClick={() => setIsAddingMarket((v) => !v)}
-            className="w-9 h-9 flex items-center justify-center rounded-lg text-[var(--color-accent)] hover:bg-[var(--color-accent)]/10 transition-colors"
-          >
-            <span className="text-xl leading-none">+</span>
-          </button>
-        </div>
-
-        {isAddingMarket && (
-          <div className="flex items-center gap-2 mb-4">
-            <input
-              type="text" value={newMarketName} onChange={(e) => setNewMarketName(e.target.value)}
-              placeholder={t.analyticsMarketNamePlaceholder} dir="auto"
-              className="flex-1 bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-xl px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
-            />
-            <button onClick={handleAddMarket} className="min-h-[40px] px-4 bg-[var(--color-accent)] text-[var(--color-accent-text)] rounded-xl text-sm font-semibold">
-              {t.saveAction}
-            </button>
-          </div>
-        )}
-
-        {marketsLoading ? (
-          <SkeletonBlock height={100} />
-        ) : markets.length === 0 ? (
-          <IconEmptyState icon={Store} title={t.analyticsNoMarketsYet} subtitle={t.analyticsNoMarketsYetSubtitle} />
-        ) : (
-          <div className="flex flex-col gap-3">
-            {markets.map((m) => (
-              <div key={m.id} className="bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-2xl p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="font-medium text-[var(--color-text-primary)]">{m.name}</p>
-                  <p className="text-sm font-bold text-[var(--color-text-primary)]">₪{m.total_spent.toFixed(2)}</p>
-                </div>
-
-                {expenseFormMarketId === m.id ? (
-                  <div className="flex flex-col gap-2 mt-2">
-                    <input
-                      type="number" step="0.01" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)}
-                      placeholder={t.analyticsExpenseAmountPlaceholder}
-                      className="bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
-                    />
-                    <input
-                      type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)}
-                      className="bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
-                    />
-                    <input
-                      type="text" value={expenseNote} onChange={(e) => setExpenseNote(e.target.value)}
-                      placeholder={t.analyticsExpenseNotePlaceholder} dir="auto"
-                      className="bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
-                    />
-                    <div className="flex gap-2">
-                      <button onClick={() => setExpenseFormMarketId(null)} className="flex-1 min-h-[40px] bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-xl text-sm font-semibold text-[var(--color-text-primary)]">
-                        {t.cancelAction}
-                      </button>
-                      <button onClick={handleAddExpense} className="flex-1 min-h-[40px] bg-[var(--color-accent)] text-[var(--color-accent-text)] rounded-xl text-sm font-semibold">
-                        {t.saveAction}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => handleOpenExpenseForm(m.id)}
-                    className="text-xs font-medium text-[var(--color-accent)] hover:underline"
-                  >
-                    + {t.analyticsAddExpense}
-                  </button>
-                )}
-
-                {m.recent_entries.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-[var(--color-border)] flex flex-col gap-1.5">
-                    {m.recent_entries.map((e) => (
-                      <button
-                        key={e.id}
-                        onClick={() => handleDeleteExpense(e.id)}
-                        className="flex items-center justify-between gap-2 text-xs text-start hover:bg-[var(--color-bg-hover)] rounded-lg px-1.5 py-1 transition-colors"
-                      >
-                        <span className="text-[var(--color-text-muted)]">{e.spent_at}{e.note ? ` · ${e.note}` : ''}</span>
-                        <span className="text-[var(--color-text-primary)] font-medium shrink-0">₪{Number(e.amount).toFixed(2)}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* E: price trend for a searched product */}
-      <div className={cardClass}>
-        <h3 className="font-semibold text-[var(--color-text-primary)] mb-4">{t.analyticsTrendTitle}</h3>
-        <div className="relative">
-          <Search className="w-4 h-4 absolute top-1/2 -translate-y-1/2 start-3 text-[var(--color-text-muted)]" />
-          <input
-            type="text" value={trendQuery} onChange={(e) => { setTrendQuery(e.target.value); setTrendSelected(null); }}
-            placeholder={t.analyticsTrendSearchPlaceholder} dir="auto"
-            className="w-full bg-[var(--color-bg-subtle)]/50 border border-[var(--color-border)] rounded-xl ps-9 pe-4 py-2.5 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] transition-colors"
-          />
-          {trendResults.length > 0 && (
-            <div className="absolute z-10 mt-1 w-full bg-[var(--color-bg-panel)] border border-[var(--color-border)] rounded-xl shadow-xl overflow-hidden">
-              {trendResults.map((p) => (
-                <button
-                  key={p.id} onClick={() => handleSelectTrendProduct(p)}
-                  className="w-full text-start px-4 py-2.5 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-                >
-                  {lang === 'he' ? p.name_he : (p.name_en ?? p.name_he)}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {trendSelected && (
-          <div className="mt-4">
-            <p className="text-sm font-medium text-[var(--color-text-primary)] mb-3">{lang === 'he' ? trendSelected.name_he : (trendSelected.name_en ?? trendSelected.name_he)}</p>
-            {trendLoading ? (
-              <SkeletonBlock height={220} />
-            ) : !trendHasEnough ? (
-              <AnalyticsEmptyState text={t.analyticsNotEnoughHistory} />
-            ) : (
-              <div style={{ width: '100%', height: 260 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={trendData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-                    <XAxis dataKey="date" tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 11 }} width={40} />
-                    <Tooltip />
-                    <Legend />
-                    {trendChainsPresent.map((c) => (
-                      <Line key={c.id} type="monotone" dataKey={c.id} name={lang === 'he' ? c.name_he : c.name_en} stroke={c.color_hex} strokeWidth={2} dot={false} connectNulls />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </motion.div>
-  );
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function SmartGroceryDashboard() {
@@ -2745,7 +2094,7 @@ export default function SmartGroceryDashboard() {
 
         {/* ═══ ANALYTICS ═══ */}
         {currentView === 'ANALYTICS' && (
-          <AnalyticsView t={t} lang={lang} currentUserId={currentUser?.id ?? null} showToast={showToast} />
+          <InsightsView householdId={household?.id ?? null} lang={lang} />
         )}
 
         {/* ═══ SCAN ═══ */}
@@ -3066,6 +2415,7 @@ export default function SmartGroceryDashboard() {
           showToast={showToast}
           onSeedRecipes={async () => (household ? seedSampleRecipes(supabase, household.id) : 0)}
           onFillWeek={async () => (household ? fillWeekWithMeals(supabase, household.id, weekStart(new Date()), Math.max(1, householdMembers.length)) : 0)}
+          onSeedTrips={async () => (household && homeChainId ? seedSampleTrips(supabase, household.id, homeChainId) : 0)}
           onClearWeek={async () => {
             if (!household) return 0;
             const start = weekStart(new Date());

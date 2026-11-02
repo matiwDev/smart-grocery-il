@@ -41,6 +41,7 @@ export interface DebugPanelProps {
   /** Phase 4: sample Hebrew recipes, and a filled week of meals. */
   onSeedRecipes?: () => Promise<number>;
   onFillWeek?: () => Promise<number>;
+  onSeedTrips?: () => Promise<number>;
   onClearWeek?: () => Promise<number>;
 }
 
@@ -251,6 +252,7 @@ export function DebugPanel(props: DebugPanelProps) {
                       <div className="flex flex-wrap gap-2">
                         <Btn onClick={() => run('Seed recipes', async () => { const n = await props.onSeedRecipes!(); props.showToast(`Added ${n} sample recipes`); })} disabled={!!busy}>+5 sample recipes</Btn>
                         <Btn onClick={() => run('Fill week', async () => { const n = await props.onFillWeek!(); props.showToast(n ? `Planned ${n} meals this week` : 'No recipes / week already full'); })} disabled={!!busy}>Fill this week</Btn>
+                        {props.onSeedTrips && <Btn onClick={() => run('Sample trips', async () => { const n = await props.onSeedTrips!(); props.showToast(n ? `Saved ${n} sample trips (last 4 months)` : 'Pick a chain first'); })} disabled={!!busy}>+8 sample trips</Btn>}
                         <Btn danger onClick={() => run('Clear week', async () => { const n = await props.onClearWeek!(); props.showToast(`Removed ${n} planned meals`); })} disabled={!!busy}>Clear this week</Btn>
                       </div>
                     </Section>

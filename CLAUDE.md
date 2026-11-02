@@ -44,7 +44,10 @@ lack names/photos/categories; it blew the free-tier database).
    applied 2 Nov): people without accounts, private body data → daily targets, recipe
    nutrition from the Health Ministry table (צמרת), Meals tab → Nutrition per person per
    day / week average. See "Nutrition".
-8. Insights (spend by month/chain, most-bought, health-grade mix).
+8. Insights — BUILT (phase8/insights, no migration): replaces Analytics. Spend by month /
+   chain / aisle from trips, most bought + price change, Nutri-Score mix of food spending,
+   planned meals by health band. See "Insights". Same branch: hand-picked food match in
+   the recipe editor, migration 029 (advisor leftovers).
 
 ## Stack
 - Next.js 15, React 19, TypeScript, Tailwind CSS 4
@@ -83,8 +86,8 @@ npm run env:link         # restore .env.local from source
 - `product_price_monthly`: one row per (product, chain, month) with min/max/avg/last,
   ONLY for tracked products (view `tracked_products` = basket items + active price
   alerts; service-role only). `rpc/rollup_monthly_prices` adds today's price once a day,
-  called at the end of every ingest. Seeded with July–August 2026. Powers analytics
-  `price_trend` (`?months=12`) and `price_drops` (this month vs last month's average).
+  called at the end of every ingest. Seeded with July–August 2026. Read by Insights
+  (phase 8) for "price change" of the most-bought products (public read).
 - The app shows one price per product per chain. There are no store/branch prices.
 
 ### Chain status (migration 015)
@@ -296,6 +299,21 @@ price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts
 - Coverage script: `npm run off:coverage` (resumable, results in scripts/.off-coverage.jsonl,
   git-ignored). OFF is NOT on Claude's network allowlist: run it on your own machine.
 
+### Insights (phase 8)
+- `lib/insights.ts` (browser, RLS): `loadInsightData(household, months)` = trips (household,
+  done_at ≥ first day of the period), their trip_items, chains, product_info + 
+  product_price_monthly for the bought products, recipes + meal_plan_entries.
+  `spendByMonth`, `spendByChain`, `spendByAisle` (unit_price × quantity, normalizeCategory),
+  `topProducts` (by trips bought in, then spend; priceChange = latest month avg vs ~3 months
+  earlier at the chain it's usually bought at), `healthMix` (food spend by Nutri-Score,
+  skipping personal_care/household/baby; red-label share of graded spend), `mealsHealth`
+  (planned meals by `healthOf` band). `seedSampleTrips()` = debug "+8 sample trips".
+- UI: components/InsightsView.tsx (period 3/6/12 months; headline this month vs last, avg
+  per trip; month bars with hover; chain/aisle bars; most bought with ↑/↓ %; Nutri-Score
+  bar; planned meals). Nav label "Insights"/"תובנות" (view key still 'ANALYTICS').
+- The old AnalyticsView (in app/page.tsx) and `/api/analytics` were removed; recharts is no
+  longer imported (still in package.json).
+
 ### Categories (migration 018)
 `categorize_product(name)` (SQL, Hebrew keyword rules, first match wins) sets
 `products.category` via trigger on insert/rename; also callable as an RPC (free-text items).
@@ -347,7 +365,7 @@ Vercel's 300s limit. Parsers: `scripts/parsers/`.
 ---
 
 ## UI structure
-- Bottom nav (phase 4): List, Meals, Recipes, Analytics (→ Insights in phase 8). Scan is
+- Bottom nav: List, Meals, Recipes, Insights (phase 8). Scan is
   the barcode button inside the search bar (and in the drawer); Saved lists is in the drawer.
 - Home: product search ("from ₪X · cheapest chain", plus "Add “…” as your own item") →
   shopping list grouped by aisle (components/ShoppingList.tsx). Tap the circle = in the
@@ -365,7 +383,7 @@ Who sees them: everyone on `npm run dev`; in production, only signed-in users wh
 is in `NEXT_PUBLIC_DEBUG_EMAILS` (comma-separated, set in Vercel).
 Open: floating bug button (bottom corner) or Ctrl/Cmd+Shift+D.
 - **Cheats:** +5/+12 staple products, +3 free-text items, check all / uncheck all, clear
-  list, +5 sample Hebrew recipes, fill / clear this week's meal plan, jump to any view, toggle lang/theme, test toast, copy user id, reset all `sg_*`
+  list, +5 sample Hebrew recipes, fill / clear this week's meal plan, +8 sample trips, jump to any view, toggle lang/theme, test toast, copy user id, reset all `sg_*`
   localStorage keys.
 - **Network:** 0.5/2/5s delay on /api/* calls, force every /api/* call to fail (500),
   live API call log with status/timing and expandable JSON bodies.
