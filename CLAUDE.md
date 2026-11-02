@@ -30,7 +30,7 @@ lack names/photos/categories; it blew the free-tier database).
    recipes (Hebrew), TheMealDB ideas (English) browse + save, week grid (days × breakfast /
    lunch / dinner) with servings and who eats, "Add week to list" (scaled, merged, topped
    up, never added twice). New tabs: List, Meals, Recipes, Analytics. See "Recipes & meal plan".
-5. Product photo + health grade — BUILT, migration 025 NOT YET APPLIED (phase5/photos-grades).
+5. Product photo + health grade — DONE (phase5/photos-grades, migration 025 applied 2 Nov).
    Coverage measured 1 Nov (`npm run off:coverage`, 168 retail barcodes): OFF knows 17% of
    products (25% of food), photo 10%, Nutri-Score 3%, nutrition 14% (22% of food). So no
    bulk job: looked up on demand for list items and cached. See "Product info".
@@ -310,8 +310,8 @@ Everything runs on free tiers. Watch:
 012_chain_prices, 013_drop_price_history, 014_lock_tracked_products, 015_chain_status,
 016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions,
 020_home_chain_custom_products, 021_household_sharing_chat, 022_household_members_fix,
-023_quantity_unit, 024_recipes_meal_plan
-(all recorded in public.schema_migrations). Written, not yet applied: 025_product_info.
+023_quantity_unit, 024_recipes_meal_plan, 025_product_info
+(all recorded in public.schema_migrations)
 
 Security note (019): `generate_household_invite(p_user_id)` and
 `join_household_by_code(p_user_id, p_code)` took any user id and were callable without

@@ -1,4 +1,4 @@
--- 025 — NOT YET APPLIED (waiting for approval, 1 Nov 2026). Plan v2, phase 5: product photo + health grade, cached from Open Food Facts.
+-- 025 — APPLIED 2026-11-02. Plan v2, phase 5: product photo + health grade, cached from Open Food Facts.
 --
 -- Coverage measured 1 Nov 2026 (scripts/off-coverage.ts, 168 random retail
 -- barcodes): OFF knows 17% of our products (25% of food), has a photo for 10%,
