@@ -11,7 +11,7 @@
  * "חלב תנובה 3% 1 ליטר" counts as "חלב", and a chip "עוף" covers "חזה עוף".
  * Hebrew plurals/singulars and English plurals are folded together.
  */
-import { EN_HE, Recipe, RecipeIngredient, sortIngredients } from '@/lib/recipes';
+import { EN_HE, MealFull, Recipe, RecipeIngredient, mealToRecipe, sortIngredients } from '@/lib/recipes';
 
 /** Something the household has. */
 export interface Have {
@@ -36,6 +36,9 @@ const MADE_WITH = new Set([
   'chocolate', 'cake', 'cookie', 'snack', 'sauce', 'drink', 'ice', 'soap', 'shampoo', 'spread', 'stock', 'cereal',
 ]);
 
+/** Hebrew words whose ending is not a plural/feminine suffix: שמנת (cream) must not become שמן (oil). */
+const KEEP = new Set(['שמנת', 'זית', 'ריבת', 'קקאו']);
+
 function stem(w: string): string {
   if (/^[a-z]+$/.test(w)) {
     if (w.length > 4 && w.endsWith('ies')) return w.slice(0, -3) + 'y';
@@ -43,6 +46,7 @@ function stem(w: string): string {
     if (w.length > 3 && w.endsWith('s') && !w.endsWith('ss')) return w.slice(0, -1);
     return w;
   }
+  if (KEEP.has(w)) return w;
   let x = w;
   if (x.length > 3 && (x.endsWith('ים') || x.endsWith('ות'))) x = x.slice(0, -2);
   else if (x.length > 3 && (x.endsWith('ה') || x.endsWith('ת'))) x = x.slice(0, -1);
@@ -169,4 +173,10 @@ export function englishCandidates(label: string): string[] {
 export function ingredientSuggestions(lang: 'he' | 'en'): string[] {
   const list = lang === 'he' ? Object.values(EN_HE) : Object.keys(EN_HE);
   return [...new Set(list)].sort((a, b) => a.localeCompare(b, lang));
+}
+
+/** A TheMealDB meal shaped like one of our recipes, so it is matched and scored the same way. */
+export function mealAsRecipe(meal: MealFull): Recipe {
+  const { recipe, ingredients } = mealToRecipe(meal, '');
+  return { ...recipe, id: `mealdb:${meal.id}`, recipe_ingredients: ingredients };
 }

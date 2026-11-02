@@ -30,6 +30,7 @@ import { ChainPickerSheet } from '@/components/ChainPickerSheet';
 import { HouseholdChat } from '@/components/HouseholdChat';
 import { MealPlanView } from '@/components/MealPlanView';
 import { RecipesView } from '@/components/RecipesView';
+import { FoodPrefsSection } from '@/components/FoodPrefsSection';
 import { ListNeed, addNeedsToList, seedSampleRecipes, fillWeekWithMeals, weekStart, isoDate, addDays } from '@/lib/recipes';
 import {
   BasketItem, BasketItemRow, ChainMeta, ChainPrice, CustomProduct, OverrideMap,
@@ -2583,6 +2584,9 @@ export default function SmartGroceryDashboard() {
               </div>
             )}
 
+            {/* Food preferences (phase 6): per person, read by the household */}
+            {currentUser?.id && <FoodPrefsSection userId={currentUser.id} lang={lang} />}
+
             {/* Household invite */}
             {currentUser && (
               <div className="bg-[var(--color-bg-panel)]/60 backdrop-blur-xl rounded-3xl p-8 border border-[var(--color-border)]">
@@ -2721,6 +2725,7 @@ export default function SmartGroceryDashboard() {
               members={householdMembers}
               homeChainId={homeChainId}
               listItems={basket.map((i) => ({ label: effective(i, overrides).name, productId: i.productId, customProductId: i.customProductId }))}
+              onEditPrefs={() => setCurrentView('PROFILE')}
               onAddNeeds={addMealNeedsToList}
               showToast={showToast}
             />

@@ -11,7 +11,8 @@ import type { MealFull, MealSummary } from '@/lib/recipes';
 //                      group is one thing we have, with its English candidates
 //                      ("chicken breast|chicken"); the first one TheMealDB knows is
 //                      used. One filter call per group (the free key filters by a
-//                      single ingredient), at most 6; meals ranked by groups used.
+//                      single ingredient), at most 6; meals ranked by groups used,
+//                      the best 24 returned whole (ingredients, category, method).
 // Proxied (and cached for a day) so the key stays on the server. The free
 // development key is "1"; a public launch needs the £10 production key in
 // THEMEALDB_API_KEY.
@@ -47,6 +48,7 @@ async function get(path: string): Promise<Record<string, unknown>> {
 }
 
 const MAX_GROUPS = 6;
+const LOOKUP_TOP = 24;
 
 /** TheMealDB's ingredient names, lower-cased → as published (cached a day). */
 async function knownIngredients(): Promise<Map<string, string>> {
@@ -76,9 +78,16 @@ async function byIngredients(groups: string[][]) {
       byId.set(id, row);
     }
   }
-  const meals = [...byId.values()]
+  // The filter answer has no ingredients; the app needs them to check diets
+  // and estimate health, so the best LOOKUP_TOP are fetched whole (cached a day).
+  const top = [...byId.values()]
     .sort((a, b) => b.uses.length - a.uses.length || a.title.localeCompare(b.title))
-    .slice(0, 40);
+    .slice(0, LOOKUP_TOP);
+  const meals = (await Promise.all(top.map(async (t) => {
+    const data = await get(`lookup.php?i=${encodeURIComponent(t.id)}`).catch(() => ({ meals: null }));
+    const m = ((data.meals as RawMeal[] | null) ?? [])[0];
+    return m ? { ...full(m), uses: t.uses } : null;
+  }))).filter(Boolean);
   return { meals, used: used.map((u) => u.name), unknown: groups.slice(0, MAX_GROUPS).length - used.length };
 }
 

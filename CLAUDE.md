@@ -34,10 +34,11 @@ lack names/photos/categories; it blew the free-tier database).
    Coverage measured 1 Nov (`npm run off:coverage`, 168 retail barcodes): OFF knows 17% of
    products (25% of food), photo 10%, Nutri-Score 3%, nutrition 14% (22% of food). So no
    bulk job: looked up on demand for list items and cached. See "Product info".
-6. What can I cook? — BUILT (phase6/what-can-i-cook, no migration): third tab in Recipes.
-   Chips you pick + "Use my list" → our recipes ranked by fewest missing ingredients
-   ("Add missing to list"), TheMealDB ideas ranked by how many of yours they use.
-   See "What can I cook?".
+6. What can I cook? — BUILT (phase6/what-can-i-cook, migration 026 applied 2 Nov): third
+   tab in Recipes. Chips you pick + "Use my list" + who's eating → our recipes and
+   TheMealDB ideas that use ≥1 thing you have, never break an eater's food preferences
+   (per person, in Profile), ranked by overlap + a health estimate + goals; less healthy
+   dishes rank lower with a badge (not hidden). See "What can I cook?".
 7. Daily nutrition, per person (age, sex, activity → target ranges). Planned meals only,
    NOT a food diary.
 8. Insights (spend by month/chain, most-bought, health-grade mix).
@@ -180,24 +181,45 @@ price should be per kg. Helpers: `qtyStep`, `qtyMin`, `formatQty` in lib/list.ts
   RecipeEditor.tsx (ingredients as written; "⋯" = list name, product link, skip),
   PlanMealSheet.tsx (recipe, day, slot, who eats, servings follow eaters until changed).
 
-### What can I cook? (phase 6, no DB changes)
+### What can I cook? (phase 6, migration 026)
 - `lib/cook.ts`: `words()` folds names to comparable words (no niqqud, numbers, units,
   geresh; Hebrew ים/ות/ה/ת and English plurals folded; יי→י). Something you have covers an
   ingredient when one's words are all in the other's ("עוף" covers "חזה עוף"; "חלב תנובה
   3%" covers "חלב"), except products MADE WITH it ("שוקולד חלב" is not milk; `MADE_WITH`
   first words). A linked product_id / custom_product_id always matches.
 - Staples never count as missing: skip_list ingredients plus salt, pepper, oil, olive oil,
-  sugar, water (`isStaple`). `matchRecipes()` keeps recipes with ≥1 match, sorted by fewest
-  missing, then most used. "Add missing to list" = `needsFor()` on the recipe with only the
+  sugar, water (`isStaple`). `matchRecipes()` keeps recipes with ≥1 match. `KEEP` in
+  lib/cook.ts lists Hebrew words not to stem (שמנת must not become שמן). "Add missing to list" = `needsFor()` on the recipe with only the
   missing ingredients (`withOnly`), through the usual addNeedsToList.
 - TheMealDB: `/api/recipes/mealdb?ing=a|b,c` — each comma group is one thing we have with its
   English candidates (`englishCandidates()` = reverse EN_HE, most specific first, only names
   wholly inside ours); the server picks the first name in `list.php?i=list`, calls
   `filter.php?i=` once per group (free key = one ingredient per call; max 6 groups), ranks
-  by groups used. Returns `{meals[{…, uses[]}], used[], unknown}`.
-- UI: components/CookView.tsx (chips with Hebrew/English suggestions, "Use my list" toggle;
-  both remembered in localStorage `sg_cook_have`, `sg_cook_use_list`). RecipesView gets
-  `listItems` (current list names via `effective()`) from app/page.tsx.
+  by groups used, then fetches the best 24 whole (`lookup.php`, cached a day) so the app
+  can check diets and health. Returns `{meals[MealFull + uses[]], used[], unknown}`. The
+  app turns them into recipe-shaped objects (`mealAsRecipe`, id `mealdb:<id>`) and
+  matches/scores them exactly like ours.
+- `person_profiles` (migration 026, one row per user; phase 7 adds age/sex/activity here):
+  diet any|pescatarian|vegetarian|vegan, kosher (default OFF), avoid[] (gluten, lactose,
+  nuts, peanuts, eggs, fish, shellfish, sesame, soy), dislikes[] (free text, ≤30), goals[]
+  (lighter, protein, less_sugar, more_veg). RLS: own row read/write; household members read
+  (`shares_household(user_id)`, SECURITY DEFINER). Edited in Profile →
+  components/FoodPrefsSection.tsx (autosaves, 500 ms).
+- `lib/suggest.ts`: `kindsOf()` classifies an ingredient by keyword (meat, pork, fish,
+  shellfish, dairy, eggs, gluten, nuts…, veg, legume, whole grain, sugar…; `NOT_LISTS`
+  stops coconut milk = dairy etc.). `combinePrefs()` for the eaters: strictest diet, any
+  kosher, union of avoid/dislikes/goals. `blockedBy()` = hard rules (kosher = no pork,
+  shellfish, or meat with dairy). `healthOf()` = 0–100 ESTIMATE (veg/legumes/whole grains/
+  fish up; cream/butter/cheese, sugar, processed meat, red meat, deep-frying, desserts down;
+  goals scale it) → band healthy ≥68 | balanced | occasional <45 or dessert.
+  `rankSuggestions()` = 50 × share you have − 3 per missing beyond 2 + 0.4 × health ± goals.
+  `healthyPicks()` when nothing is chosen. Phase 7 should replace the estimate with real
+  per-serving values.
+- UI: components/CookView.tsx (chips with Hebrew/English suggestions, "Use my list" toggle,
+  both remembered in localStorage `sg_cook_have`, `sg_cook_use_list`; "Who's eating?" member
+  pills, default everyone; "Suits: …" line + link to Food preferences; Healthy / Occasional
+  / Dessert chips via `HealthChip`). RecipesView gets `listItems` (current list names via
+  `effective()`) and `onEditPrefs` (→ Profile) from app/page.tsx.
 
 ### Product info: photo + health grade (migration 025, phase 5)
 - `product_info` (product_id PK → products): status found | not_found, fetched_at, off_name,
@@ -335,7 +357,7 @@ Everything runs on free tiers. Watch:
 012_chain_prices, 013_drop_price_history, 014_lock_tracked_products, 015_chain_status,
 016_debug_stats, 017_drop_branches, 018_list_v2_trips, 019_lock_household_functions,
 020_home_chain_custom_products, 021_household_sharing_chat, 022_household_members_fix,
-023_quantity_unit, 024_recipes_meal_plan, 025_product_info
+023_quantity_unit, 024_recipes_meal_plan, 025_product_info, 026_person_profiles
 (all recorded in public.schema_migrations)
 
 Security note (019): `generate_household_invite(p_user_id)` and

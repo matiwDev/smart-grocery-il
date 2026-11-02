@@ -47,11 +47,12 @@ export interface RecipesViewProps {
   homeChainId: string | null;
   /** Items on the household's current list (for "What can I cook?"). */
   listItems: Have[];
+  onEditPrefs: () => void;
   onAddNeeds: (needs: ListNeed[]) => Promise<{ added: number; updated: number }>;
   showToast: (msg: string) => void;
 }
 
-export function RecipesView({ householdId, userId, lang, members, homeChainId, listItems, onAddNeeds, showToast }: RecipesViewProps) {
+export function RecipesView({ householdId, userId, lang, members, homeChainId, listItems, onEditPrefs, onAddNeeds, showToast }: RecipesViewProps) {
   const tx = TEXT[lang];
   const [tab, setTab] = useState<'ours' | 'ideas' | 'cook'>('ours');
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -306,11 +307,13 @@ export function RecipesView({ householdId, userId, lang, members, homeChainId, l
           lang={lang}
           recipes={recipes}
           listItems={listItems}
-          savedIdeaIds={savedIds}
+          members={members}
+          userId={userId}
           openingIdea={openingIdea}
           onOpenRecipe={(r) => setOpen({ recipe: r })}
           onOpenIdea={openIdea}
           onAddMissing={addMissingToList}
+          onEditPrefs={onEditPrefs}
         />
       )}
 
